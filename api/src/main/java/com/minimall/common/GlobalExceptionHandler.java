@@ -37,11 +37,11 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
-     * 业务异常:默认用 HTTP 200 + 业务码承载(7.3),**但"未登录"与"无权限"这两类必须带上真正的状态码**。
+     * 业务异常:默认用 HTTP 200 + 业务码承载(7.3),**但"未登录 / 无权限 / 限流"这三类必须带上真正的状态码**。
      *
-     * <p>理由与下面 Sa-Token 那两组一致:前端与网关最先看到的是状态码,而"登录态不可用"要靠 401
-     * 分流到登录页、"无权限"要靠 403 提示。之前统一返回 200 时,刷新令牌失效这类响应在网关上
-     * 与成功请求无法区分(8.1 用例 21 断言的就是这个口径)。
+     * <p>理由与下面 Sa-Token 那两组一致:前端与网关最先看到的是状态码。"登录态不可用"要靠 401 分流到登录页、
+     * "无权限"要靠 403 提示、限流要靠 429(前端 3.4 明确要求 429 时提示"操作过于频繁"且禁止自动重试,
+     * 7.1.1 也写了"超限直接 429")。之前统一返回 200 时,这些响应在网关上与成功请求无法区分。
      */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex, HttpServletRequest request) {
@@ -52,6 +52,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = switch (errorCode) {
             case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case IP_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
             default -> HttpStatus.OK;
         };
         return ResponseEntity.status(status).body(ApiResponse.fail(errorCode.code(), ex.getMessage()));
