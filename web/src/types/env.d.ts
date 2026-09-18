@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 /**
- * 环境变量声明(见前端文档 7)。**新增变量必须在这里补类型**,
+ * 环境变量声明(见前端文档 7)。新增变量必须在这里补类型,
  * 否则 strict 模式下读到的都是隐式 any,拼错变量名也不会报错。
  */
 interface ImportMetaEnv {

@@ -4,7 +4,7 @@ import { request } from '@/utils/request'
 /**
  * 认证相关接口(后端 AuthController,architecture.md 7.1)。
  *
- * 只声明请求与类型,**不写业务逻辑、不弹提示**(前端文档 2 的 api 层约定)。
+ * 只声明请求与类型,不写业务逻辑、不弹提示(前端文档 2 的 api 层约定)。
  */
 export interface LoginPayload {
   tenantCode: string
@@ -19,7 +19,7 @@ export function login(payload: LoginPayload): Promise<LoginResult> {
 }
 
 /**
- * 登出。**请求体必须带 refreshToken**(4.6):不带的话后端会撤销该用户**全部设备**的令牌,
+ * 登出。请求体必须带 refreshToken(4.6):不带的话后端会撤销该用户全部设备的令牌,
  * 用户在其他端的登录会被一起踢掉。
  */
 export function logout(refreshToken: string): Promise<void> {

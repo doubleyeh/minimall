@@ -1,6 +1,6 @@
 import type { Id } from './api'
 
-/** 令牌对。刷新成功时必须**同一时刻覆盖写入**这一对(前端文档 4.1)。 */
+/** 令牌对。刷新成功时必须同一时刻覆盖写入这一对(前端文档 4.1)。 */
 export interface TokenPair {
   token: string
   refreshToken: string

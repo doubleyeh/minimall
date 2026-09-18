@@ -10,7 +10,7 @@ export interface ApiEnvelope<T> {
 }
 
 /**
- * 后端把**所有 Long 都序列化成字符串**(避免雪花 ID 超过 JS 安全整数,后端 architecture.md 4.3)。
+ * 后端把所有 Long 都序列化成字符串(避免雪花 ID 超过 JS 安全整数,后端 architecture.md 4.3)。
  * 所以 id 类字段在前端一律是 `string`,不要写成 number —— 写成 number 会在类型上"看起来对",
  * 实际比较时 `'12' === 12` 永远为假。
  */

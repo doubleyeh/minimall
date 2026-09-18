@@ -37,7 +37,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || undefined
 const http = axios.create({ baseURL, timeout: 15000 })
 
 /**
- * 刷新专用实例:**不挂任何拦截器**。
+ * 刷新专用实例:不挂任何拦截器。
  * 否则刷新请求自己返回 401 时又会进入拦截器的 401 分支,变成递归(4.2 第 2 条要求显式排除)。
  */
 const refreshClient = axios.create({ baseURL, timeout: 15000 })
@@ -46,7 +46,7 @@ const refreshClient = axios.create({ baseURL, timeout: 15000 })
 let refreshPromise: Promise<TokenPair> | null = null
 
 /**
- * 登录态失效的回调由认证层注册。**不在这里 import router / store**:
+ * 登录态失效的回调由认证层注册。不在这里 import router / store:
  * 那会形成 request → store → request 的循环依赖,而且"请求层负责跳转"本身也是职责串位。
  */
 let onAuthFailed: (() => void) | null = null
@@ -70,7 +70,7 @@ http.interceptors.request.use((config) => {
 })
 
 http.interceptors.response.use(
-  // 成功路径**不在这里拆包**:axios 的拦截器签名要求返回 AxiosResponse,
+  // 成功路径不在这里拆包:axios 的拦截器签名要求返回 AxiosResponse,
   // 在这里返回 data 只能靠类型断言硬骗过去。拆包统一放在下面的门面里做(见 request)。
   (response) => response,
   async (error: AxiosError<ApiEnvelope<unknown>>) => {
@@ -161,7 +161,7 @@ async function handleUnauthorized(
   } catch {
     return failAuth(error)
   }
-  // 重放原请求:请求拦截器会从 localStorage 现读**新**令牌并覆盖 Authorization
+  // 重放原请求:请求拦截器会从 localStorage 现读新令牌并覆盖 Authorization
   return http.request(config)
 }
 
