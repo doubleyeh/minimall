@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    # 库名由环境变量注入:CI 上每个流水线用自己的库名,避免并行时抢 Flyway 锁、互相污染(架构文档 9.4)
+    url: jdbc:mysql://${TEST_MYSQL_HOST:127.0.0.1}:3306/${TEST_MYSQL_DB:minimall_test}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${TEST_MYSQL_USER:root}
+    password: ${TEST_MYSQL_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${TEST_REDIS_HOST:127.0.0.1}
+      port: ${TEST_REDIS_PORT:6379}
+      # 独立的 DB index,避免和 dev 数据混在一起
+      database: 15
+
+sa-token:
+  # 测试环境的会话短一些
+  timeout: 1800
+
+logging:
+  level:
+    org.hibernate.SQL: debug

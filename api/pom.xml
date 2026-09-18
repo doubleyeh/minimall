@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      版本号来源:architecture.md 第 9.1 节(2026年9月核实)。
+      升级前请去 Maven Central / 官方发布页确认最新兼容补丁版本,不要凭记忆改。
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.minimall</groupId>
+    <artifactId>java-api</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>java-api</name>
+    <description>java_api 服务(目录:mini_mall/api):单体应用脚手架,RBAC + 多租户</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!--
+          注意:不要定义名为 querydsl.version 的属性!
+          spring-boot-dependencies 4.1.0 用 ${openfeign-querydsl.version}(默认 5.1.0)去 import
+          com.querydsl:querydsl-bom,在项目里覆盖这个属性会把父 POM 的 import 一起改坏
+          (会变成 com.querydsl:querydsl-bom:7.x 这种不存在的坐标,构建直接读不出 POM)。
+          fork 的版本必须用另一个属性名。
+        -->
+        <openfeign-querydsl.version>7.6</openfeign-querydsl.version>
+        <sa-token.version>1.46.0</sa-token.version>
+        <archunit.version>1.3.0</archunit.version>
+        <!-- 这两个属性覆盖的是普通受管依赖(不是 import 的 BOM),覆盖是安全的;已实测可解析 -->
+        <mysql.version>26.7.0</mysql.version>
+        <!-- flyway-core / flyway-mysql 两个模块版本号必须一致(架构文档 9.1) -->
+        <flyway.version>12.5.0</flyway.version>
+        <!-- 默认排除打 @Tag("integration") 的用例(需要 MySQL/Redis),全量跑: mvn test -Dexcluded.groups= -->
+        <excluded.groups>integration</excluded.groups>
+    </properties>
+
+    <dependencies>
+        <!-- Web / 校验 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!--
+          切面:租户过滤切面、操作日志切面都依赖它,web starter 不传递引入。
+          注意 Spring Boot 4 里这个 starter 已改名为 spring-boot-starter-aspectj
+          (旧的 spring-boot-starter-aop 在 4.1.0 的依赖管理里没有版本号,直接构建失败)。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- 持久层:Spring Data JPA(带 Hibernate 7.4.x) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!--
+          QueryDSL:必须用 OpenFeign fork 的坐标,不要用 com.querydsl 官方坐标(停止维护,Hibernate 6+ 有已知问题)。
+          注意 fork 7.x 起 querydsl-jpa **不再需要 jakarta 分类器**(它本来就是 jakarta-only,
+          写成 classifier=jakarta 会直接解析失败);而 querydsl-apt 仍然要带 jakarta 分类器。
+        -->
+        <dependency>
+            <groupId>io.github.openfeign.querydsl</groupId>
+            <artifactId>querydsl-jpa</artifactId>
+            <version>${openfeign-querydsl.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.openfeign.querydsl</groupId>
+            <artifactId>querydsl-apt</artifactId>
+            <version>${openfeign-querydsl.version}</version>
+            <classifier>jakarta</classifier>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- 鉴权:注意是 boot4 适配模块,不是 boot3 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot4-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- 会话存 Redis。1.46.0 起使用 Redis 6.0+ 的 SET KEEPTTL,Redis 必须 >= 6.0 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-template</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
+
+        <!--
+          密码哈希(架构文档 7.1:BCrypt)。
+          只引 spring-security-crypto 这个纯工具包,不引 spring-boot-starter-security——
+          本方案的认证/鉴权走 Sa-Token,不需要 Spring Security 的过滤器链,引进来只会多一层互相打架的配置。
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
+        <!-- 缓存 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!--
+          表结构迁移,两个都不能少:
+          1. spring-boot-starter-flyway:Spring Boot 4 把自动配置按模块拆开了,只放 flyway-core 这个库
+             在类路径上**不会触发 Flyway**(现象是:启动时 Flyway 一行日志都没有,然后 Hibernate validate
+             报 "missing table ..." —— 很容易误判成实体映射问题)。starter 才会带上自动配置。
+          2. flyway-mysql:Flyway 10+ 起 MySQL 支持是独立模块,不引它会在启动时报不支持该数据库。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- 测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+          Spring Boot 4 把测试切片按模块拆开了:spring-boot-starter-test 只带 spring-boot-test /
+          test-autoconfigure 这两个通用包,**不含** @DataJpaTest 这类切片注解,必须按模块单独引。
+          (3.x 时代这些注解都在 test-autoconfigure 里,照旧写法会直接编译不过。)
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jdbc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              默认只跑纯单元测试与架构测试:依赖 DB/Redis 的隔离性测试打 @Tag("integration"),
+              需要时用 `mvn test -Dexcluded.groups=` 全量跑(环境准备见架构文档 9.4)。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>${excluded.groups}</excludedGroups>
+                    <systemPropertyVariables>
+                        <!--
+                          测试里会起多个 Spring 上下文(RANDOM_PORT 的 HTTP 用例、事务隔离用例各一个),
+                          Hikari 默认每池 10 条连接,几个上下文就能把 MySQL 的 max_connections 吃满
+                          (本机是 30),表现为 Flyway 报 "Too many connections"、上下文加载失败 ——
+                          看上去像"迁移脚本坏了",实际是连接池开太多。测试库不需要大池,压到 3。
+                        -->
+                        <spring.datasource.hikari.maximum-pool-size>3</spring.datasource.hikari.maximum-pool-size>
+                        <spring.datasource.hikari.minimum-idle>1</spring.datasource.hikari.minimum-idle>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <!--
+              运维用的 Flyway 命令(架构文档 9.6 的回滚流程要用到):
+                mvn flyway:info     -Dflyway.url=jdbc:mysql://host:3306/db -Dflyway.user=.. -Dflyway.password=..
+                mvn flyway:validate (同上)
+                mvn flyway:repair   (同上) ← 迁移失败后清除 failed 标记,再发新版本脚本前滚
+              应用启动时由 Spring Boot 自动迁移;这里只是给运维提供"同一个 Flyway、同一批脚本"的命令行入口。
+              不配这个插件,9.6 里"用 flyway repair 清掉失败标记"这条流程就没有落地手段(只能手改
+              flyway_schema_history —— 那是最不该手改的一张表)。
+              注意两点:①url/user/password 从 -D 传入,不在 pom 里写死任何环境的连接;②插件类路径是独立的,
+              所以 MySQL 支持模块与 JDBC 驱动都要作为插件依赖显式声明,否则运行时报"不支持的数据库"。
+            -->
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <configuration>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration</location>
+                    </locations>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.flywaydb</groupId>
+                        <artifactId>flyway-mysql</artifactId>
+                        <version>${flyway.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>com.mysql</groupId>
+                        <artifactId>mysql-connector-j</artifactId>
+                        <version>${mysql.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <!--
+              QueryDSL 的 Q 类是编译期 APT 生成的:必须显式声明 annotationProcessorPaths,
+              否则不生成 Q 类、QueryDSL 代码编译不过。
+              注意:一旦声明了 annotationProcessorPaths,处理器classpath就只看这里,
+              所以 Lombok 也必须一起列进来(最容易漏的一步)。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>io.github.openfeign.querydsl</groupId>
+                            <artifactId>querydsl-apt</artifactId>
+                            <version>${openfeign-querydsl.version}</version>
+                            <classifier>jakarta</classifier>
+                        </path>
+                        <path>
+                            <groupId>jakarta.persistence</groupId>
+                            <artifactId>jakarta.persistence-api</artifactId>
+                            <version>${jakarta-persistence.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- 占位:本工程不做 Maven profile 环境区分,环境差异一律走 Spring profile(见架构文档 9.2) -->
+    </profiles>
+</project>

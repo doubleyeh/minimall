@@ -1,0 +1,77 @@
+spring:
+  application:
+    name: mini-mall
+  profiles:
+    active: dev
+  jpa:
+    # 显式配置,不依赖框架默认值:HTTP 路径依赖它保证整个请求周期是同一个 Hibernate Session,
+    # 租户过滤器在入口 enable 一次才够用(架构文档 4.2)。
+    open-in-view: true
+    hibernate:
+      # 三环境统一 validate:引入 Flyway 后 Hibernate 不允许在任何环境自动改表(架构文档 9.3)
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Shanghai
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+  threads:
+    virtual:
+      enabled: true
+
+# Sa-Token 关键配置(取值见架构文档 7.1.1,不要留白)
+sa-token:
+  token-name: Authorization
+  # 令牌前缀。客户端统一按 `Authorization: Bearer <token>` 传入(7.1),Sa-Token 读取时自动去掉前缀。
+  # 不配这一项时它会把整个 "Bearer xxx" 当成令牌串,校验必然失败 → 表现是"刚登录成功,下一个请求就 401"。
+  token-prefix: Bearer
+  # 访问令牌 TTL(秒)。短 TTL 是刷新机制生效的前提(架构文档 7.1.3);dev/test 在各自 profile 里覆盖。
+  timeout: 1800
+  # 不启用滑动过期(-1):续期必须走显式刷新接口,否则续期时无法做安全判断(7.1.3)
+  active-timeout: -1
+  is-concurrent: true      # 允许同一账号多端同时登录
+  is-share: false          # 每端 token 不同,便于精确踢单端
+  token-style: uuid
+  is-read-header: true
+  is-read-cookie: false    # 前后端分离,不依赖 cookie 传 token
+
+minimall:
+  # 雪花算法:多实例部署时每个实例必须不同(架构文档 4.3、9.3)
+  snowflake:
+    worker-id: ${SNOWFLAKE_WORKER_ID:1}
+    datacenter-id: ${SNOWFLAKE_DATACENTER_ID:1}
+  # 租户上下文与过滤(架构文档 4.2、4.9、4.11)
+  tenant:
+    # 白名单:允许没有 tenantId 就执行的路径,必须显式维护,不做模糊匹配
+    public-paths:
+      - /auth/login
+      # 刷新接口必须在白名单里:调用它时访问令牌通常已经过期,登录态校验必然失败(7.1.3)
+      - /auth/refresh
+      - /pay/callback/**
+      - /actuator/**
+    tenant-status-cache-seconds: 60
+  # 权限缓存(架构文档 5.5):key 带租户级版本号,失效只需 INCR 版本号
+  permission:
+    cache-ttl-seconds: 7200
+  # 刷新令牌(架构文档 7.1.3)
+  auth:
+    refresh-token:
+      ttl-seconds: 604800        # 7 天
+      reuse-grace-seconds: 120   # 已用令牌的重放宽限期,只为容忍客户端网络重试,不要调大
+  # 登录防护(架构文档 7.1.1)
+  login:
+    max-fail-count: 5
+    lock-minutes: 15
+    ip-limit-per-minute: 10
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.minimall: info
