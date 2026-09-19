@@ -65,7 +65,10 @@ public class ClientAuthFilter extends OncePerRequestFilter {
             "/mall/api/auth/wx-login",
             "/mall/api/categories",
             "/mall/api/goods",
-            "/mall/api/goods/**"
+            "/mall/api/goods/**",
+            // 领券列表:与商品浏览同理,先看到优惠再登录,转化更好。
+            // 注意只放行"可领取列表",/mine(我的券)与 /claim(领取)仍需要令牌
+            "/mall/api/coupons/claimable"
     };
 
     private static final String AUTH_HEADER = "Authorization";

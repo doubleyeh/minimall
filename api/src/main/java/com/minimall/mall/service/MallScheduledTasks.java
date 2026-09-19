@@ -40,21 +40,28 @@ public class MallScheduledTasks {
 
     private static final int DEFAULT_PAY_TIMEOUT_MINUTES = 15;
     private static final int DEFAULT_AUTO_RECEIVE_DAYS = 15;
+    private static final int DEFAULT_AFTER_SALE_MERCHANT_HOURS = 72;
+    private static final int DEFAULT_AFTER_SALE_BUYER_DAYS = 7;
+    private static final int DEFAULT_AFTER_SALE_RECEIVE_DAYS = 10;
 
     private static final String DICT_PAY_TIMEOUT = "order_pay_timeout_minutes";
     private static final String DICT_AUTO_RECEIVE = "order_auto_receive_days";
+    private static final String DICT_AFTER_SALE_TIMEOUT = "after_sale_timeout";
 
     private final TenantTaskRunner tenantTaskRunner;
     private final OrderService orderService;
+    private final AfterSaleService afterSaleService;
     private final MarketingMaintenanceService marketingMaintenanceService;
     private final DictService dictService;
 
     public MallScheduledTasks(TenantTaskRunner tenantTaskRunner,
                               OrderService orderService,
+                              AfterSaleService afterSaleService,
                               MarketingMaintenanceService marketingMaintenanceService,
                               DictService dictService) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
+        this.afterSaleService = afterSaleService;
         this.marketingMaintenanceService = marketingMaintenanceService;
         this.dictService = dictService;
     }
@@ -89,6 +96,32 @@ public class MallScheduledTasks {
         logIfFailed("订单自动确认收货", result);
     }
 
+    /**
+     * 售后超时处理(每小时):一次跑完三条规则,因为它们同属"售后卡在某个环节太久"。
+     *
+     * <p>三个阈值都来自字典 {@code after_sale_timeout}(72 小时 / 7 天 / 10 天),
+     * 而不是硬编码 —— 售后时效是最常被业务方要求调整的参数(3.9)。
+     */
+    @Scheduled(cron = "0 15 * * * ?")
+    public void handleAfterSaleTimeout() {
+        // 三档阈值存在同一个字典类型下(按标签区分),这里按标签取值的顺序与 V4 种子数据一致:
+        // 1-商家处理(小时) 2-买家退货(天) 3-商家收货(天)
+        int merchantHours = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 0, DEFAULT_AFTER_SALE_MERCHANT_HOURS);
+        int buyerDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 1, DEFAULT_AFTER_SALE_BUYER_DAYS);
+        int receiveDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 2, DEFAULT_AFTER_SALE_RECEIVE_DAYS);
+        LocalDateTime now = LocalDateTime.now();
+        var result = tenantTaskRunner.runForEachTenant("售后超时处理", SYSTEM_ACTOR_ID, tenantId -> {
+            int autoApproved = afterSaleService.autoApproveTimeout(now.minusHours(merchantHours));
+            int closed = afterSaleService.autoCloseTimeout(now.minusDays(buyerDays));
+            int autoReceived = afterSaleService.autoReceiveTimeout(now.minusDays(receiveDays));
+            if (autoApproved + closed + autoReceived > 0) {
+                log.info("租户 {} 售后超时处理:自动同意 {} / 自动关闭 {} / 自动收货 {}",
+                        tenantId, autoApproved, closed, autoReceived);
+            }
+        });
+        logIfFailed("售后超时处理", result);
+    }
+
     /** 优惠券过期清理(每天 3:30,避开业务高峰)。 */
     @Scheduled(cron = "0 30 3 * * ?")
     public void expireCouponRecords() {
@@ -104,14 +137,25 @@ public class MallScheduledTasks {
 
     /** 读字典里的整数配置;取不到或格式不对时用默认值,并把情况记下来。 */
     private int dictInt(String dictType, int defaultValue) {
+        return dictIntAt(dictType, 0, defaultValue);
+    }
+
+    /**
+     * 读字典里第 {@code index} 个条目的整数值。
+     *
+     * <p>一个字典类型下有多档配置时(after_sale_timeout 有三档)只能按顺序取 ——
+     * 字典的条目按 {@code sort_order} 返回,所以这里的下标与 V4 种子数据的顺序是对应的。
+     * 取不到、越界、或值不是整数时一律退回默认值:配置问题不该让任务整体卡住。
+     */
+    private int dictIntAt(String dictType, int index, int defaultValue) {
         try {
             List<DictItemView> items = dictService.items(dictType);
-            if (items.isEmpty()) {
+            if (items.size() <= index) {
                 return defaultValue;
             }
-            return Integer.parseInt(items.get(0).value().trim());
+            return Integer.parseInt(items.get(index).value().trim());
         } catch (NumberFormatException ex) {
-            log.warn("字典 {} 的值不是整数,已使用默认值 {}", dictType, defaultValue);
+            log.warn("字典 {} 第 {} 项不是整数,已使用默认值 {}", dictType, index, defaultValue);
             return defaultValue;
         }
     }
