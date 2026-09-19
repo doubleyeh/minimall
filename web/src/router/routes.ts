@@ -110,6 +110,29 @@ export const businessMenus: BusinessMenuNode[] = [
       { path: '/platform/menu', title: '菜单管理', icon: 'list', menuKeys: ['/platform', 'menu'] },
     ],
   },
+  /**
+   * 商城管理(后端 V4 迁移里的 sys_menu 数据,route_path 与这里的 path 片段一一对应)。
+   *
+   * 注意 menuKeys 要写 [目录, 页面] 两段:后端目录给的是全路径(/mall),
+   * 页面给的是片段(goods),权限快照里两者都要能对上,否则菜单不显示(5.2)。
+   */
+  {
+    path: '/mall',
+    title: '商城管理',
+    icon: 'shopping',
+    menuKeys: ['/mall'],
+    children: [
+      { path: '/mall/goods', title: '商品管理', icon: 'shop', menuKeys: ['/mall', 'goods'] },
+      { path: '/mall/category', title: '商品分类', icon: 'appstore', menuKeys: ['/mall', 'category'] },
+      { path: '/mall/order', title: '订单管理', icon: 'profile', menuKeys: ['/mall', 'order'] },
+      { path: '/mall/after-sale', title: '售后管理', icon: 'tool', menuKeys: ['/mall', 'after-sale'] },
+      { path: '/mall/coupon', title: '优惠券', icon: 'gift', menuKeys: ['/mall', 'coupon'] },
+      { path: '/mall/promotion', title: '满减活动', icon: 'thunderbolt', menuKeys: ['/mall', 'promotion'] },
+      { path: '/mall/freight', title: '运费模板', icon: 'car', menuKeys: ['/mall', 'freight'] },
+      { path: '/mall/member-level', title: '会员等级', icon: 'crown', menuKeys: ['/mall', 'member-level'] },
+      { path: '/mall/review', title: '商品评价', icon: 'star', menuKeys: ['/mall', 'review'] },
+    ],
+  },
 ]
 
 /** 移除函数集合:登出时必须逐个调用,否则换账号后会残留上一个账号的越权路由(5.2 第 3 条)。 */
