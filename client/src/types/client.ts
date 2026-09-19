@@ -204,3 +204,32 @@ export interface ClientLoginResponse {
   nickname?: string | null
   avatarUrl?: string | null
 }
+
+export interface ReviewView {
+  id: Id
+  goodsId: Id
+  goodsName: string
+  /** 匿名评价时后端已做脱敏处理,直接展示即可 */
+  customerNickname?: string | null
+  rating: number
+  content?: string | null
+  /**
+   * 图片地址,**逗号分隔的字符串**(后端库里就是这么存的,不是数组)。
+   * 展示前记得 split(',') 并过滤空串 —— 直接当数组用会渲染出一整串逗号。
+   */
+  images?: string | null
+  isAnonymous: number
+  replyContent?: string | null
+  replyTime?: string | null
+  status: number
+  createTime: string
+}
+
+export interface ReviewCreateRequest {
+  orderItemId: Id
+  /** 1-5 星,后端会校验范围 */
+  rating: number
+  content?: string | null
+  images?: string[]
+  anonymous?: boolean
+}

@@ -23,6 +23,16 @@
         <div class="info">
           <div class="name ellipsis-2">{{ item.goodsName }}</div>
           <div class="sku">{{ item.skuName }} × {{ item.quantity }}</div>
+          <!-- 评价入口只出现在已完成订单:后端也要求订单已完成,否则提交必然失败 -->
+          <t-button
+            v-if="order.status === 4"
+            class="review-btn"
+            size="extra-small"
+            theme="light"
+            @click="goReview(item.id)"
+          >
+            评价
+          </t-button>
         </div>
         <div class="amount">¥{{ item.totalAmount }}</div>
       </div>
@@ -134,6 +144,10 @@ async function onPay(): Promise<void> {
   }
 }
 
+function goReview(orderItemId: Id): void {
+  void router.push(`/review/${orderItemId}`)
+}
+
 function openAfterSale(): void {
   const item = order.value?.items[0]
   if (!item) return
@@ -216,6 +230,10 @@ onMounted(load)
 
 .amount {
   font-size: 13px;
+}
+
+.review-btn {
+  margin-top: 6px;
 }
 
 .after-sale-row {

@@ -47,6 +47,34 @@
       <div class="detail-content" v-html="goods.detailContent"></div>
     </div>
 
+    <!--
+      商品评价是公开接口,游客也要能看:一个"没有评价"的商品页会让人怀疑没人买过。
+      没有评价时如实显示"暂无评价",不做假数据填充。
+    -->
+    <div class="card">
+      <div class="section-title">
+        商品评价<span v-if="reviewTotal > 0" class="review-count">({{ reviewTotal }})</span>
+      </div>
+      <div v-if="reviews.length === 0" class="empty-tip">暂无评价</div>
+      <template v-else>
+        <div v-for="review in reviews" :key="review.id" class="review">
+          <div class="review-head">
+            <span class="review-user">{{ review.customerNickname || '匿名用户' }}</span>
+            <span class="review-stars">{{ stars(review.rating) }}</span>
+          </div>
+          <div class="review-content">{{ review.content || '该用户没有填写评价内容' }}</div>
+          <div v-if="reviewImages(review).length > 0" class="review-images">
+            <img v-for="(url, index) in reviewImages(review)" :key="index" :src="url" alt="" />
+          </div>
+          <div v-if="review.replyContent" class="review-reply">商家回复:{{ review.replyContent }}</div>
+          <div class="review-time">{{ review.createTime }}</div>
+        </div>
+        <div v-if="reviewTotal > reviews.length" class="review-more" @click="loadMoreReviews">
+          查看更多评价
+        </div>
+      </template>
+    </div>
+
     <div class="page-gap"></div>
 
     <div class="footer">
@@ -62,9 +90,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { cartAdd, goodsDetail } from '@/api/client'
+import { cartAdd, goodsDetail, goodsReviews } from '@/api/client'
 import { isLoggedIn } from '@/utils/auth'
-import type { ClientGoodsDetailView, ClientSkuView, Id } from '@/types/client'
+import type { ClientGoodsDetailView, ClientSkuView, Id, ReviewView } from '@/types/client'
 import { ApiError } from '@/utils/request'
 
 const route = useRoute()
@@ -128,6 +156,38 @@ async function onBuyNow(): Promise<void> {
   })
 }
 
+// ——— 商品评价 ———
+
+const REVIEW_PAGE_SIZE = 5
+const reviews = ref<ReviewView[]>([])
+const reviewTotal = ref(0)
+const reviewPage = ref(0)
+
+async function loadReviews(page = 1): Promise<void> {
+  const result = await goodsReviews(String(route.params.goodsId), page, REVIEW_PAGE_SIZE)
+  // 第一页覆盖、后续追加:分页接口返回的是整页,直接赋值会把已展示的评价替换掉
+  reviews.value = page === 1 ? result.list : [...reviews.value, ...result.list]
+  reviewTotal.value = result.total
+  reviewPage.value = page
+}
+
+function loadMoreReviews(): void {
+  void loadReviews(reviewPage.value + 1)
+}
+
+function stars(rating: number): string {
+  const filled = Math.max(0, Math.min(5, rating))
+  return '★'.repeat(filled) + '☆'.repeat(5 - filled)
+}
+
+/** images 是逗号分隔的字符串(后端库里的存法),不是数组 */
+function reviewImages(review: ReviewView): string[] {
+  return (review.images ?? '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean)
+}
+
 onMounted(async () => {
   goods.value = await goodsDetail(String(route.params.goodsId))
   // 默认选中第一个有货的 SKU:让用户少点一次(没有可售 SKU 时保持未选中)
@@ -135,6 +195,7 @@ onMounted(async () => {
   if (firstAvailable) {
     selectedSkuId.value = firstAvailable.id
   }
+  await loadReviews(1)
 })
 </script>
 
@@ -247,4 +308,80 @@ onMounted(async () => {
   text-align: center;
   padding-right: 4px;
 }
-</style>
+
+.review-count {
+  color: #999;
+  font-weight: 400;
+}
+
+.review {
+  padding: 10px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.review:last-child {
+  border-bottom: none;
+}
+
+.review-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.review-user {
+  font-size: 13px;
+  color: #333;
+}
+
+.review-stars {
+  font-size: 13px;
+  color: #ffa500;
+  letter-spacing: 1px;
+}
+
+.review-content {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #333;
+  word-break: break-all;
+}
+
+.review-images {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.review-images img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #f5f5f5;
+}
+
+.review-reply {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #f7f7f7;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+.review-time {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.review-more {
+  padding: 10px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #666;
+}
+</style></style>

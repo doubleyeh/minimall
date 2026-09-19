@@ -34,6 +34,7 @@ const router = createRouter({
     { path: '/orders/:orderId', name: 'OrderDetail', component: () => import('@/views/order/detail.vue') },
     { path: '/after-sales', name: 'AfterSales', component: () => import('@/views/after-sale/index.vue') },
     { path: '/after-sales/apply/:orderItemId', name: 'AfterSaleApply', component: () => import('@/views/after-sale/apply.vue') },
+    { path: '/review/:orderItemId', name: 'ReviewCreate', component: () => import('@/views/review/create.vue') },
   ],
 })
 

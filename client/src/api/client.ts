@@ -13,6 +13,8 @@ import type {
   Id,
   OrderCreateResponse,
   PageResult,
+  ReviewCreateRequest,
+  ReviewView,
 } from '@/types/client'
 import { request } from '@/utils/request'
 
@@ -212,4 +214,39 @@ export function profile(): Promise<ClientProfileView> {
 
 export function updateProfile(data: { nickname?: string; avatarUrl?: string; gender?: number }): Promise<void> {
   return request.put<void>('/mall/api/profile', data)
+}
+
+// ---------------------------------------------------------------- 商品评价
+
+/**
+ * 某商品的评价列表。**公开接口**(游客也能看):商品页一直没有评价会显得"没人买过"。
+ */
+export function goodsReviews(goodsId: Id, pageNo = 1, pageSize = 5): Promise<PageResult<ReviewView>> {
+  const params = new URLSearchParams()
+  params.set('pageNo', String(pageNo))
+  params.set('pageSize', String(pageSize))
+  return request.get<PageResult<ReviewView>>(`/mall/api/reviews/goods/${goodsId}?${params.toString()}`)
+}
+
+/**
+ * 提交评价(需要令牌)。
+ *
+ * 两条后端规则要在端上体现出来,否则用户只会看到一个"失败":
+ * ①订单必须是"已完成"状态;②同一订单明细只能评价一次。
+ */
+export function createReview(data: ReviewCreateRequest): Promise<Id> {
+  return request.post<Id>('/mall/api/reviews', data)
+}
+
+// ---------------------------------------------------------------- 购物车(补充)
+
+/**
+ * 清空购物车。
+ *
+ * 与"删除若干条目"是两个接口:`DELETE /mall/api/cart` 的请求体是要删的 id 列表,
+ * 而这个是 `DELETE /mall/api/cart/all`,不接受参数 —— 想清空时别去拼一个"全部 id"的列表,
+ * 客户端手里的列表可能已经过期(别的端删过、或分页没取全)。
+ */
+export function cartClear(): Promise<void> {
+  return request.delete<void>('/mall/api/cart/all')
 }

@@ -5,10 +5,29 @@
     <div v-if="items.length === 0" class="empty-tip">购物车还是空的,去逛逛吧</div>
 
     <div v-else>
+      <!--
+        勾选与清空。两个后端事实:
+        ①`PUT /cart/{id}` 接受 selected,勾选状态是存在服务端的(换设备登录也保留),
+          所以这里每次改完都重新拉列表,而不是本地改一下就算了;
+        ②清空是独立的 `DELETE /cart/all`,不要自己拼一个"全部 id"的列表去删 ——
+          本地列表可能已经过期(别的端删过),那样会漏删。
+        另外后端没有批量勾选接口,全选只能逐条更新;购物车条目通常个位数,可以接受。
+      -->
+      <div class="toolbar">
+        <t-checkbox :checked="allSelected" @change="onToggleAll">全选</t-checkbox>
+        <t-button size="extra-small" theme="danger" variant="text" @click="onClear">清空购物车</t-button>
+      </div>
+
       <t-cell-group v-for="item in items" :key="item.id" class="cart-item">
         <t-cell :title="item.goodsName || '商品已下架'" :description="item.skuName || ''">
           <template #image>
-            <img class="thumb" :src="item.image || ''" alt="" />
+            <div class="thumb-wrap">
+              <t-checkbox
+                :checked="item.selected === 1"
+                @change="(checked: boolean) => onSelectChange(item.id, checked)"
+              />
+              <img class="thumb" :src="item.image || ''" alt="" />
+            </div>
           </template>
           <template #note>
             <div class="note">
@@ -42,7 +61,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { cartList, cartRemove, cartUpdate } from '@/api/client'
+import { cartClear, cartList, cartRemove, cartUpdate } from '@/api/client'
 import type { CartItemView, Id } from '@/types/client'
 import { ApiError } from '@/utils/request'
 
@@ -84,6 +103,30 @@ async function onRemove(cartId: Id): Promise<void> {
   await load()
 }
 
+const allSelected = computed(() => items.value.length > 0 && items.value.every((item) => item.selected === 1))
+
+async function onSelectChange(cartId: Id, selected: boolean): Promise<void> {
+  await cartUpdate(cartId, { selected: selected ? 1 : 0 })
+  await load()
+}
+
+async function onToggleAll(selected: boolean): Promise<void> {
+  await Promise.all(items.value.map((item) => cartUpdate(item.id, { selected: selected ? 1 : 0 })))
+  await load()
+}
+
+function onClear(): void {
+  // 清空不可撤销,先确认。这里用系统 confirm 而不是 TDesign 的 Dialog:
+  // 本页其余提示都是 window.alert,保持一致;等整体换成 toast/dialog 时一起改。
+  if (!window.confirm('确认清空购物车?已下架或售罄的条目也会一起删除,该操作不可撤销。')) {
+    return
+  }
+  void (async () => {
+    await cartClear()
+    await load()
+  })()
+}
+
 function goCheckout(): void {
   void router.push('/checkout')
 }
@@ -96,6 +139,19 @@ onMounted(load)
   margin: 8px;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.thumb-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .thumb {
