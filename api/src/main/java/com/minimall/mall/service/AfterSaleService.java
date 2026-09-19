@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.AfterSaleApplyRequest;
-import com.minimall.api.mall.dto.AfterSaleView;
+import com.minimall.mall.api.dto.AfterSaleApplyRequest;
+import com.minimall.mall.api.dto.AfterSaleView;
 import com.minimall.common.PageResult;
 
 import java.math.BigDecimal;

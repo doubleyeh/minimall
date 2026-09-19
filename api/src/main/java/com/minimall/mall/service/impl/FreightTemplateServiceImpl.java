@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.FreightTemplateSaveRequest;
-import com.minimall.api.mall.dto.FreightTemplateView;
+import com.minimall.mall.api.dto.FreightTemplateSaveRequest;
+import com.minimall.mall.api.dto.FreightTemplateView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallFreightTemplate;

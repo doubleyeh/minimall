@@ -3,7 +3,7 @@ package com.minimall.infra.tenant;
 /**
  * 数据权限过滤的绑定参数(架构文档 5.3)。
  *
- * <p>五个档位共用一条 SQL 条件(见 {@code com.minimall.domain.sys.package-info} 里的 dataScopeFilter 定义),
+ * <p>五个档位共用一条 SQL 条件(见 {@code com.minimall.sys.domain.package-info} 里的 dataScopeFilter 定义),
  * 靠 {@code dataScope} 这个参数决定哪一支生效。这样做的原因:Hibernate Filter 的条件是静态 SQL 片段,
  * 按档位拆成五个 filter 会让"到底该 enable 哪个"散落成五处判断;一条条件 + 参数更好测,也更不容易漏 enable。
  *

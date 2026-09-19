@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.ClientLoginResponse;
-import com.minimall.api.mall.dto.WxLoginRequest;
+import com.minimall.mall.api.dto.ClientLoginResponse;
+import com.minimall.mall.api.dto.WxLoginRequest;
 
 /**
  * 小程序客户登录(商城设计文档 3.1)。

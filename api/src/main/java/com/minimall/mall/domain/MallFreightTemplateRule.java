@@ -1,6 +1,6 @@
 package com.minimall.mall.domain;
 
-import com.minimall.domain.sys.BaseTenantEntity;
+import com.minimall.infra.persistence.BaseTenantEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;

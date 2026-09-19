@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.AfterSaleApplyRequest;
-import com.minimall.api.mall.dto.AfterSaleView;
+import com.minimall.mall.api.dto.AfterSaleApplyRequest;
+import com.minimall.mall.api.dto.AfterSaleView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

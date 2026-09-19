@@ -32,12 +32,16 @@
 复用后端 `architecture.md` 9.1 节全部依赖,不新增技术选型。业务模块目录:
 
 ```
-src/main/java/.../mall/
-  api/          小程序端Controller(前缀 /mall/api)与商家管理端Controller(前缀 /mall/admin)分开
-  service/
-  domain/       实体类,全部继承 BaseTenantEntity
-  infra/        微信支付SDK封装、库存扣减的并发控制
+src/main/java/com/minimall/mall/
+  api/      Controller(小程序端前缀 /mall/api、管理端前缀 /mall/admin)+ 各端 DTO
+  service/  业务逻辑(接口与 impl 分包)
+  domain/   实体与仓储接口;实体以 Client/Mall 前缀区分端,基类继承自 infra.persistence
+  infra/    本域专用技术封装:auth(客户端 JWT)、pay(微信支付)、订单号生成
 ```
+
+> 注意实体基类不在这里:`BaseTenantEntity`/`BaseAuditEntity` 被 sys 与 mall 两边一起继承,
+> 因此归属 `com.minimall.infra.persistence`(见 `architecture.md` §3 的分包口径)。
+> 把共享基类放进任一业务域,都会让另一个域反向依赖它。
 
 管理端页面按现有前端脚手架规范,在 `views/mall/` 下新增,菜单数据通过 `sys_menu` 配置,权限码格式沿用 `模块:资源:操作`(如 `mall:goods:delete`)。
 

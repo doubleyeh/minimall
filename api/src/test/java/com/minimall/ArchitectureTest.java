@@ -7,6 +7,7 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,6 +30,10 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  *   <li>common 不得依赖任何业务包(它被所有人依赖,不能反过来依赖别人)</li>
  *   <li>domain 允许依赖 infra 的 ID 生成器 —— 实体基类的 {@code @PrePersist} 需要同步生成雪花 ID
  *       (见 4.3 的接入方式说明),这是有意放开的一条,不要当成漏洞</li>
+ *   <li><b>顶层包只能是 mall / sys / infra / common</b> —— 分包口径不设边界,新代码会随手建出第五个
+ *       顶层包,几轮之后约定就名存实亡</li>
+ *   <li><b>Controller 必须位于某个域的 api 包下</b> —— 否则"服务入口在哪"没有确定答案,
+ *       按包收敛拦截器/权限规则的思路也不再成立</li>
  * </ol>
  */
 class ArchitectureTest {
@@ -83,7 +88,7 @@ class ArchitectureTest {
     void serviceImplementationsMustBeTransactional() {
         // 覆盖基础设施与商城两侧的实现包。新增业务模块时把它的 impl 包加进来 ——
         // 漏一个包,那个模块的查询就在"过滤器未启用"的状态下执行(见下面的 because)。
-        classes().that().resideInAnyPackage("..service.sys.impl..", "..mall.service.impl..")
+        classes().that().resideInAnyPackage("..sys.service.impl..", "..mall.service.impl..")
                 // 只看顶层类:实现类里的小 record(如 OrderServiceImpl 内部的 Line/CouponUse)
                 // 是纯粹的传值载体,不需要也不应该标事务注解 —— 不加这一条会把它们一起算成违规
                 .and().areTopLevelClasses()
@@ -106,5 +111,34 @@ class ArchitectureTest {
                 .resideInAnyPackage("..api..", "..service..", "..domain..", "..infra..")
                 .because("common 被所有人依赖,它自己不能依赖任何业务包(架构文档 3)");
         rule.check(classes);
+    }
+
+    @Test
+    @DisplayName("顶层包只能是 mall / sys / infra / common")
+    void topLevelPackagesAreLimited() {
+        classes().that().resideInAPackage("com.minimall..")
+                // 启动类是唯一允许待在根包的:它必须位于所有组件扫描包的父级
+                .and().areNotAnnotatedWith(SpringBootApplication.class)
+                .should().resideInAnyPackage(
+                        "com.minimall.mall..", "com.minimall.sys..",
+                        "com.minimall.infra..", "com.minimall.common..")
+                .because("""
+                        四个顶层包的分工:mall 与 sys 是业务域(各自按 api → service → domain → infra 纵向分包)、
+                        infra 是跨域技术设施(租户过滤、鉴权、审计、ID 生成、缓存、持久化基类)、
+                        common 是通用返回与异常。
+                        这条规则的价值不在当下,而在下一个模块:人的默认行为是随手新建一个顶层包,
+                        而"随手建的包"正是这次分包统一的起因。""")
+                .check(classes);
+    }
+
+    @Test
+    @DisplayName("Controller 必须位于某个域的 api 包下(mall.api / sys.api)")
+    void controllersLiveInApiPackages() {
+        classes().that().areAnnotatedWith(RestController.class)
+                .or().areAnnotatedWith(Controller.class)
+                .should().resideInAPackage("..api..")
+                .because("接口层统一放在所属业务域的 api 包下;散落各处会让"
+                        + "\"服务入口在哪\"没有确定答案,按包收敛拦截器与权限规则的思路也不再成立")
+                .check(classes);
     }
 }

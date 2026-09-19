@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.AddressSaveRequest;
-import com.minimall.api.mall.dto.AddressView;
+import com.minimall.mall.api.dto.AddressSaveRequest;
+import com.minimall.mall.api.dto.AddressView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.tenant.TenantContext;

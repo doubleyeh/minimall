@@ -1,6 +1,6 @@
 package com.minimall.infra.dict;
 
-import com.minimall.api.sys.dto.DictItemView;
+import com.minimall.sys.api.dto.DictItemView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;

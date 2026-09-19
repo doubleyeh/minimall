@@ -1,11 +1,11 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.GoodsDetailView;
-import com.minimall.api.mall.dto.GoodsSaveRequest;
-import com.minimall.api.mall.dto.GoodsView;
-import com.minimall.api.mall.dto.SkuSaveRequest;
-import com.minimall.api.mall.dto.SkuView;
-import com.minimall.api.mall.dto.SpecSaveRequest;
+import com.minimall.mall.api.dto.GoodsDetailView;
+import com.minimall.mall.api.dto.GoodsSaveRequest;
+import com.minimall.mall.api.dto.GoodsView;
+import com.minimall.mall.api.dto.SkuSaveRequest;
+import com.minimall.mall.api.dto.SkuView;
+import com.minimall.mall.api.dto.SpecSaveRequest;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

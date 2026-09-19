@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.AdminOrderView;
-import com.minimall.api.mall.dto.ClientOrderView;
+import com.minimall.mall.api.dto.AdminOrderView;
+import com.minimall.mall.api.dto.ClientOrderView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

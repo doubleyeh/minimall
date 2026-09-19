@@ -1,15 +1,15 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.CategorySaveRequest;
-import com.minimall.api.mall.dto.CategoryTreeNode;
-import com.minimall.api.mall.dto.CouponSaveRequest;
-import com.minimall.api.mall.dto.FreightTemplateSaveRequest;
-import com.minimall.api.mall.dto.GoodsSaveRequest;
-import com.minimall.api.mall.dto.GoodsDetailView;
-import com.minimall.api.mall.dto.MemberLevelSaveRequest;
-import com.minimall.api.mall.dto.PromotionSaveRequest;
-import com.minimall.api.mall.dto.SkuSaveRequest;
-import com.minimall.api.mall.dto.SpecSaveRequest;
+import com.minimall.mall.api.dto.CategorySaveRequest;
+import com.minimall.mall.api.dto.CategoryTreeNode;
+import com.minimall.mall.api.dto.CouponSaveRequest;
+import com.minimall.mall.api.dto.FreightTemplateSaveRequest;
+import com.minimall.mall.api.dto.GoodsSaveRequest;
+import com.minimall.mall.api.dto.GoodsDetailView;
+import com.minimall.mall.api.dto.MemberLevelSaveRequest;
+import com.minimall.mall.api.dto.PromotionSaveRequest;
+import com.minimall.mall.api.dto.SkuSaveRequest;
+import com.minimall.mall.api.dto.SpecSaveRequest;
 import com.minimall.common.BusinessException;
 import com.minimall.common.PageResult;
 import com.minimall.infra.audit.AuditContext;
@@ -406,8 +406,8 @@ class MallAdminServiceIntegrationTest {
         Long goodsForOrder = inTenant(() -> createGoods());
         Long addressId = inTenant(() -> createAddress());
         Long orderId = inTenant(() -> {
-            var created = orderService.create(new com.minimall.api.mall.dto.CreateOrderRequest(
-                    List.of(new com.minimall.api.mall.dto.CreateOrderRequest.Item(
+            var created = orderService.create(new com.minimall.mall.api.dto.CreateOrderRequest(
+                    List.of(new com.minimall.mall.api.dto.CreateOrderRequest.Item(
                             skuRepository.findByGoodsIdOrderByIdAsc(goodsForOrder).get(0).getId(), 1)),
                     addressId, null, null));
             payService.handlePayCallback(created.orderNo(), "admin-it-" + System.nanoTime(),

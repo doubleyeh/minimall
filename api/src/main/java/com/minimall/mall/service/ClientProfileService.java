@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.ClientProfileUpdateRequest;
-import com.minimall.api.mall.dto.ClientProfileView;
+import com.minimall.mall.api.dto.ClientProfileUpdateRequest;
+import com.minimall.mall.api.dto.ClientProfileView;
 
 /**
  * 小程序端个人中心(商城设计文档 3.1)。

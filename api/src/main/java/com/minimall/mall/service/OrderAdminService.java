@@ -1,6 +1,6 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.AdminOrderView;
+import com.minimall.mall.api.dto.AdminOrderView;
 import com.minimall.common.PageResult;
 
 /**

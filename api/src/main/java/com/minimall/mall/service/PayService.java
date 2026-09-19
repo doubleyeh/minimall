@@ -1,6 +1,6 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.OrderCreateResponse;
+import com.minimall.mall.api.dto.OrderCreateResponse;
 
 import java.math.BigDecimal;
 

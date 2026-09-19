@@ -62,20 +62,29 @@
 
 **仓库布局**:`mini_mall` 是**项目根**,只放设计产物(`architecture.md`、`rbac_tenant_schema.sql`)与各服务目录;`mini_mall/api` 是 **java_api 服务的服务根**——它有自己的 `pom.xml` 与 `src/main/...`,构建、启动、CI 都以它为工作目录(`cd mini_mall/api && mvn ...`)。以后再有 `job`/`web` 之类的新服务,在项目根下平级新增目录,互不干扰;项目根**不放聚合 pom**,避免"根 pom 决定所有服务构建方式"这种隐式耦合。
 
-**决策:单 Maven 工程(单 jar),不拆多模块**。理由:本方案是单体应用,现阶段 `api/service/domain/infra/common` 之间没有"独立部署/独立复用"的需求,拆多模块只增加构建复杂度(pom 互相依赖、IDE 索引、发布链路),收益为零。依赖方向用一条 ArchUnit 测试固化(见 9.1),效果等价而成本更低。**将来某个域确实需要独立发布时再拆,且按域拆而不是按层拆**。
+**决策:单 Maven 工程(单 jar),不拆多模块**。理由:本方案是单体应用,现阶段各业务域与 `infra`/`common` 之间没有"独立部署/独立复用"的需求,拆多模块只增加构建复杂度(pom 互相依赖、IDE 索引、发布链路),收益为零。依赖方向与分包边界用 ArchUnit 测试固化(见 9.1),效果等价而成本更低。**将来某个域确实需要独立发布时再拆,且按域拆而不是按层拆**。
 
-包结构(命名空间前缀统一为 `com.{company}.mall`):
+包结构(命名空间前缀统一为 `com.{company}.mall`),**四个顶层包,业务域按域纵向切**:
 
 ```
-api       接口层,只放 Controller + DTO,不写业务逻辑,禁止直接注入 Repository
-service   业务逻辑,面向接口编程(接口与实现分包)
-domain    实体 + 仓储接口(Repository 接口声明在这里,实现由 Spring Data 生成)
-infra     租户过滤、权限校验、审计、ID生成、缓存、外部对接等技术实现
-common    统一响应、全局异常、工具类、常量
+mall/      商城业务域(小程序端 + 商家管理端)
+  api/     接口层:Controller + DTO,不写业务逻辑,禁止直接注入 Repository
+  service/ 业务逻辑,面向接口编程(接口与实现分包)
+  domain/  实体 + 仓储接口(Repository 接口声明在这里,实现由 Spring Data 生成)
+  infra/   本域专用的技术实现(客户端 JWT、微信支付封装、订单号生成)
+sys/       平台/租户管理域(tenant、sys_user/role/dept/menu、sys_dict_*)
+  api/  service/  domain/        ← 同上;本域暂无专有 infra
+infra/     跨域技术设施:租户过滤、鉴权、审计、ID 生成、缓存、字典读取、持久化基类
+common/    统一响应、全局异常、工具类、常量
 ```
 
-- 业务域作为**第二级子包**纵向切:`...api.sys`、`...service.sys`、`...domain.sys`,以后的 `mall` 域同理。这样"按领域纵向切"和"按技术层横切"两件事不冲突:层是主干,域是分支。
+- **业务域作为第一级子包纵向切**:`mall.api`、`mall.service`、`mall.domain`,`sys.api`、`sys.service`……层是域内部的分支。这样"按领域纵向切"与"按技术层横切"两件事不冲突,而且一个域可以整体搬走/拆分,不必去四个顶层包里逐个挑文件。
+- **共享技术设施留在顶层 `infra`**,判断标准是"它服务于谁":只服务一个域的(客户端 JWT、微信支付封装)放该域的 `infra`;服务所有域的(租户过滤、Sa-Token、审计、雪花 ID、持久化基类)放顶层 `infra`。
+- **域之间不互相依赖**:`mall` 与 `sys` 之间没有直接引用,两者共用的东西必须落到 `infra`。典型例子:`BaseTenantEntity`/`BaseAuditEntity` 被 sys 与 mall 的实体一起继承,所以它们属于 `infra.persistence` —— 若放在 `sys.domain` 下,`mall.domain`(28 处)就要反向依赖 `sys.domain`,纵向切分就白切了。
 - **依赖方向单向**:`api → service → domain`;`infra` 被 `api`/`service` 依赖,不反向依赖它们(避免循环);`common` 可以被任何人依赖,但它自己不依赖任何人。违反即构建失败,不允许注释掉这条测试。
+- 以上边界由 `ArchitectureTest` 固定:顶层包只能是这四个;Controller 必须位于某个域的 `api` 包下。
+
+> 本节的口径在实现商城时做过一次修正。原文写的是"层是主干、域是分支"(`...api.sys`、`...service.sys`),而 `mall_architecture.md` §1 从设计之初就是垂直写法(`mall/{api,service,domain,infra}`),两份文档互相矛盾;实际代码两边各写了一半(接口层按层切、其余三层按域切)。现在统一为**域为一级、层为域内分支**,理由见上面第三条 —— 域内聚是可以被整体移动/替换的单位,而层不是。
 
 ---
 
@@ -449,7 +458,7 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 - 只处理单一租户的任务:直接 `runAsTenant(tenantId, ...)`。这类任务(如 4.8.1 的按租户同步)同样是**每个租户一个事务**,循环里 try/catch 单租户异常,记日志后继续
 - **多实例部署注意**:`@Scheduled` 在每个实例上都会触发,同一批租户会被处理多遍。现阶段假设单实例部署;确实要多实例时,需要 Redis 分布式锁或调度中心,本方案不展开,列入第 10 节遗留
 
-**落地**:`TenantTaskRunner`(service/sys/support)把上面这段循环固定成骨架:逐个租户 `runAsTenant`、每租户独立 `try/catch`、跳过禁用/过期租户、返回成功数与失败租户清单。两个必须知道的行为:①**在事务内调用会被直接拒绝**——否则所有租户共用一个事务,单租户失败会把整批带回滚,与本节语义正好相反;②业务侧只写"单个租户要做什么",且那个方法**必须标注 `@Transactional`**(6.3 第 1 条),否则没有 Session 边界、过滤器无处可挂。
+**落地**:`TenantTaskRunner`(`sys/service/support`)把上面这段循环固定成骨架:逐个租户 `runAsTenant`、每租户独立 `try/catch`、跳过禁用/过期租户、返回成功数与失败租户清单。两个必须知道的行为:①**在事务内调用会被直接拒绝**——否则所有租户共用一个事务,单租户失败会把整批带回滚,与本节语义正好相反;②业务侧只写"单个租户要做什么",且那个方法**必须标注 `@Transactional`**(6.3 第 1 条),否则没有 Session 边界、过滤器无处可挂。
 
 ### 6.3 线程池场景 ✅
 `@Async`、任务线程池提交的任务里,ThreadLocal 不跨线程传播,`runAsTenant` 必须在**目标线程内部**调用,不能在提交任务前的调用方线程里调。

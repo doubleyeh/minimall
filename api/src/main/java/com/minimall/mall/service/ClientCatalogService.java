@@ -1,8 +1,8 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.CategoryTreeNode;
-import com.minimall.api.mall.dto.ClientGoodsDetailView;
-import com.minimall.api.mall.dto.ClientGoodsView;
+import com.minimall.mall.api.dto.CategoryTreeNode;
+import com.minimall.mall.api.dto.ClientGoodsDetailView;
+import com.minimall.mall.api.dto.ClientGoodsView;
 import com.minimall.common.PageResult;
 
 import java.util.List;

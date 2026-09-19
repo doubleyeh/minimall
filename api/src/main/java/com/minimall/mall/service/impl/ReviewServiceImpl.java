@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.ReviewCreateRequest;
-import com.minimall.api.mall.dto.ReviewView;
+import com.minimall.mall.api.dto.ReviewCreateRequest;
+import com.minimall.mall.api.dto.ReviewView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

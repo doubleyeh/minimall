@@ -1,8 +1,8 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.ClientCouponView;
-import com.minimall.api.mall.dto.CouponSaveRequest;
-import com.minimall.api.mall.dto.CouponView;
+import com.minimall.mall.api.dto.ClientCouponView;
+import com.minimall.mall.api.dto.CouponSaveRequest;
+import com.minimall.mall.api.dto.CouponView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

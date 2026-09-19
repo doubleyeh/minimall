@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class TenantFilterService {
 
-    /** 过滤器的名字必须与 {@code com.minimall.domain.sys.package-info} 里的 @FilterDef 完全一致。 */
+    /** 过滤器的名字必须与 {@code com.minimall.sys.domain.package-info} 里的 @FilterDef 完全一致。 */
     public static final String TENANT_FILTER = "tenantFilter";
     public static final String DATA_SCOPE_FILTER = "dataScopeFilter";
 

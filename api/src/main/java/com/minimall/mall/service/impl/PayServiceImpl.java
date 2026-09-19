@@ -1,6 +1,6 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.OrderCreateResponse;
+import com.minimall.mall.api.dto.OrderCreateResponse;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.tenant.TenantContext;

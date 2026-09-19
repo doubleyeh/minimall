@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.ClientLoginResponse;
-import com.minimall.api.mall.dto.WxLoginRequest;
+import com.minimall.mall.api.dto.ClientLoginResponse;
+import com.minimall.mall.api.dto.WxLoginRequest;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.tenant.TenantContext;

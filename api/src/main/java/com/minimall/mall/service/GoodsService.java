@@ -1,8 +1,8 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.GoodsDetailView;
-import com.minimall.api.mall.dto.GoodsSaveRequest;
-import com.minimall.api.mall.dto.GoodsView;
+import com.minimall.mall.api.dto.GoodsDetailView;
+import com.minimall.mall.api.dto.GoodsSaveRequest;
+import com.minimall.mall.api.dto.GoodsView;
 import com.minimall.common.PageResult;
 
 /**

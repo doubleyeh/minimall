@@ -1,7 +1,7 @@
 package com.minimall.infra.audit;
 
-import com.minimall.domain.sys.SysOperLog;
-import com.minimall.domain.sys.repository.SysOperLogRepository;
+import com.minimall.sys.domain.SysOperLog;
+import com.minimall.sys.domain.repository.SysOperLogRepository;
 import com.minimall.infra.web.TraceIdFilter;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;

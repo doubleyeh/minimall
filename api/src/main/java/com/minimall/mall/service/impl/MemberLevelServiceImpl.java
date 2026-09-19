@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.MemberLevelSaveRequest;
-import com.minimall.api.mall.dto.MemberLevelView;
+import com.minimall.mall.api.dto.MemberLevelSaveRequest;
+import com.minimall.mall.api.dto.MemberLevelView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallMemberLevel;

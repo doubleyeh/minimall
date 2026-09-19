@@ -1,9 +1,9 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.CategoryTreeNode;
-import com.minimall.api.mall.dto.ClientGoodsDetailView;
-import com.minimall.api.mall.dto.ClientGoodsView;
-import com.minimall.api.mall.dto.ClientSkuView;
+import com.minimall.mall.api.dto.CategoryTreeNode;
+import com.minimall.mall.api.dto.ClientGoodsDetailView;
+import com.minimall.mall.api.dto.ClientGoodsView;
+import com.minimall.mall.api.dto.ClientSkuView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;

@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.CategorySaveRequest;
-import com.minimall.api.mall.dto.CategoryTreeNode;
+import com.minimall.mall.api.dto.CategorySaveRequest;
+import com.minimall.mall.api.dto.CategoryTreeNode;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallGoodsCategory;

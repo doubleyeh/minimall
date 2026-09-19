@@ -8,13 +8,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 
-import com.minimall.service.sys.AuthService;
-import com.minimall.service.sys.DeptService;
-import com.minimall.service.sys.MenuService;
-import com.minimall.service.sys.PackageService;
-import com.minimall.service.sys.RoleService;
-import com.minimall.service.sys.TenantService;
-import com.minimall.service.sys.UserService;
+import com.minimall.sys.service.AuthService;
+import com.minimall.sys.service.DeptService;
+import com.minimall.sys.service.MenuService;
+import com.minimall.sys.service.PackageService;
+import com.minimall.sys.service.RoleService;
+import com.minimall.sys.service.TenantService;
+import com.minimall.sys.service.UserService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

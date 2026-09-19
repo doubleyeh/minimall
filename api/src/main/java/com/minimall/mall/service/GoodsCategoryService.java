@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.CategorySaveRequest;
-import com.minimall.api.mall.dto.CategoryTreeNode;
+import com.minimall.mall.api.dto.CategorySaveRequest;
+import com.minimall.mall.api.dto.CategoryTreeNode;
 
 import java.util.List;
 

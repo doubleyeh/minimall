@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.FreightTemplateSaveRequest;
-import com.minimall.api.mall.dto.FreightTemplateView;
+import com.minimall.mall.api.dto.FreightTemplateSaveRequest;
+import com.minimall.mall.api.dto.FreightTemplateView;
 
 import java.util.List;
 

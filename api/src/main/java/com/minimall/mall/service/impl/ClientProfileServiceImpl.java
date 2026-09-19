@@ -1,7 +1,7 @@
 package com.minimall.mall.service.impl;
 
-import com.minimall.api.mall.dto.ClientProfileUpdateRequest;
-import com.minimall.api.mall.dto.ClientProfileView;
+import com.minimall.mall.api.dto.ClientProfileUpdateRequest;
+import com.minimall.mall.api.dto.ClientProfileView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallCustomer;

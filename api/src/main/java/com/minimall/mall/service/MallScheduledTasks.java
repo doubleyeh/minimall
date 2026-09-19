@@ -1,10 +1,10 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.sys.dto.DictItemView;
+import com.minimall.sys.api.dto.DictItemView;
 import com.minimall.mall.service.MarketingMaintenanceService;
 import com.minimall.mall.service.OrderService;
-import com.minimall.service.sys.DictService;
-import com.minimall.service.sys.support.TenantTaskRunner;
+import com.minimall.sys.service.DictService;
+import com.minimall.sys.service.support.TenantTaskRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;

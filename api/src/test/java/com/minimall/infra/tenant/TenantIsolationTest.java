@@ -1,6 +1,6 @@
 package com.minimall.infra.tenant;
 
-import com.minimall.domain.sys.SysUser;
+import com.minimall.sys.domain.SysUser;
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.config.JpaAuditingConfig;
 import com.minimall.support.JpaTestSupport;

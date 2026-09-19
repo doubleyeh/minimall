@@ -1,7 +1,7 @@
 package com.minimall.mall.service;
 
-import com.minimall.api.mall.dto.PromotionSaveRequest;
-import com.minimall.api.mall.dto.PromotionView;
+import com.minimall.mall.api.dto.PromotionSaveRequest;
+import com.minimall.mall.api.dto.PromotionView;
 import com.minimall.common.PageResult;
 
 /**
