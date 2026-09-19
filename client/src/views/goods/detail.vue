@@ -180,9 +180,28 @@ function stars(rating: number): string {
   return '★'.repeat(filled) + '☆'.repeat(5 - filled)
 }
 
-/** images 是逗号分隔的字符串(后端库里的存法),不是数组 */
+/**
+ * 解析评价图片。
+ *
+ * 后端存的是 **JSON 数组字符串**(形如 ["https://a.png","https://b.png"]) ——
+ * 不是逗号分隔的列表。按逗号切分会把方括号和引号一起渲染出来,所以这里先按 JSON 解析;
+ * 解析失败时退化为剥掉括号引号再切分,兼容历史数据。
+ */
 function reviewImages(review: ReviewView): string[] {
-  return (review.images ?? '')
+  const raw = review.images
+  if (!raw) {
+    return []
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      return parsed.filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+    }
+  } catch {
+    // 不是严格 JSON:走下面的兜底
+  }
+  return raw
+    .replace(/[[\]"]/g, '')
     .split(',')
     .map((url) => url.trim())
     .filter(Boolean)

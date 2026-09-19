@@ -214,8 +214,9 @@ export interface ReviewView {
   rating: number
   content?: string | null
   /**
-   * 图片地址,**逗号分隔的字符串**(后端库里就是这么存的,不是数组)。
-   * 展示前记得 split(',') 并过滤空串 —— 直接当数组用会渲染出一整串逗号。
+   * 图片地址,**JSON 数组字符串**(形如 ["https://a.png","https://b.png"])。
+   * 后端为了不给几张图单独建表就存成了字符串,展示前必须先 JSON.parse ——
+   * 按逗号切分会把方括号和引号一起渲染出来。
    */
   images?: string | null
   isAnonymous: number

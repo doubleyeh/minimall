@@ -91,6 +91,10 @@ public class CartServiceImpl implements CartService {
         requireSellable(sku);
 
         int quantity = request.quantity();
+        // 三条写入路径(add/update/accumulate)都必须校验库存。原先只有后两条做了,
+        // 于是"首次加购 11 件、库存 10"能塞进购物车 —— 用户要等到结算才被告知买不了,
+        // 而那时购物车里已经挂着一个永远无法结算的数量。
+        requireStock(sku, quantity);
         MallCart existing = cartRepository.findByCustomerIdAndSkuId(customerId, request.skuId()).orElse(null);
         if (existing != null) {
             return accumulate(existing, quantity);
@@ -117,10 +121,7 @@ public class CartServiceImpl implements CartService {
             MallSku sku = skuRepository.findById(cart.getSkuId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "商品规格不存在"));
             requireSellable(sku);
-            if (request.quantity() > sku.availableStock()) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID,
-                        "库存不足,当前仅剩 " + sku.availableStock() + " 件");
-            }
+            requireStock(sku, request.quantity());
             cart.setQuantity(request.quantity());
         }
         if (request.selected() != null) {
@@ -152,14 +153,21 @@ public class CartServiceImpl implements CartService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "单个 SKU 最多购买 " + MAX_QUANTITY + " 件");
         }
         MallSku sku = skuRepository.findById(cart.getSkuId()).orElse(null);
-        if (sku != null && total > sku.availableStock()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "库存不足,当前仅剩 " + sku.availableStock() + " 件");
+        if (sku != null) {
+            requireStock(sku, total);
         }
         cart.setQuantity(total);
         // 再次加购时把条目设为选中:用户的意图是"我想买它",加进购物车却被默认不勾选会很困惑
         cart.setSelected(1);
         return cart.getId();
+    }
+
+    /** 数量与可售库存的校验统一在这里:三个写入路径的判定与文案必须一致。 */
+    private void requireStock(MallSku sku, int quantity) {
+        if (quantity > sku.availableStock()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "库存不足,当前仅剩 " + sku.availableStock() + " 件");
+        }
     }
 
     private void requireSellable(MallSku sku) {
