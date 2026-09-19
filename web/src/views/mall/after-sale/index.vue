@@ -77,6 +77,25 @@
         </template>
       </n-drawer-content>
     </n-drawer>
+
+    <!--
+      填写说明弹窗:拒绝原因、仲裁依据共用。
+      刻意用 n-form + n-input 而不是在 dialog 里手搓 input —— 后者拿不到表单校验,
+      而且状态要自己管(见脚本里的说明)。
+    -->
+    <n-modal v-model:show="promptVisible" preset="card" :title="promptTitle" style="width: 480px">
+      <n-form ref="promptFormRef" :model="promptForm" :rules="promptRules" label-placement="top">
+        <n-form-item label="说明" path="value">
+          <n-input v-model:value="promptForm.value" type="textarea" :rows="3" :placeholder="promptPlaceholder" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="promptVisible = false">取消</n-button>
+          <n-button type="primary" :loading="promptSubmitting" @click="onPromptSubmit">提交</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </n-space>
 </template>
 
@@ -96,7 +115,7 @@ import {
 import { usePermissionStore } from '@/stores/permission'
 import type { Id, PageResult } from '@/types/api'
 import type { AfterSaleView } from '@/types/mall'
-import type { DataTableColumns, SelectOption } from 'naive-ui'
+import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -230,35 +249,70 @@ async function onApprove(): Promise<void> {
   await refresh()
 }
 
+// ——— 填写说明弹窗(拒绝原因 / 仲裁依据) ———
+
+const promptVisible = ref(false)
+const promptSubmitting = ref(false)
+const promptTitle = ref('')
+const promptPlaceholder = ref('')
+const promptRequired = ref(true)
+const promptFormRef = ref<FormInst | null>(null)
+const promptForm = reactive<{ value: string }>({ value: '' })
+
+/** 必填时才加校验规则:不返回空对象,否则 `value` 会变成可选,与 FormRules 不兼容 */
+const promptRules = computed<FormRules>(() => ({
+  value: promptRequired.value ? [{ required: true, message: '请填写说明', trigger: ['input', 'blur'] }] : [],
+}))
+
+/** 提交动作由调用方传入,弹窗本身不关心是"拒绝售后"还是"仲裁"。 */
+let promptSubmit: ((value: string) => Promise<void>) | null = null
+
+function openPrompt(options: {
+  title: string
+  placeholder: string
+  required: boolean
+  onSubmit: (value: string) => Promise<void>
+}): void {
+  promptTitle.value = options.title
+  promptPlaceholder.value = options.placeholder
+  promptRequired.value = options.required
+  // 每次打开都清空。原来这件事是"忘了做"的:输入框是每次新建的(看着是空的),
+  // 但存放值的 ref 是页面级的,上一次输入的内容会留下来 —— 用户看着空框点提交,
+  // 发出去的却是上一次的原因。这类"看得见的状态与真实提交值不一致"最难被发现。
+  promptForm.value = ''
+  promptSubmit = options.onSubmit
+  promptVisible.value = true
+}
+
+async function onPromptSubmit(): Promise<void> {
+  try {
+    await promptFormRef.value?.validate()
+  } catch {
+    return
+  }
+  if (!promptSubmit) return
+  promptSubmitting.value = true
+  try {
+    await promptSubmit(promptForm.value.trim())
+    promptVisible.value = false
+  } finally {
+    promptSubmitting.value = false
+  }
+}
+
 function onReject(): void {
   if (!detail.value) return
   const target = detail.value
-  dialog.warning({
+  openPrompt({
     title: '拒绝售后申请',
-    content: () => h('div', { style: 'padding-top:8px' }, [h(RejectInput)]),
-    positiveText: '确认拒绝',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await rejectAfterSale(target.id, rejectReason.value)
+    placeholder: '请填写拒绝原因(买家可见)',
+    required: true,
+    onSubmit: async (reason) => {
+      await rejectAfterSale(target.id, reason)
       message.success('已拒绝')
       await refresh()
     },
   })
-}
-
-const rejectReason = ref('')
-const RejectInput = {
-  setup() {
-    return () =>
-      h('input', {
-        class: 'n-input__input-el',
-        style: 'width:100%;height:34px;border:1px solid #e0e0e6;border-radius:3px;padding:0 10px',
-        placeholder: '请填写拒绝原因',
-        onInput: (event: Event) => {
-          rejectReason.value = (event.target as HTMLInputElement).value
-        },
-      })
-  },
 }
 
 async function onConfirmReceive(): Promise<void> {
@@ -287,24 +341,38 @@ async function onConfirmReceive(): Promise<void> {
 function onRejectReceive(): void {
   if (!detail.value) return
   const target = detail.value
-  dialog.warning({
+  openPrompt({
     title: '拒绝收货',
-    content: () => h('div', { style: 'padding-top:8px' }, [h(RejectInput)]),
-    positiveText: '确认',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await rejectReceiveAfterSale(target.id, rejectReason.value)
+    placeholder: '请说明拒绝收货的理由(买家可见)',
+    required: true,
+    onSubmit: async (reason) => {
+      await rejectReceiveAfterSale(target.id, reason)
       message.success('已拒绝收货')
       await refresh()
     },
   })
 }
 
-async function onArbitrate(pass: boolean): Promise<void> {
+/**
+ * 客服仲裁。
+ *
+ * 说明**不写死**:后端会把 remark 记进售后流转日志(设计文档 3.9 的操作留痕),
+ * 写死一句"商家举证充分"等于让留痕失去意义 —— 出了纠纷没人知道当时依据是什么。
+ * 允许留空(后端 remark 可空),但不替用户编一个理由。
+ */
+function onArbitrate(pass: boolean): void {
   if (!detail.value) return
-  await arbitrateAfterSale(detail.value.id, pass, pass ? '支持买家诉求' : '商家举证充分')
-  message.success(pass ? '仲裁通过,已执行退款' : '仲裁驳回')
-  await refresh()
+  const target = detail.value
+  openPrompt({
+    title: pass ? '仲裁通过' : '仲裁驳回',
+    placeholder: pass ? '支持买家诉求的依据(选填)' : '驳回买家诉求的依据(选填)',
+    required: false,
+    onSubmit: async (remark) => {
+      await arbitrateAfterSale(target.id, pass, remark || undefined)
+      message.success(pass ? '仲裁通过,已执行退款' : '仲裁驳回')
+      await refresh()
+    },
+  })
 }
 
 onMounted(load)

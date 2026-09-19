@@ -160,11 +160,49 @@ export interface TenantCreateRequest {
 
 export interface TenantCreateResponse {
   tenantId: Id
-  tenantCode: string
   adminUsername: string
   adminUserId: Id
   defaultRoleId: Id
   rootDeptId: Id
   initialPassword: string | null
   mustChangePassword: boolean
+}
+
+// ——— 字典 ———
+
+export interface DictTypeView {
+  id: Id
+  dictType: string
+  dictName: string
+  /** 该类型下的字典项数量,由后端聚合返回 —— 不要在前端自己数(分页/懒加载时会算错) */
+  dataCount: number
+  createTime: string | null
+}
+
+export interface DictTypeSaveRequest {
+  /** 修改时后端要求与库里保持一致:改编码会让已有的字典项全部悬空 */
+  dictType: string
+  dictName: string
+}
+
+export interface DictDataView {
+  id: Id
+  dictType: string
+  dictLabel: string
+  dictValue: string
+  sortOrder: number
+}
+
+export interface DictDataSaveRequest {
+  /** 必须是已存在的字典类型编码,否则会产生永远查不到的孤儿字典项 */
+  dictType: string
+  dictLabel: string
+  dictValue: string
+  sortOrder?: number | null
+}
+
+/** 业务端只读下拉项:后端刻意不返回主键(给了主键前端就会想"按 ID 改字典项") */
+export interface DictItemView {
+  label: string
+  value: string
 }

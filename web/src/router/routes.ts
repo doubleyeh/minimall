@@ -108,6 +108,11 @@ export const businessMenus: BusinessMenuNode[] = [
       { path: '/platform/tenant', title: '租户管理', icon: 'storefront', menuKeys: ['/platform', 'tenant'] },
       { path: '/platform/package', title: '套餐管理', icon: 'gift', menuKeys: ['/platform', 'package'] },
       { path: '/platform/menu', title: '菜单管理', icon: 'list', menuKeys: ['/platform', 'menu'] },
+      /**
+       * 字典管理挂在平台管理下,与后端 sys_menu(id = 9,parent_id = 5,is_platform = 1)一致。
+       * 它是平台专用菜单,不在任何套餐里,所以租户账号的权限快照中不会有 'dict' —— 菜单自然不显示。
+       */
+      { path: '/platform/dict', title: '字典管理', icon: 'book', menuKeys: ['/platform', 'dict'] },
     ],
   },
   /**
