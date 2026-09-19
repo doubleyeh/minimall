@@ -121,13 +121,24 @@ public class DeptServiceImpl implements DeptService {
     private void cascadeAncestors(SysDept dept, String newAncestors) {
         String oldPrefix = SysDept.pathPrefix(dept.getAncestors(), dept.getId());
         String newPrefix = SysDept.pathPrefix(newAncestors, dept.getId());
+        // 前缀以逗号结尾(那是给 LIKE 匹配直接下级用的),做字符串替换时要去掉:
+        // 直接下级的 ancestors 正好等于"前缀去掉尾逗号"这一段,不去掉就会 substring 越界。
+        String oldBase = stripTrailingComma(oldPrefix);
+        String newBase = stripTrailingComma(newPrefix);
         List<SysDept> descendants = deptRepository.findByAncestorsStartingWith(oldPrefix);
         for (SysDept descendant : descendants) {
-            descendant.setAncestors(newPrefix + descendant.getAncestors().substring(oldPrefix.length()));
+            String ancestors = descendant.getAncestors();
+            // 直接下级:祖先链恰等于 oldBase,尾巴为空;更深的后代:尾巴是 ",B,C" 这样的剩余部分
+            String tail = ancestors.length() > oldBase.length() ? ancestors.substring(oldBase.length()) : "";
+            descendant.setAncestors(newBase + tail);
         }
         if (!descendants.isEmpty()) {
             log.info("部门移动,已级联更新子孙祖级链 deptId={} 子孙数={}", dept.getId(), descendants.size());
         }
+    }
+
+    private String stripTrailingComma(String prefix) {
+        return prefix.endsWith(",") ? prefix.substring(0, prefix.length() - 1) : prefix;
     }
 
     /** 子部门的 ancestors = 父部门的 ancestors + 父部门 id(逗号分隔)。根部门为空串。 */

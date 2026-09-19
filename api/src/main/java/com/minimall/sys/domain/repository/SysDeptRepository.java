@@ -38,8 +38,15 @@ public interface SysDeptRepository extends JpaRepository<SysDept, Long>, Queryds
 
     /**
      * 按祖级链前缀取子树 —— 部门被移动到新上级时,子孙的 ancestors 都要跟着改(5.1)。
+     *
+     * <p><b>必须用 concat 补尾逗号</b>:前缀本身以逗号结尾(见 {@code SysDept.pathPrefix}),
+     * 而**直接下级**的 ancestors 没有尾逗号(例如 {@code 1,5})。派生查询会生成
+     * {@code ancestors like '1,5,%'},直接下级永远匹配不上 —— 结果是移动部门时只有孙子辈被更新,
+     * 直接下级的祖级链留在旧位置,与真实层级脱节,"本部门及以下"随之算漏。
+     * 这个坑 {@code pathPrefix} 的 javadoc 已经写明,这里是它的落地处。
      */
-    List<SysDept> findByAncestorsStartingWith(String ancestorsPrefix);
+    @Query("select d from SysDept d where concat(d.ancestors, ',') like concat(:prefix, '%')")
+    List<SysDept> findByAncestorsStartingWith(@Param("prefix") String ancestorsPrefix);
 
     /**
      * "本部门及以下"的部门 ID(5.3 的第 3 档)。
