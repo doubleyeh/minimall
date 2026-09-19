@@ -33,91 +33,31 @@
       <t-cell title="我的订单" arrow @click="router.push('/orders')" />
       <t-cell title="我的售后" arrow @click="router.push('/after-sales')" />
       <t-cell title="优惠券" arrow @click="router.push('/coupons')" />
-      <t-cell title="收货地址" arrow @click="openAddressEditor" />
+      <t-cell title="收货地址" arrow @click="router.push('/addresses')" />
       <t-cell title="退出登录" arrow @click="onLogout" />
     </t-cell-group>
-
-    <t-popup v-model="addressVisible" placement="bottom">
-      <div class="popup">
-        <div class="popup-title">新增收货地址</div>
-        <t-input v-model="addressForm.receiverName" label="收货人" />
-        <div class="gap"></div>
-        <t-input v-model="addressForm.receiverPhone" label="手机号" />
-        <div class="gap"></div>
-        <t-input v-model="addressForm.province" label="省份" />
-        <div class="gap"></div>
-        <t-input v-model="addressForm.city" label="城市" />
-        <div class="gap"></div>
-        <t-input v-model="addressForm.district" label="区县" />
-        <div class="gap"></div>
-        <t-input v-model="addressForm.detailAddress" label="详细地址" />
-        <div class="gap"></div>
-        <t-button block theme="primary" @click="saveAddress">保存</t-button>
-        <div class="gap"></div>
-        <div v-for="address in addresses" :key="address.id" class="address-item">
-          <span class="ellipsis">{{ address.receiverName }} {{ address.receiverPhone }} {{ address.detailAddress }}</span>
-          <t-button size="extra-small" variant="text" @click="onDeleteAddress(address.id)">删除</t-button>
-        </div>
-      </div>
-    </t-popup>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { addressCreate, addressDelete, addressList, profile } from '@/api/client'
+import { profile } from '@/api/client'
 import { clearAuth } from '@/utils/auth'
-import type { AddressView, ClientProfileView } from '@/types/client'
-import { ApiError } from '@/utils/request'
+import type { ClientProfileView } from '@/types/client'
 
 /**
  * 个人中心。
  *
- * 只有一个"新增地址"的简化入口:**地址的完整管理(改默认、编辑)还没做页面**,
- * 下单时会用到列表里的默认地址。这里先保证"没有地址时能建一个"这条路径通。
+ * 订单角标由服务端一次返回(四个计数),而不是让这里对订单接口发四次请求 ——
+ * 个人中心是高频页面,首屏请求数应当尽量少。
  */
 const router = useRouter()
 const data = ref<ClientProfileView | null>(null)
 
-const addressVisible = ref(false)
-const addresses = ref<AddressView[]>([])
-const addressForm = reactive({
-  receiverName: '',
-  receiverPhone: '',
-  province: '',
-  city: '',
-  district: '',
-  detailAddress: '',
-})
-
 async function load(): Promise<void> {
   data.value = await profile()
-}
-
-async function openAddressEditor(): Promise<void> {
-  addresses.value = await addressList()
-  addressVisible.value = true
-}
-
-async function saveAddress(): Promise<void> {
-  if (!addressForm.receiverName.trim() || !addressForm.detailAddress.trim()) {
-    window.alert('请填写收货人与详细地址')
-    return
-  }
-  try {
-    await addressCreate({ ...addressForm, defaultAddress: addresses.value.length === 0 })
-    addresses.value = await addressList()
-    window.alert('已保存')
-  } catch (error) {
-    window.alert(error instanceof ApiError ? error.message : '保存失败')
-  }
-}
-
-async function onDeleteAddress(addressId: string): Promise<void> {
-  await addressDelete(addressId)
-  addresses.value = await addressList()
 }
 
 function onLogout(): void {
@@ -175,32 +115,5 @@ onMounted(load)
   margin-top: 4px;
   color: #999;
   font-size: 12px;
-}
-
-.popup {
-  padding: 16px;
-  background: #fff;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.popup-title {
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.gap {
-  height: 12px;
-}
-
-.address-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-  border-top: 1px solid #f5f5f5;
-  font-size: 13px;
 }
 </style>

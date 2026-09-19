@@ -29,6 +29,7 @@ const router = createRouter({
     },
     { path: '/goods/:goodsId', name: 'GoodsDetail', component: () => import('@/views/goods/detail.vue'), meta: { public: true } },
     { path: '/coupons', name: 'Coupons', component: () => import('@/views/coupon/index.vue'), meta: { public: true } },
+    { path: '/addresses', name: 'Addresses', component: () => import('@/views/address/index.vue') },
     { path: '/checkout', name: 'Checkout', component: () => import('@/views/order/checkout.vue') },
     { path: '/orders/:orderId', name: 'OrderDetail', component: () => import('@/views/order/detail.vue') },
     { path: '/after-sales', name: 'AfterSales', component: () => import('@/views/after-sale/index.vue') },
