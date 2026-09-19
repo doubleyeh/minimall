@@ -35,6 +35,8 @@
         -->
         <openfeign-querydsl.version>7.6</openfeign-querydsl.version>
         <sa-token.version>1.46.0</sa-token.version>
+        <!-- 小程序客户端 JWT(jjwt 0.12.x) -->
+        <jjwt.version>0.12.6</jjwt.version>
         <archunit.version>1.3.0</archunit.version>
         <!-- 这两个属性覆盖的是普通受管依赖(不是 import 的 BOM),覆盖是安全的;已实测可解析 -->
         <mysql.version>26.7.0</mysql.version>
@@ -97,6 +99,30 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot4-starter</artifactId>
             <version>${sa-token.version}</version>
+        </dependency>
+
+        <!--
+          小程序客户端令牌(JWT)。**刻意不复用 Sa-Token**:客户端会话是"免登录 30 天、过期静默重登",
+          与后台会话(分钟级、强制改密、租户切换)是两套完全不同的生命周期,共用一套会话存储
+          会互相牵制(商城设计文档 3.1)。
+          jjwt-jackson 会带上 Jackson 2 的 databind —— 它与项目的 Jackson 3 包名不同,可以共存。
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <!-- 会话存 Redis。1.46.0 起使用 Redis 6.0+ 的 SET KEEPTTL,Redis 必须 >= 6.0 -->
         <dependency>

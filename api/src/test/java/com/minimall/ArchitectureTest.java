@@ -81,7 +81,12 @@ class ArchitectureTest {
     @Test
     @DisplayName("service 实现类必须标注 @Transactional(否则租户过滤器不会被启用)")
     void serviceImplementationsMustBeTransactional() {
-        classes().that().resideInAPackage("..service.sys.impl..")
+        // 覆盖基础设施与商城两侧的实现包。新增业务模块时把它的 impl 包加进来 ——
+        // 漏一个包,那个模块的查询就在"过滤器未启用"的状态下执行(见下面的 because)。
+        classes().that().resideInAnyPackage("..service.sys.impl..", "..mall.service.impl..")
+                // 只看顶层类:实现类里的小 record(如 OrderServiceImpl 内部的 Line/CouponUse)
+                // 是纯粹的传值载体,不需要也不应该标事务注解 —— 不加这一条会把它们一起算成违规
+                .and().areTopLevelClasses()
                 .should().beAnnotatedWith(Transactional.class)
                 .because("租户过滤器由事务切面在每个事务边界启用(架构文档 4.2);"
                         + "漏标不会报错,而是该入口的查询在过滤器未启用的状态下执行 —— 直接跨租户读到数据")

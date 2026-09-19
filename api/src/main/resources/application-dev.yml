@@ -18,6 +18,12 @@ minimall:
   auth:
     refresh-token:
       ttl-seconds: 2592000   # dev 30 天
+  mall:
+    auth:
+      # 本地开发没有真实的小程序 appId/appSecret,打开 mock 才能走通登录链路:
+      # code 会被直接映射成模拟 openid(见 WxAuthClient)。
+      # 生产环境(config/application-prod.yml)必须保持 false —— 那里没有这个配置项,默认即 false。
+      wx-mock: true
 
 logging:
   level:
