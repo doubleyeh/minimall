@@ -279,6 +279,39 @@ class AdminPermissionHttpTest {
                 .isEmpty();
     }
 
+    @Test
+    @DisplayName("租户管理员:租户内的系统管理端点不被误拦(users/roles/depts)")
+    void tenantAdminCanReachTenantScopedSystemEndpoints() throws Exception {
+        String token = loginTenantAdmin();
+        assertThat(get("/system/users?pageNo=1&pageSize=5", token).status()).isEqualTo(200);
+
+        List<String> blocked = new ArrayList<>();
+        for (AdminEndpoint endpoint : adminEndpoints()) {
+            if (!isTenantScopedSystemPath(endpoint.pattern())) {
+                // 平台级端点(租户/套餐/菜单/字典)对租户管理员本就应当拒绝,不在这条用例范围内
+                continue;
+            }
+            Response response = call(endpoint, token);
+            if (response.status() == 401 || response.status() == 403) {
+                blocked.add("%s %s -> HTTP %s (业务码 %s)"
+                        .formatted(endpoint.httpMethod(), endpoint.pattern(), response.status(), response.code()));
+            }
+        }
+
+        assertThat(blocked)
+                .as("""
+                        租户管理员对租户内的用户/角色/部门端点被拒绝。默认管理员角色由套餐同步授权,
+                        这些端点被拦通常意味着套餐授权或菜单表出了问题 —— 表现是租户建好后连自己的用户都管不了。""")
+                .isEmpty();
+    }
+
+    /** 租户内可见的系统管理路径:用户、角色、部门(其余 /system/** 是平台级,租户管理员本就无权)。 */
+    private boolean isTenantScopedSystemPath(String pattern) {
+        return pattern.startsWith("/system/users")
+                || pattern.startsWith("/system/roles")
+                || pattern.startsWith("/system/depts");
+    }
+
     // ------------------------------------------------------------------ 端点枚举
 
     /**
