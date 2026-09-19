@@ -347,13 +347,20 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         List<MallAfterSale> rows = afterSaleRepository.findTimeoutByStatus(
                 MallAfterSale.STATUS_PENDING, updatedBefore, PageRequest.of(0, BATCH_SIZE));
         for (MallAfterSale afterSale : rows) {
-            int from = afterSale.getStatus();
-            if (afterSale.getAfterSaleType() == MallAfterSale.TYPE_REFUND_ONLY) {
-                finish(afterSale, MallAfterSale.STATUS_DONE, MallAfterSaleLog.OPERATOR_SYSTEM, null,
+            // 每轮都重新取托管实例:上面任何一次 finish 里的库存回补都会清空持久化上下文,
+            // 上一轮加载出来的实体到这一轮已经是游离态 —— 直接改它会写不进去,
+            // 而日志照样会写"已自动同意",于是出现"日志说同意了、状态却没变"的静默错单
+            MallAfterSale target = afterSaleRepository.findById(afterSale.getId()).orElse(null);
+            if (target == null) {
+                continue;
+            }
+            int from = target.getStatus();
+            if (target.getAfterSaleType() == MallAfterSale.TYPE_REFUND_ONLY) {
+                finish(target, MallAfterSale.STATUS_DONE, MallAfterSaleLog.OPERATOR_SYSTEM, null,
                         "商家超时未处理,系统自动同意退款");
             } else {
-                afterSale.setStatus(MallAfterSale.STATUS_WAIT_RETURN);
-                writeLog(afterSale.getId(), from, MallAfterSale.STATUS_WAIT_RETURN,
+                target.setStatus(MallAfterSale.STATUS_WAIT_RETURN);
+                writeLog(target.getId(), from, MallAfterSale.STATUS_WAIT_RETURN,
                         MallAfterSaleLog.OPERATOR_SYSTEM, null, "商家超时未处理,系统自动同意退货");
             }
         }
@@ -391,34 +398,38 @@ public class AfterSaleServiceImpl implements AfterSaleService {
      * @param toStatus 终态(4/8/9/10)
      */
     private void finish(MallAfterSale afterSale, int toStatus, int operatorType, Long operatorId, String remark) {
-        int from = afterSale.getStatus();
+        // 入口先取一次托管实例:调用方手里的 afterSale 可能已经是游离态 ——
+        // 回补库存走的是 @Modifying(clearAutomatically = true),它会清空持久化上下文。
+        // 最典型的是换货:exchange 里先回补原规格库存,再回到这里改状态;
+        // 对游离态实体 setStatus 不会被持久化,表现是"库存搬了、退款也建了,单据状态却停在待商家收货"
+        // (批量超时任务里同理:上一轮清空上下文后,下一轮的实体也失效了)。
+        MallAfterSale target = afterSaleRepository.findById(afterSale.getId()).orElse(afterSale);
+        int from = target.getStatus();
         boolean refundable = toStatus == MallAfterSale.STATUS_DONE || toStatus == MallAfterSale.STATUS_ARBITRATION_PASS;
 
         // **先把售后单自身的改动写完**,再做下面的库存/退款动作。
-        // 原因与订单取消那里相同:回补库存用的是 @Modifying(clearAutomatically = true),
-        // 它会 flush 之后清空持久化上下文 —— 清空之后 afterSale 就是游离对象,
-        // 再改它的字段不会被持久化(表现为"同意了但状态还是待处理")。
-        afterSale.setStatus(toStatus);
-        afterSale.setFinishTime(LocalDateTime.now());
+        // 原因与订单取消那里相同:下面的库存回补会 flush 并清空持久化上下文。
+        target.setStatus(toStatus);
+        target.setFinishTime(LocalDateTime.now());
 
         if (refundable) {
             // 退货退款/仅退款:创建退款记录并回补库存;换货场景的库存已在 exchange 里处理,这里只退款
-            if (afterSale.getAfterSaleType() != MallAfterSale.TYPE_EXCHANGE) {
-                createRefund(afterSale);
+            if (target.getAfterSaleType() != MallAfterSale.TYPE_EXCHANGE) {
+                createRefund(target);
             }
-            if (afterSale.getAfterSaleType() != MallAfterSale.TYPE_EXCHANGE
+            if (target.getAfterSaleType() != MallAfterSale.TYPE_EXCHANGE
                     || toStatus == MallAfterSale.STATUS_ARBITRATION_PASS) {
-                restoreStock(afterSale);
+                restoreStock(target);
             }
-            markItemAfterSaleDone(afterSale.getOrderItemId());
+            markItemAfterSaleDone(target.getOrderItemId());
         } else {
             // 关闭/仲裁驳回:不动资金与库存,但明细要回到"无售后"以便重新申请
-            resetItemAfterSaleStatus(afterSale.getOrderItemId());
+            resetItemAfterSaleStatus(target.getOrderItemId());
         }
-        writeLog(afterSale.getId(), from, toStatus, operatorType, operatorId, remark);
+        writeLog(target.getId(), from, toStatus, operatorType, operatorId, remark);
         // 注意:下面的方法内部都会重新 findById 拿托管实例,所以持久化上下文被清空也不受影响
-        restoreOrderStatus(afterSale.getOrderId());
-        log.info("售后单结案 afterSaleNo={} from={} to={}", afterSale.getAfterSaleNo(), from, toStatus);
+        restoreOrderStatus(target.getOrderId());
+        log.info("售后单结案 afterSaleNo={} from={} to={}", target.getAfterSaleNo(), from, toStatus);
     }
 
     /** 换货:回补原 SKU、扣减新 SKU,并记录重新发货的物流。 */
