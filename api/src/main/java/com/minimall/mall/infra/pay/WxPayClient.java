@@ -74,6 +74,24 @@ public class WxPayClient {
         return false;
     }
 
+    /**
+     * 发起退款。
+     *
+     * <p>与统一下单同理:真实微信退款是**异步**的,这里只负责提交申请并拿到退款单号,
+     * 最终结果由退款回调更新(见 {@code MallWxRefund} 的状态机)。
+     *
+     * @return 微信退款单号;申请提交失败时为空
+     */
+    public Optional<String> refund(String outTradeNo, String outRefundNo, BigDecimal amount) {
+        if (properties.wxMockEnabled()) {
+            log.info("微信退款 mock 模式:outTradeNo={} outRefundNo={} amount={}", outTradeNo, outRefundNo, amount);
+            return Optional.of("mock-refund-" + outRefundNo);
+        }
+        // TODO 真实接入:POST /v3/refund/domestic/refunds,使用商户私钥签名
+        log.warn("未配置真实微信退款渠道,退款申请失败 outRefundNo={}", outRefundNo);
+        return Optional.empty();
+    }
+
     /** 模拟拉起支付所需的参数(结构与 {@code wx.requestPayment} 一致)。 */
     private PrepayResult.PayParams mockPayParams(String prepayId) {
         return new PrepayResult.PayParams(
