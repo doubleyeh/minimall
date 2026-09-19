@@ -262,11 +262,18 @@ const menuVisible = ref(false)
 const menuLoading = ref(false)
 const menuPackageId = ref<Id | null>(null)
 const menuPackageName = ref('')
-const menuTreeData = ref<Array<{ key: Id; label: string; children?: unknown[] }>>([])
+/** 与 role 页面同理:children 必须是自引用的具体类型,unknown[] 与 TreeOption 不兼容 */
+interface MenuNode {
+  key: Id
+  label: string
+  children?: MenuNode[]
+}
+
+const menuTreeData = ref<MenuNode[]>([])
 const checkedKeys = ref<Id[]>([])
 const indeterminateKeys = ref<Id[]>([])
 
-function toTree(nodes: MenuTreeNode[]): Array<{ key: Id; label: string; children?: unknown[] }> {
+function toTree(nodes: MenuTreeNode[]): MenuNode[] {
   return nodes.map((node) => ({
     key: node.id,
     label: node.permCode ? `${node.menuName}(${node.permCode})` : node.menuName,

@@ -139,7 +139,9 @@ const pagination = reactive({
   pageSize: 10,
   itemCount: 0,
   showSizePicker: false,
-  prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 条`,
+  // Naive UI 的 RenderPrefix 参数里 itemCount 是可选的(未分页时为空),
+  // 直接写成 { itemCount: number } 会因参数类型不兼容而编译失败
+  prefix: (info: { itemCount?: number }) => `共 ${info.itemCount ?? 0} 条`,
 })
 
 function toDeptOptions(nodes: DeptTreeNode[]): TreeSelectOption[] {

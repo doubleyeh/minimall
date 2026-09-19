@@ -359,11 +359,23 @@ const grantSubmitting = ref(false)
 const grantRoleId = ref<Id | null>(null)
 const grantRoleName = ref('')
 const grantRoleIsDefault = ref(false)
-const grantTree = ref<Array<{ key: Id; label: string; children?: unknown[] }>>([])
+/**
+ * 授权树节点。
+ *
+ * 用自引用类型而不是 `children?: unknown[]`:后者与 Naive UI 的 TreeOption 不兼容
+ * (TreeOption 要求 children 是 TreeOption[]),会在 n-tree 的 :data 绑定处报类型错误。
+ */
+interface GrantNode {
+  key: Id
+  label: string
+  children?: GrantNode[]
+}
+
+const grantTree = ref<GrantNode[]>([])
 const checkedKeys = ref<Id[]>([])
 const indeterminateKeys = ref<Id[]>([])
 
-function toGrantTree(nodes: MenuTreeNode[]): Array<{ key: Id; label: string; children?: unknown[] }> {
+function toGrantTree(nodes: MenuTreeNode[]): GrantNode[] {
   return nodes.map((node) => ({
     key: node.id,
     label: node.permCode ? `${node.menuName}(${node.permCode})` : node.menuName,
