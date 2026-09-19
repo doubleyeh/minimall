@@ -42,10 +42,10 @@ public record GoodsSaveRequest(
 
         List<String> images,
 
-        @Valid
-        List<SpecSaveRequest> specs,
+        // @Valid 标在**类型参数**上而不是容器上:标在容器上(Hibernate Validator 会报 HV000271)
+        // 已废弃,而且语义不同 —— 标在类型参数上表示"逐个元素校验",这才是我们要的
+        List<@Valid SpecSaveRequest> specs,
 
         @NotEmpty(message = "至少需要一个 SKU")
-        @Valid
-        List<SkuSaveRequest> skus) {
+        List<@Valid SkuSaveRequest> skus) {
 }

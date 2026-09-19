@@ -24,9 +24,9 @@ public record FreightTemplateSaveRequest(
         @NotNull(message = "计费方式不能为空")
         Integer chargeType,
 
+        // @Valid 标在类型参数上(逐个元素校验)。标在容器上已废弃,见 GoodsSaveRequest 的同类说明
         @NotEmpty(message = "至少需要一条运费规则")
-        @Valid
-        List<Rule> rules) {
+        List<@Valid Rule> rules) {
 
     /**
      * 一条区域规则。
