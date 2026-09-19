@@ -1,6 +1,17 @@
 # 微信小商城 - 业务架构设计
 
-依赖 `architecture.md`(RBAC+多租户基础设施)与 `rbac_tenant_schema.sql`。本模块所有表继承租户过滤机制,建表脚本 `mall_schema.sql` 作为 `V2__mall_init.sql` 接在 `V1` 之后。
+依赖 `architecture.md`(RBAC+多租户基础设施)与 `rbac_tenant_schema.sql`。本模块所有表继承租户过滤机制,建表脚本 `mall_schema.sql` 已落地为 **`V4__mall_init.sql`**。
+
+> 关于版本号:设计稿原写"作为 V2 接在 V1 之后",但 `V2` 已被种子数据(`V2__seed_platform_data.sql`)占用,
+> 后续又新增了字典菜单的 `V3`。按 `architecture.md` 9.5"已发布脚本不可变",商城建表只能新开版本,
+> 所以实际版本是 **V4**。
+>
+> 相比设计稿有三处落地调整(不改业务语义,只是补齐基础设施硬约束),详见 `V4__mall_init.sql` 头部注释:
+> ①所有表统一带 `id/tenant_id/create_time/update_time/create_by/update_by`(租户级实体统一继承 `BaseTenantEntity`,缺列无法落库);
+> ②`mall_sku_spec_value` 补 `tenant_id`(否则它是租户隔离链上唯一的缺口);
+> ③单列索引改 `(tenant_id, xxx)` 复合索引(租户过滤条件会挂在每一个查询上)。
+> 另外 `mall_*` 表**不参与数据权限**、**不实现 `OwnedEntity`**:商城侧操作人是 `mall_customer`,
+> 身份记在各自的 `customer_id` 业务列里,不复用 `create_by` 的后台操作人语义。
 
 配套前端文档另出,本文档只覆盖商城端(小程序)+ 商家管理端(复用现有后台脚手架新增 `mall` 目录)的业务设计。
 
