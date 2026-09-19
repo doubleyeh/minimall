@@ -35,6 +35,8 @@
         -->
         <openfeign-querydsl.version>7.6</openfeign-querydsl.version>
         <sa-token.version>1.46.0</sa-token.version>
+        <!-- 覆盖率统计(0.8.12 起正式支持 Java 21 的字节码) -->
+        <jacoco.version>0.8.13</jacoco.version>
         <!-- 小程序客户端 JWT(jjwt 0.12.x) -->
         <jjwt.version>0.12.6</jjwt.version>
         <archunit.version>1.3.0</archunit.version>
@@ -214,9 +216,38 @@
               默认只跑纯单元测试与架构测试:依赖 DB/Redis 的隔离性测试打 @Tag("integration"),
               需要时用 `mvn test -Dexcluded.groups=` 全量跑(环境准备见架构文档 9.4)。
             -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
+            <!--
+              覆盖率统计(架构文档 9 的"测试"一栏补充)。
+                  挂到 test 阶段:跑完测试自动生成 target/site/jacoco/(HTML + jacoco.csv)。
+                  **不设覆盖率阈值**:阈值会逼着人写"只为了让数字达标"的空测试,
+                  而这个项目更需要的是"关键路径有真断言"(见 8.1 的用例清单)。
+                  用 `mvn test` 看报告,用 target/site/jacoco/jacoco.csv 做逐包对比。
+                -->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                    <executions>
+                        <execution>
+                            <id>prepare-agent</id>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <!-- 绑在 test 阶段:跑测试时顺手出报告,不需要额外执行一个 goal -->
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <excludedGroups>${excluded.groups}</excludedGroups>
                     <systemPropertyVariables>
