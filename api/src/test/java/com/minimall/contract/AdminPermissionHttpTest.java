@@ -79,6 +79,10 @@ class AdminPermissionHttpTest {
     private static final String UNPRIVILEGED_PASSWORD = "Unpriv@123456";
     /** 租户管理员首登会被强制改密(7.1.2),这里用它改密后的密码再登一次。 */
     private static final String TENANT_ADMIN_NEW_PASSWORD = "TenantAdmin@123456";
+    /** 平台超管用例账号的密码。该账号是直接改库造出来的,不存在首登改密。 */
+    private static final String PLATFORM_ADMIN_PASSWORD = "PlatAdmin@123456";
+    /** 种子数据里的平台租户编码。 */
+    private static final String PLATFORM_TENANT_CODE = "platform";
     /**
      * 授给"无权限角色"的菜单:种子数据里的系统管理目录与其下的用户管理页面。
      * 两者都是 {@code menu_type != 3},**不带任何权限码** —— 这正是我们要的
@@ -147,6 +151,7 @@ class AdminPermissionHttpTest {
     private String unprivilegedUsername;
     private String tenantAdminUsername;
     private String tenantAdminInitialPassword;
+    private String platformAdminUsername;
 
     @BeforeEach
     void setUpTenantAndUnprivilegedUser() {
@@ -175,6 +180,22 @@ class AdminPermissionHttpTest {
                     .orElseThrow();
             user.setMustChangePassword(0);
             userRepository.save(user);
+            return null;
+        });
+
+        // 平台超管账号。is_super 按 4.10 只能由种子数据/运维脚本设置,接口既不接受也不暴露它,
+        // 所以这里直接改库(与上面给无权限账号置 mustChangePassword=0 是同一个手法)。
+        // 它换来的是别的用例覆盖不到的一条通路:平台级端点(租户/套餐/菜单/字典)的正向执行。
+        platformAdminUsername = "platadmin" + suffix;
+        asSuperUser(() -> {
+            userService.create(new UserSaveRequest(platformAdminUsername, PLATFORM_ADMIN_PASSWORD,
+                    "平台用例超管", null, null, List.of(), 1));
+            SysUser superUser = userRepository
+                    .findByTenantIdAndUsername(PLATFORM_TENANT_ID, platformAdminUsername)
+                    .orElseThrow();
+            superUser.setIsSuper(1);
+            superUser.setMustChangePassword(0);
+            userRepository.save(superUser);
             return null;
         });
     }
@@ -310,6 +331,50 @@ class AdminPermissionHttpTest {
         return pattern.startsWith("/system/users")
                 || pattern.startsWith("/system/roles")
                 || pattern.startsWith("/system/depts");
+    }
+
+    @Test
+    @DisplayName("平台超管:全部管理端端点都不被误拦 —— 上一条的正面对照")
+    void platformSuperAdminIsNotBlockedOnAnyAdminEndpoint() throws Exception {
+        String token = loginPlatformAdmin();
+
+        // 先证明这确实是个超管:平台级接口能通(普通租户管理员在这里会被 403)。
+        // 少了这一步,"全部不返回 403"也可能只是"这个账号其实什么都能过"或者根本没登录上。
+        assertThat(get("/system/tenants?pageNo=1&pageSize=5", token).status())
+                .as("超管必须能访问平台级接口,否则下面的断言没有意义")
+                .isEqualTo(200);
+
+        List<String> blocked = new ArrayList<>();
+        for (AdminEndpoint endpoint : adminEndpoints()) {
+            if (PERMISSION_FREE_ENDPOINTS.containsKey(endpoint.pattern())) {
+                continue;
+            }
+            Response response = call(endpoint, token);
+            if (response.status() == 401 || response.status() == 403) {
+                blocked.add("%s %s -> HTTP %s (业务码 %s)"
+                        .formatted(endpoint.httpMethod(), endpoint.pattern(), response.status(), response.code()));
+            }
+        }
+
+        assertThat(blocked)
+                .as("""
+                        超管的权限码被 4.10 短路为"全部启用菜单",任何管理端端点都不该拒绝它。被拒只有两种可能:
+                        ①该端点声明的权限码在 sys_menu 里根本不存在(短路取的就是菜单的 perm_code 集合);
+                        ②该端点被过滤链或强制改密闸门拦在鉴权之前。
+                        这两种都是"只有超管能调出来"的问题 —— 普通租户账号调不到这一层。""")
+                .isEmpty();
+    }
+
+    /** 平台超管登录。它是直接改库造出来的账号,不需要走首登改密那一圈。 */
+    private String loginPlatformAdmin() throws Exception {
+        Response login = post("/auth/login",
+                "{\"tenantCode\":\"" + PLATFORM_TENANT_CODE + "\",\"username\":\"" + platformAdminUsername
+                        + "\",\"password\":\"" + PLATFORM_ADMIN_PASSWORD
+                        + "\",\"deviceId\":\"admin-perm-platform\"}", null);
+        assertThat(login.code()).as("平台超管登录应当成功:响应=%s", login.body()).isEqualTo("0");
+        String token = login.text("token");
+        assertThat(token).isNotBlank();
+        return token;
     }
 
     // ------------------------------------------------------------------ 端点枚举
