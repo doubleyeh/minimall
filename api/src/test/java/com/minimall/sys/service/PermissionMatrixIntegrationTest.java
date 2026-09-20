@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @Tag("integration")
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 class PermissionMatrixIntegrationTest {
 
     private static final long PLATFORM_TENANT_ID = 1L;

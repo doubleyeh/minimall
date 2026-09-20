@@ -22,7 +22,7 @@ import org.springframework.test.context.ActiveProfiles;
 @Tag("integration")
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 class SchemaValidationTest {
 
     @Test

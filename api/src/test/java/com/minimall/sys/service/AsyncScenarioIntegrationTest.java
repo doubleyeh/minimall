@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @Tag("integration")
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 @Import(AsyncScenarioIntegrationTest.TaskConfig.class)
 class AsyncScenarioIntegrationTest {
 

@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("integration")
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 @Import({TenantFilterService.class, TenantIsolationTest.ScopeStubConfig.class,
         JpaAuditingConfig.class, JpaTestSupport.class})
 class TenantIsolationTest {

@@ -45,7 +45,7 @@ import static org.mockito.Mockito.verify;
  */
 @Tag("integration")
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PackageMenuSyncIsolationTest {
 

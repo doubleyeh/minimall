@@ -53,7 +53,7 @@ import java.util.function.Supplier;
  */
 @Tag("integration")
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 abstract class MallClientServiceTestBase {
 
     /** 种子数据里的平台租户。 */

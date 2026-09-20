@@ -252,6 +252,16 @@
                     <excludedGroups>${excluded.groups}</excludedGroups>
                     <systemPropertyVariables>
                         <!--
+                          让测试跑在 test profile 上。
+                          不加这一项时 spring.profiles.active 取 application.yml 里的 dev,于是
+                          application-test.yml 从来没被加载过(它是死的),测试实际连的是
+                          application-dev.yml 的库与 Redis DB 0 —— 与正在开发的实例共用同一个 Redis,
+                          测试会往里面写刷新令牌、限流计数、单号,把开发中的登录态踢掉。
+                          放在 systemPropertyVariables 而不是 argLine:argLine 已被 JaCoCo 的
+                          prepare-agent 占用,再写一次会把它的 -javaagent 覆盖掉,覆盖率静默变空。
+                        -->
+                        <spring.profiles.active>test</spring.profiles.active>
+                        <!--
                           测试里会起多个 Spring 上下文(RANDOM_PORT 的 HTTP 用例、事务隔离用例各一个),
                           Hikari 默认每池 10 条连接,几个上下文就能把 MySQL 的 max_connections 吃满
                           (本机是 30),表现为 Flyway 报 "Too many connections"、上下文加载失败 ——

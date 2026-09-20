@@ -54,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @Tag("integration")
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 class TenantProvisioningIntegrationTest {
 
     private static final long PLATFORM_TENANT_ID = 1L;

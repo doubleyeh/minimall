@@ -16,6 +16,15 @@ sa-token:
   # 测试环境的会话短一些
   timeout: 1800
 
+minimall:
+  mall:
+    auth:
+      # 自动化里没有真实的小程序 appId/appSecret,必须开 mock 才能走通登录链路
+      # (code 被直接映射成模拟 openid,见 WxAuthClient)。
+      # 默认给 true 而不是像基础层那样默认 false:这个 profile 的用途就是自动化。
+      # 仍保留环境变量覆盖,CI 上要验真实 code2Session 时可以 WX_MOCK=false 关掉。
+      wx-mock: ${WX_MOCK:true}
+
 logging:
   level:
     org.hibernate.SQL: debug
