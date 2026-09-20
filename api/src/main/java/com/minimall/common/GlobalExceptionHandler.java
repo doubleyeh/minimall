@@ -7,6 +7,7 @@ import cn.dev33.satoken.exception.NotRoleException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -76,6 +77,27 @@ public class GlobalExceptionHandler {
     public ApiResponse<Void> handleDuplicateKey(DuplicateKeyException ex) {
         log.warn("唯一约束冲突:{}", ex.getMostSpecificCause().getMessage());
         return ApiResponse.fail(ErrorCode.DATA_CONFLICT.code(), "数据已存在,请检查唯一字段");
+    }
+
+    /**
+     * 数据完整性约束冲突(唯一键、外键、非空)。
+     *
+     * <p><b>为什么必须单独处理</b>:唯一键冲突按触发时机不同会抛出**两种**异常 ——
+     * 仓储方法执行时就撞上 → Spring 转成 {@link DuplicateKeyException};
+     * Hibernate 把插入推迟到事务提交时才 flush → 抛的是 {@link DataIntegrityViolationException},
+     * 而它正是 {@code DuplicateKeyException} 的**父类**。只处理子类就漏掉了后一种。
+     *
+     * <p>漏掉的表现:管理员填了一个已存在的手机号,收到的是"系统异常,请稍后重试"——
+     * 于是他会反复重试一个永远不会成功的请求,而日志里多一条 ERROR 堆栈。
+     * 它本该是 50002(数据已存在或存在引用关系),前端据此提示到具体字段。
+     *
+     * <p>这个洞是靠一条真实 HTTP 用例发现的:用同一个手机号建第二个用户。
+     * 单元/服务层用例发现不了 —— 那里的事务边界与真实请求不同,异常类型也就不一样。
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ApiResponse<Void> handleDataIntegrity(DataIntegrityViolationException ex) {
+        log.warn("数据完整性约束冲突:{}", ex.getMostSpecificCause().getMessage());
+        return ApiResponse.fail(ErrorCode.DATA_CONFLICT);
     }
 
     /**
