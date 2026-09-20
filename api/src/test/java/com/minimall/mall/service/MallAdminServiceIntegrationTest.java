@@ -117,6 +117,13 @@ class MallAdminServiceIntegrationTest {
             // 固定名字会让第二次运行直接撞唯一约束(setUp 就失败,报"同级下已存在同名分类")
             categoryName = "测试分类" + System.nanoTime() % 100000;
             categoryId = categoryService.create(new CategorySaveRequest(0L, categoryName, null, 0, 1));
+            // 会员等级与分类不同:MemberLevelService 没有删除方法,所以这个类一直没清理它,
+            // 而等级名曾只用 nanoTime % 10000(四位)做后缀 —— CI 库是长期共用的,累积到一定数量后
+            // 建新等级必然撞上唯一约束,表现为"某个用例偶尔报等级名称已存在"。
+            // 这里按名字前缀清掉残留(包含历史遗留),让用例对运行次数不敏感。
+            memberLevelRepository.findAll().stream()
+                    .filter(level -> level.getLevelName() != null && level.getLevelName().startsWith("用例等级"))
+                    .forEach(memberLevelRepository::delete);
             return null;
         });
         asClient();
@@ -147,6 +154,9 @@ class MallAdminServiceIntegrationTest {
                     .filter(coupon -> coupon.getCouponName().startsWith("用例券"))
                     .forEach(couponRepository::delete);
             customerRepository.findById(customerId).ifPresent(customerRepository::delete);
+            memberLevelRepository.findAll().stream()
+                    .filter(level -> level.getLevelName() != null && level.getLevelName().startsWith("用例等级"))
+                    .forEach(memberLevelRepository::delete);
             // 分类最后删,且要先删子分类:用例中途失败时子分类可能还挂着,
             // 直接删父分类会被"存在下级分类"拒绝,把失败用例的清理也变成报错
             categoryService.tree(null).stream()
@@ -358,7 +368,7 @@ class MallAdminServiceIntegrationTest {
     @DisplayName("会员等级:重名被拒,折扣率取值被校验")
     void memberLevelRules() {
         inTenant(() -> {
-            Long levelId = memberLevelService.create(new MemberLevelSaveRequest("用例等级" + System.nanoTime() % 10000,
+            Long levelId = memberLevelService.create(new MemberLevelSaveRequest("用例等级" + System.nanoTime(),
                     1, 100, new BigDecimal("0.95"), 1));
             assertThat(memberLevelService.list()).isNotEmpty();
             assertThatThrownBy(() -> memberLevelService.update(levelId, new MemberLevelSaveRequest("改名",
@@ -472,6 +482,9 @@ class MallAdminServiceIntegrationTest {
 
     @Autowired
     private com.minimall.mall.domain.repository.MallCustomerAddressRepository addressRepository;
+    /** 会员等级没有删除接口,清理只能走仓储(见 setUp 里关于等级名后缀的说明)。 */
+    @Autowired
+    private com.minimall.mall.domain.repository.MallMemberLevelRepository memberLevelRepository;
 
     private com.minimall.mall.domain.repository.MallCustomerAddressRepository addressRepository() {
         return addressRepository;
