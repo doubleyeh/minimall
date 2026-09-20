@@ -4,13 +4,15 @@
   "private": true,
   "description": "微信小程序商城 · 客户侧",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
     "tdesign-miniprogram": "^1.16.1"
   },
   "devDependencies": {
     "miniprogram-api-typings": "^5.2.3",
+    "miniprogram-automator": "^0.12.1",
     "typescript": "^5.7.2"
   }
 }

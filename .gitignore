@@ -27,6 +27,8 @@ dist/
 miniprogram_npm/
 # 开发者工具写入的本地私有配置(项目名、本地编译开关等)
 project.private.config.json
+# 冒烟脚本产出的截图,是验证证据不是产物
+smoke-*.png
 
 # —— 系统文件 ——
 .DS_Store

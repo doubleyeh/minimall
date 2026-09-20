@@ -2,14 +2,16 @@
   "appid": "touristappid",
   "projectname": "mini-mall-miniprogram",
   "compileType": "miniprogram",
-  "miniprogramRoot": "./",
+  "miniprogramRoot": "",
   "setting": {
     "urlCheck": false,
     "es6": true,
     "enhance": true,
     "postcss": true,
     "minified": false,
-    "useCompilerPlugins": ["typescript"],
+    "useCompilerPlugins": [
+      "typescript"
+    ],
     "ignoreDevUnusedFiles": false,
     "packNpmManually": false,
     "babelSetting": {
@@ -18,5 +20,14 @@
       "outputPath": ""
     }
   },
-  "condition": {}
+  "condition": {},
+  "libVersion": "3.17.3",
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "editorSetting": {
+    "tabIndent": "insertSpaces",
+    "tabSize": 2
+  }
 }
