@@ -19,10 +19,14 @@ target/
 hs_err_pid*.log
 replay_pid*.log
 
-# —— 前端(后续添加)—— 
+# —— 前端 ——
 node_modules/
 dist/
 .cache/
+# 小程序「构建 npm」的产物目录,由开发者工具生成
+miniprogram_npm/
+# 开发者工具写入的本地私有配置(项目名、本地编译开关等)
+project.private.config.json
 
 # —— 系统文件 ——
 .DS_Store

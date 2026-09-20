@@ -1,0 +1,49 @@
+<view class="page">
+  <view class="search" bindtap="onSearchTap">
+    <text class="search__icon">搜索</text>
+    <text class="search__placeholder">搜索商品</text>
+  </view>
+
+  <scroll-view class="cats" scroll-x enable-flex show-scrollbar="{{false}}">
+    <view
+      class="cats__item {{activeCategoryId === '' ? 'cats__item--active' : ''}}"
+      bindtap="onCategoryTap"
+      data-id=""
+    >全部</view>
+    <view
+      wx:for="{{tabs}}"
+      wx:key="id"
+      class="cats__item {{activeCategoryId === item.id ? 'cats__item--active' : ''}}"
+      bindtap="onCategoryTap"
+      data-id="{{item.id}}"
+    >{{item.label}}</view>
+  </scroll-view>
+
+  <view class="goods">
+    <view
+      wx:for="{{cards}}"
+      wx:key="id"
+      class="goods__card"
+      bindtap="onGoodsTap"
+      data-id="{{item.id}}"
+    >
+      <image class="goods__image" src="{{item.image}}" mode="aspectFill" lazy-load></image>
+      <view class="goods__body">
+        <view class="goods__name ellipsis-2">{{item.name}}</view>
+        <view wx:if="{{item.subtitle}}" class="goods__subtitle ellipsis-2">{{item.subtitle}}</view>
+        <view class="goods__foot row-between">
+          <view class="price">
+            <text class="price__symbol">¥</text>
+            <text class="price__value">{{item.priceText}}</text>
+            <text wx:if="{{item.priceSuffix}}" class="price__suffix">{{item.priceSuffix}}</text>
+          </view>
+          <text class="text-muted">已售 {{item.saleCountText}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="tip">加载中…</view>
+  <view wx:elif="{{cards.length === 0}}" class="tip">还没有商品</view>
+  <view wx:elif="{{finished}}" class="tip">没有更多了</view>
+</view>

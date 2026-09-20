@@ -1,0 +1,22 @@
+{
+  "appid": "touristappid",
+  "projectname": "mini-mall-miniprogram",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": false,
+    "useCompilerPlugins": ["typescript"],
+    "ignoreDevUnusedFiles": false,
+    "packNpmManually": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "condition": {}
+}
