@@ -701,6 +701,81 @@ class SysAdminServiceBranchIntegrationTest {
     }
 
     @Test
+    @DisplayName("不存在的用户:详情/修改/删除/停用/解锁/重置密码统一按资源不存在(7.3 越权防护)")
+    void userOperationsOnUnknownIdAreNotFound() {
+        long unknownId = 999999L;
+
+        assertThatThrownBy(() -> asTenantAdmin(() -> userService.detail(unknownId)))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode())
+                        .isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> asTenantAdminRun(() -> userService.update(unknownId,
+                new UserSaveRequest("whoever", null, "不存在", null, null, List.of(), 1))))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> asTenantAdminRun(() -> userService.delete(unknownId)))
+                .as("按 ID 的写操作都要先经过滤查询加载实体,加载不到就是统一的资源不存在;"
+                        + "用 bulk 语句直接改会绕过数据权限")
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> asTenantAdminRun(() -> userService.changeStatus(unknownId, 0)))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> asTenantAdminRun(() -> userService.unlock(unknownId)))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> asTenantAdmin(() -> userService.resetPassword(unknownId)))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("用户详情:没有部门的用户不报错,部门名为空(不能因为查不到部门名就失败)")
+    void userDetailWithoutDept() {
+        String username = "itnodept" + suffix();
+        Long userId = asTenantAdmin(() -> userService.create(new UserSaveRequest(
+                username, null, "无部门用户", null, null, List.of(), null)).userId());
+
+        UserView view = asTenantAdmin(() -> userService.detail(userId));
+        assertThat(view.username()).isEqualTo(username);
+        assertThat(view.deptId()).isNull();
+        assertThat(view.deptName()).isNull();
+        assertThat(view.status()).as("不传状态时默认启用").isEqualTo(1);
+        // 用 SQL 数而不是读实体的 roleIds:它是懒加载的 @ElementCollection,
+        // 而这里没有事务(仓储方法自己的事务已经结束),直接访问会抛 LazyInitializationException
+        assertThat(countRows("SELECT COUNT(*) FROM sys_user_role WHERE user_id = ?", userId))
+                .as("不挂角色也要能建出来(先建人再授权是常见顺序)")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("用户修改:字段传 null 表示不改,不能把已有的角色或状态清掉")
+    void userUpdateWithNullFieldsKeepsExistingValues() {
+        String username = "itnullupd" + suffix();
+        Long roleId = createRole("nullupd" + suffix(), 1, null);
+        Long userId = asTenantAdmin(() -> userService.create(new UserSaveRequest(
+                username, null, "原昵称", "13800000000", null, List.of(roleId), 0)).userId());
+
+        // 只改昵称:roleIds 与 status 都传 null
+        asTenantAdminRun(() -> userService.update(userId, new UserSaveRequest(
+                username, null, "新昵称", "13800000000", null, null, null)));
+
+        UserView view = asTenantAdmin(() -> userService.detail(userId));
+        assertThat(view.nickname()).isEqualTo("新昵称");
+        assertThat(countRows("SELECT COUNT(*) FROM sys_user_role WHERE user_id = ? AND role_id = ?", userId, roleId))
+                .as("传 null 表示不改角色;若当成空集合处理,用户的权限会被静默清空")
+                .isEqualTo(1);
+        assertThat(view.status())
+                .as("传 null 表示不改状态;若当成 0 处理,用户会被静默停用")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("用户列表:页码与页大小越界时被钳制,不抛异常(端上偶发传 0 不该 500)")
+    void userPageClampsPageArguments() {
+        PageResult<UserView> zeroPage = asTenantAdmin(() -> userService.page(null, null, null, 0, 0));
+        assertThat(zeroPage.total()).as("pageNo/pageSize 为 0 时按最小合法值处理").isPositive();
+
+        PageResult<UserView> hugePage = asTenantAdmin(() -> userService.page(null, null, null, 9999, 5));
+        assertThat(hugePage.list()).isEmpty();
+    }
+
+    @Test
     @DisplayName("用户新增:没有租户上下文时直接 UNAUTHORIZED(不去猜一个租户)")
     void userRequiresTenant() {
         // 注意用 create 而不是 page:page 只做查询,没有租户上下文时租户过滤器会绑哨兵值返回空集,

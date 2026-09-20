@@ -122,6 +122,12 @@ class AdminPermissionHttpTest {
             Matcher matcher = Pattern.compile("\"" + field + "\":\"([^\"]*)\"").matcher(body);
             return matcher.find() ? matcher.group(1) : null;
         }
+
+        /** 取数字字段(如 userId):text() 只匹配带引号的字符串,数字字段要用这个。 */
+        Long number(String field) {
+            Matcher matcher = Pattern.compile("\"" + field + "\":(\\d+)").matcher(body);
+            return matcher.find() ? Long.valueOf(matcher.group(1)) : null;
+        }
     }
 
     @LocalServerPort
@@ -377,6 +383,42 @@ class AdminPermissionHttpTest {
         return token;
     }
 
+    @Test
+    @DisplayName("删除用户的两道守卫:不能删自己、不能删掉租户最后一个管理员(只能在请求上下文里验证)")
+    void userDeleteGuardsNeedRequestContext() throws Exception {
+        // 这两道判断之前要先取"当前登录用户",走的是 StpUtil 的请求作用域入口。
+        // 服务层用例到不了这里 —— 它会先抛 SaTokenContextException(见 SysAdminServiceBranchIntegrationTest
+        // 里那条专门断言这个异常的用例),所以这两个守卫只能在真实请求链路上验证。
+
+        // ① 不能删自己
+        loginTenantAdmin();
+        Response login = postLogin(tenantAdminUsername, TENANT_ADMIN_NEW_PASSWORD);
+        String tenantToken = login.text("token");
+        Long selfId = login.number("userId");
+        assertThat(selfId).as("登录响应要带当前用户 id,前端也靠它").isNotNull();
+
+        Response selfDelete = delete("/system/users/" + selfId, tenantToken);
+        assertThat(selfDelete.code()).as("把自己删掉会立刻失去登录凭据,只能靠运维改库恢复").isNotEqualTo("0");
+        assertThat(selfDelete.body()).contains("不能删除当前登录用户");
+
+        Response stillThere = get("/system/users?pageNo=1&pageSize=50", tenantToken);
+        assertThat(stillThere.status()).as("守卫拦下之后自己也必须还能用").isEqualTo(200);
+
+        // ② 不能删掉该租户最后一个持有默认管理员角色的人 —— 删了该租户就失去管理入口。
+        //    这里用平台租户:种子数据里 admin(id=1)是唯一持有默认角色(role 1,is_default=1)的人。
+        //    **注意这条断言的代价**:若守卫失效,它会真的把种子管理员删掉,本轮后续用例都会连带失败。
+        //    这是有意的取舍 —— 那个守卫本来就是防止"租户失去管理入口"的最后一道防线,
+        //    它失效是必须立刻暴露的事故(而且每次运行开始都会重置库,下一轮会恢复)
+        String platformToken = loginPlatformAdmin();
+        Response lastAdminDelete = delete("/system/users/" + SEED_ADMIN_ID, platformToken);
+        assertThat(lastAdminDelete.code()).isNotEqualTo("0");
+        assertThat(lastAdminDelete.body()).contains("不能删除该租户最后一个管理员");
+
+        assertThat(userRepository.findById(SEED_ADMIN_ID))
+                .as("守卫必须真的没有删掉它,而不是删了之后再报错")
+                .isPresent();
+    }
+
     // ------------------------------------------------------------------ 端点枚举
 
     /**
@@ -455,6 +497,17 @@ class AdminPermissionHttpTest {
                 .uri(URI.create("http://127.0.0.1:" + port + path))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return new Response(response.statusCode(), response.body());
+    }
+
+    private Response delete(String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + path))
+                .DELETE();
         if (token != null) {
             builder.header("Authorization", "Bearer " + token);
         }
