@@ -39,6 +39,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -141,6 +142,23 @@ class SysAdminServiceBranchIntegrationTest {
         asTenantAdmin(() -> {
             action.run();
             return null;
+        });
+    }
+
+    /**
+     * 以指定账号作为"操作人"执行。
+     *
+     * <p>审计字段的来源是 {@code AuditContext} 里的 userId(经 {@code AuditorAware})，
+     * 所以要区分"谁创建的"与"谁改的"，必须能换一个操作人身份跑。
+     */
+    private <T> T asAuditor(long auditorUserId, Supplier<T> action) {
+        return TenantContext.callAsTenant(tenantId, false, () -> {
+            AuditContext.bind(new AuditContext(tenantId, auditorUserId, "127.0.0.1", "sys-branch-it"));
+            try {
+                return action.get();
+            } finally {
+                AuditContext.clear();
+            }
         });
     }
 
@@ -785,6 +803,51 @@ class SysAdminServiceBranchIntegrationTest {
                 .isInstanceOf(BusinessException.class)
                 .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode())
                         .isEqualTo(ErrorCode.UNAUTHORIZED));
+    }
+
+    @Test
+    @DisplayName("审计字段:新建填创建人,改动刷新修改人与时间,创建人始终不被改写(4.4)")
+    void auditFieldsFollowTheActor() {
+        // 用两个**真实账号**分别扮演创建人与修改人:create_by/update_by 若带外键,
+        // 用编造的 id 会直接插不进去(那样这条用例会以插库失败告终,而不是断言失败)。
+        //
+        // 修改人必须**带角色**:数据权限按当前操作人的角色算,没有角色的账号算不出可见范围,
+        // 会被按 denyAll 处理 —— 此时连"按 id 读一个本租户用户"都会被过滤成空,报资源不存在。
+        // (第一次写这条用例就踩到了:修改人没有角色,update 直接 404。)
+        String username = "itaudit" + suffix();
+        Long modifierId = asTenantAdmin(() -> userService.create(new UserSaveRequest(
+                "itauditmod" + suffix(), null, "修改人", null, null, List.of(defaultRoleId), 1)).userId());
+
+        Long userId = asAuditor(adminUserId, () -> userService.create(new UserSaveRequest(
+                username, null, "被审计用户", null, null, List.of(), 1))).userId();
+
+        SysUser created = asTenantAdmin(() -> userRepository.findById(userId).orElseThrow());
+        assertThat(created.getCreateBy()).as("创建人取自 AuditContext,不是 Sa-Token 会话").isEqualTo(adminUserId);
+        assertThat(created.getCreateTime()).isNotNull();
+        assertThat(created.getUpdateTime())
+                .as("update_time 是 not null 列,插入时就要有值")
+                .isNotNull();
+        assertThat(created.getUpdateBy()).as("插入时 Spring Data 也会填一次最后修改人").isEqualTo(adminUserId);
+
+        // 把 update_time 手工改到昨天。再改一次用户,它必须被刷新到现在 ——
+        // 否则审计时间线会停在过去,而且这件事不会报任何错
+        asTenantAdminRun(() -> jdbcTemplate.update("UPDATE sys_user SET update_time = ? WHERE id = ?",
+                LocalDateTime.now().minusDays(1), userId));
+
+        asAuditor(modifierId, () -> {
+            userService.update(userId, new UserSaveRequest(username, null, "被改过的昵称", null, null, null, null));
+            return null;
+        });
+
+        SysUser updated = asTenantAdmin(() -> userRepository.findById(userId).orElseThrow());
+        assertThat(updated.getNickname()).isEqualTo("被改过的昵称");
+        assertThat(updated.getUpdateBy()).as("修改人要跟着操作人变").isEqualTo(modifierId);
+        assertThat(updated.getUpdateTime())
+                .as("修改时间必须被刷新,否则审计轨迹显示不出来什么时候改的")
+                .isAfter(LocalDateTime.now().minusHours(1));
+        assertThat(updated.getCreateBy())
+                .as("create_by 是 updatable = false,任何改动都不能改写创建人")
+                .isEqualTo(adminUserId);
     }
 
     private void asPlatformAdminRun(Runnable action) {
