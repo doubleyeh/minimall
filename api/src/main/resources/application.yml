@@ -3,6 +3,17 @@ spring:
     name: mini-mall
   profiles:
     active: dev
+  # 项目不用 Spring Data Redis 的仓储抽象:缓存、令牌、限流、单号全部直接走 StringRedisTemplate
+  # (见 infra 下各服务),没有任何 @RedisHash 实体。
+  #
+  # 不关掉它时,Spring Data Redis 会去扫描**全部** Spring Data 仓储接口寻找自己的候选,
+  # 对每一个 JPA 仓储接口打一行 INFO「Could not safely identify store assignment for repository
+  # candidate interface ...」——本仓库 38 个仓储接口就是启动时 38 行噪音。
+  # 它是 INFO 不是 WARN,但危害一样:真正的告警被淹在里面,启动日志也看不出重点。
+  data:
+    redis:
+      repositories:
+        enabled: false
   jpa:
     # 显式配置,不依赖框架默认值:HTTP 路径依赖它保证整个请求周期是同一个 Hibernate Session,
     # 租户过滤器在入口 enable 一次才够用(架构文档 4.2)。

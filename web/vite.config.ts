@@ -43,10 +43,18 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
-      // 后端接口没有统一前缀(/auth/**、/system/**),所以按首段分别转发
+      // 后端接口没有统一前缀(/auth/**、/system/**、/mall/admin/**),所以按首段分别转发。
+      //
+      // /mall 不能漏。漏掉时的表现不是 404 而是更坏的情况:请求被 Vite 的 SPA 兜底
+      // 当成前端路由,返回 index.html 加 HTTP 200 —— axios 在网络层看不到任何错误,
+      // 前端只在解析响应时拿到 HTML,表现为"商城管理端的数据出不来"。
+      // 这类问题 typecheck 与 build 都发现不了,只有把应用真正跑起来才会暴露:
+      // 商城页面(分类/商品/订单/售后/优惠券/运费模板/会员等级/评价)全部走 /mall/admin/**,
+      // 而代理是在工程骨架阶段写的,那时还没有这些接口。
       proxy: {
         '/auth': { target: proxyTarget, changeOrigin: true },
         '/system': { target: proxyTarget, changeOrigin: true },
+        '/mall': { target: proxyTarget, changeOrigin: true },
       },
     },
     build: {
