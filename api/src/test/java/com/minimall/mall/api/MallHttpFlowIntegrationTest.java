@@ -2,11 +2,16 @@ package com.minimall.mall.api;
 
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.tenant.TenantContext;
+import com.minimall.mall.api.dto.CouponSaveRequest;
+import com.minimall.mall.domain.MallCoupon;
 import com.minimall.mall.domain.MallGoods;
 import com.minimall.mall.domain.MallSku;
 import com.minimall.mall.domain.repository.MallGoodsRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallSkuRepository;
+import com.minimall.mall.service.AfterSaleService;
+import com.minimall.mall.service.CouponService;
+import com.minimall.mall.service.OrderAdminService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +28,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,6 +69,13 @@ class MallHttpFlowIntegrationTest {
     private MallSkuRepository skuRepository;
     @Autowired
     private MallOrderRepository orderRepository;
+    /** 以下三个服务只用来**造夹具**:商家侧发货/审核、可领取的券。它们的 HTTP 通路另有用例覆盖。 */
+    @Autowired
+    private OrderAdminService orderAdminService;
+    @Autowired
+    private AfterSaleService afterSaleService;
+    @Autowired
+    private CouponService couponService;
 
     private String token;
     private Long goodsId;
@@ -241,6 +254,230 @@ class MallHttpFlowIntegrationTest {
         assertThat(get("/mall/api/orders/" + orderId, token).text("status")).isEqualTo("6");
     }
 
+    // ---------------------------------------------------------------- 客户端写接口
+
+    @Test
+    @DisplayName("地址:新增 → 改名 → 设默认(自动清掉其他默认)→ 删除")
+    void addressCrudCycle() {
+        login();
+        createAddress("e2e默认一号", "13900000021");
+        Long second = createAddress("e2e默认二号", "13900000022");
+
+        assertThat(get("/mall/api/addresses", token).body())
+                .contains("e2e默认一号").contains("e2e默认二号");
+
+        // 库上注释写明了"同一客户至多一条为 1,应用层保证":这条断言就是替它把关的地方。
+        // 两条都是默认时,下单用哪个地址取决于查询顺序 —— 用户会看到收货地址莫名其妙地变
+        assertThat(put("/mall/api/addresses/" + second + "/default", null, token).status()).isEqualTo(200);
+        String list = get("/mall/api/addresses", token).body();
+        assertThat(countOf(list, "\"isDefault\":1")).as("默认地址只能有一条").isEqualTo(1);
+        assertThat(put("/mall/api/addresses/" + second, addressBody("e2e默认二号改", "13900000022"), token).status())
+                .isEqualTo(200);
+        assertThat(get("/mall/api/addresses", token).body()).contains("e2e默认二号改");
+
+        assertThat(delete("/mall/api/addresses/" + second, null, token).status()).isEqualTo(200);
+        assertThat(get("/mall/api/addresses", token).body()).doesNotContain("e2e默认二号改");
+    }
+
+    @Test
+    @DisplayName("购物车:改数量 → 勾选 → 删除条目 → 清空")
+    void cartUpdateRemoveAndClear() {
+        login();
+        addToCart(skuId, 2);
+        Long cartId = firstCartId();
+
+        assertThat(put("/mall/api/cart/" + cartId, "{\"quantity\":3,\"selected\":1}", token).status()).isEqualTo(200);
+        String afterUpdate = get("/mall/api/cart", token).body();
+        assertThat(afterUpdate).contains("\"quantity\":3");
+        assertThat(afterUpdate).as("勾选状态是存在服务端的(换设备仍保留)").contains("\"selected\":1");
+
+        // 取消勾选:下单只取已勾选条目,所以这个字段错了会表现成"下单少买了东西"
+        assertThat(put("/mall/api/cart/" + cartId, "{\"quantity\":3,\"selected\":0}", token).status()).isEqualTo(200);
+        assertThat(get("/mall/api/cart", token).body()).contains("\"selected\":0");
+
+        assertThat(delete("/mall/api/cart", "[" + cartId + "]", token).status()).isEqualTo(200);
+        assertThat(get("/mall/api/cart", token).body()).doesNotContain("端到端测试商品");
+
+        // 清空走独立的接口,不要自己拼"全部 id"的列表(本地列表可能已经过期)
+        addToCart(skuId, 1);
+        assertThat(delete("/mall/api/cart/all", null, token).status()).isEqualTo(200);
+        assertThat(get("/mall/api/cart", token).body()).doesNotContain("端到端测试商品");
+    }
+
+    @Test
+    @DisplayName("订单:待付款可取消;已发货可确认收货")
+    void orderCancelAndReceive() {
+        login();
+        Long addressId = createAddress("e2e订单", "13900000023");
+
+        // ① 待付款 → 取消
+        long unpaidOrderId = createOrderOnly(addressId, 1);
+        Response cancel = post("/mall/api/orders/" + unpaidOrderId + "/cancel", null, token);
+        assertThat(cancel.status()).isEqualTo(200);
+        assertThat(cancel.code()).as("待付款订单应当可取消:%s", cancel.body()).isZero();
+        assertThat(get("/mall/api/orders/" + unpaidOrderId, token).text("status"))
+                .as("取消后状态要真的变了")
+                .isNotEqualTo("1");
+
+        // ② 已支付 → 商家发货 → 确认收货
+        long[] paid = createPaidOrder(addressId, 1);
+        long orderId = paid[0];
+        inTenant(() -> {
+            // 发货这条通路由管理端用例覆盖,这里只把它当夹具
+            orderAdminService.ship(orderId, "顺丰速运", "SF" + System.nanoTime());
+            return null;
+        });
+        assertThat(get("/mall/api/orders/" + orderId, token).text("status")).isEqualTo("3");
+
+        Response receive = post("/mall/api/orders/" + orderId + "/receive", null, token);
+        assertThat(receive.status()).isEqualTo(200);
+        assertThat(receive.code()).as("已发货订单应当可确认收货:%s", receive.body()).isZero();
+        assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
+                .as("确认收货后进入已完成").isEqualTo("4");
+    }
+
+    @Test
+    @DisplayName("领券:同一张券每人限领一次,超过限领要拒绝")
+    void couponClaimIsLimitedPerCustomer() {
+        String couponName = "e2e券" + System.nanoTime() % 100000;
+        Long couponId = inTenant(() -> couponService.create(new CouponSaveRequest(couponName,
+                MallCoupon.TYPE_FULL_REDUCTION, new BigDecimal("5.00"), null, new BigDecimal("0"),
+                100, 1, LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(30), 1)));
+
+        login();
+        Response first = post("/mall/api/coupons/" + couponId + "/claim", null, token);
+        assertThat(first.status()).isEqualTo(200);
+        assertThat(first.code()).as("首次领取应当成功:%s", first.body()).isZero();
+        assertThat(get("/mall/api/coupons/mine", token).body())
+                .as("领到的券要能在我的券里看到").contains(couponName);
+
+        Response second = post("/mall/api/coupons/" + couponId + "/claim", null, token);
+        assertThat(second.code())
+                .as("每人限领 1 张,第二次必须被拒(否则可以无限领券)")
+                .isNotZero();
+    }
+
+    @Test
+    @DisplayName("售后:被拒后可撤销、可申请客服介入;退货退款提交退货物流")
+    void afterSaleCancelLogisticsAndArbitration() {
+        login();
+        Long addressId = createAddress("e2e售后", "13900000024");
+
+        // ① 仅退款 → 商家拒绝 → 买家撤销
+        long[] first = createPaidOrder(addressId, 1);
+        Long firstAfterSale = applyAfterSale(first[1], 1);
+        inTenant(() -> {
+            afterSaleService.reject(firstAfterSale, "不符合仅退款条件");
+            return null;
+        });
+        Response cancel = post("/mall/api/after-sales/" + firstAfterSale + "/cancel", null, token);
+        assertThat(cancel.status()).isEqualTo(200);
+        assertThat(cancel.code()).as("被拒的售后可以撤销:%s", cancel.body()).isZero();
+
+        // ② 退货退款 → 商家同意 → 买家提交退货物流
+        long[] second = createPaidOrder(addressId, 1);
+        Long secondAfterSale = applyAfterSale(second[1], 2);
+        inTenant(() -> {
+            afterSaleService.approve(secondAfterSale, new BigDecimal("60.00"));
+            return null;
+        });
+        Response logistics = post("/mall/api/after-sales/" + secondAfterSale + "/return-logistics",
+                "{\"company\":\"顺丰速运\",\"no\":\"SF" + System.nanoTime() + "\"}", token);
+        assertThat(logistics.status()).isEqualTo(200);
+        assertThat(logistics.code()).as("已同意退货时要能提交退货物流:%s", logistics.body()).isZero();
+        assertThat(get("/mall/api/after-sales/" + secondAfterSale, token).body())
+                .as("提交后进入待商家收货").contains("待商家收货");
+
+        // ③ 仅退款 → 商家拒绝 → 买家申请客服介入
+        long[] third = createPaidOrder(addressId, 1);
+        Long thirdAfterSale = applyAfterSale(third[1], 1);
+        inTenant(() -> {
+            afterSaleService.reject(thirdAfterSale, "拒绝理由");
+            return null;
+        });
+        Response arbitration = post("/mall/api/after-sales/" + thirdAfterSale + "/arbitration", null, token);
+        assertThat(arbitration.status()).isEqualTo(200);
+        assertThat(arbitration.code()).as("被拒后可以申请客服介入:%s", arbitration.body()).isZero();
+        assertThat(get("/mall/api/after-sales/" + thirdAfterSale, token).body()).contains("客服介入中");
+    }
+
+    // ---------------------------------------------------------------- 夹具与工具
+
+    private Long createAddress(String receiverName, String phone) {
+        Response created = post("/mall/api/addresses", addressBody(receiverName, phone), token);
+        assertThat(created.status()).as("建地址失败:%s", created.body()).isEqualTo(200);
+        return Long.valueOf(created.text("data"));
+    }
+
+    private String addressBody(String receiverName, String phone) {
+        return "{\"receiverName\":\"" + receiverName + "\",\"receiverPhone\":\"" + phone + "\","
+                + "\"province\":\"广东省\",\"city\":\"深圳市\",\"district\":\"南山区\","
+                + "\"detailAddress\":\"测试路 9 号\"}";
+    }
+
+    private void addToCart(Long sku, int quantity) {
+        assertThat(post("/mall/api/cart", "{\"skuId\":" + sku + ",\"quantity\":" + quantity + "}", token).status())
+                .isEqualTo(200);
+    }
+
+    /** 购物车条目的主键:列表里第一个 id。 */
+    private Long firstCartId() {
+        Matcher matcher = Pattern.compile("\"id\":(\\d+)").matcher(get("/mall/api/cart", token).body());
+        assertThat(matcher.find()).as("购物车列表里应当能取到条目 id").isTrue();
+        return Long.valueOf(matcher.group(1));
+    }
+
+    /** 只下单不支付,返回订单 id(待付款状态)。 */
+    private long createOrderOnly(Long addressId, int quantity) {
+        Response order = post("/mall/api/orders",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":" + quantity + "}],\"addressId\":" + addressId + "}",
+                token);
+        assertThat(order.status()).as("下单失败:%s", order.body()).isEqualTo(200);
+        return Long.parseLong(order.text("orderId"));
+    }
+
+    /** 下单并走完支付回调,返回 [订单 id, 订单明细 id](已支付 = 待发货)。 */
+    private long[] createPaidOrder(Long addressId, int quantity) {
+        Response order = post("/mall/api/orders",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":" + quantity + "}],\"addressId\":" + addressId + "}",
+                token);
+        assertThat(order.status()).as("下单失败:%s", order.body()).isEqualTo(200);
+        long orderId = Long.parseLong(order.text("orderId"));
+        String orderNo = order.text("orderNo");
+        Response callback = post("/pay/callback/wx", "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-"
+                + System.nanoTime() + "\",\"amount\":" + (60 * quantity) + ".00,\"success\":true,\"rawBody\":\"{}\"}", null);
+        assertThat(callback.status()).as("支付回调失败:%s", callback.body()).isEqualTo(200);
+        assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
+                .as("支付回调后应当进入待发货").isEqualTo("2");
+
+        Matcher matcher = Pattern.compile("\"items\":\\[\\{\"id\":(\\d+)")
+                .matcher(get("/mall/api/orders/" + orderId, token).body());
+        assertThat(matcher.find()).as("订单详情里应当能取到明细 id").isTrue();
+        return new long[]{orderId, Long.parseLong(matcher.group(1))};
+    }
+
+    private Long applyAfterSale(long orderItemId, int afterSaleType) {
+        Response apply = post("/mall/api/after-sales",
+                "{\"orderItemId\":" + orderItemId + ",\"afterSaleType\":" + afterSaleType
+                        + ",\"applyReason\":\"端到端用例\",\"refundAmount\":60.00}", token);
+        assertThat(apply.status()).as("申请售后失败:%s", apply.body()).isEqualTo(200);
+        assertThat(apply.code()).isZero();
+        return Long.valueOf(apply.text("data"));
+    }
+
+    private int countOf(String text, String needle) {
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int index = text.indexOf(needle, from);
+            if (index < 0) {
+                return count;
+            }
+            count++;
+            from = index + needle.length();
+        }
+    }
+
     // ---------------------------------------------------------------- HTTP 辅助
 
     private void login() {
@@ -267,6 +504,20 @@ class MallHttpFlowIntegrationTest {
         HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri(path))
                 .header("Content-Type", "application/json");
         builder.PUT(body == null ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        return send(builder, bearer);
+    }
+
+    /**
+     * 带请求体的 DELETE:删除购物车条目就是用它传 id 列表。
+     *
+     * <p>JDK 的 {@code HttpRequest.Builder.DELETE()} 不接受请求体(它只有无参重载),
+     * 要带体必须走 {@code method("DELETE", publisher)} —— DELETE 带体虽然不常见,但本项目就是这么设计的。
+     */
+    private Response delete(String path, String body, String bearer) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder().uri(uri(path))
+                .header("Content-Type", "application/json");
+        builder.method("DELETE", body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
         return send(builder, bearer);
     }
