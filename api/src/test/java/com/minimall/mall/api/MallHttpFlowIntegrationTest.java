@@ -2,6 +2,10 @@ package com.minimall.mall.api;
 
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.tenant.TenantContext;
+import com.minimall.sys.api.dto.UserSaveRequest;
+import com.minimall.sys.domain.SysUser;
+import com.minimall.sys.domain.repository.SysUserRepository;
+import com.minimall.sys.service.UserService;
 import com.minimall.mall.api.dto.CouponSaveRequest;
 import com.minimall.mall.domain.MallCoupon;
 import com.minimall.mall.domain.MallGoods;
@@ -29,6 +33,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -57,6 +62,7 @@ class MallHttpFlowIntegrationTest {
 
     private static final long TENANT_ID = 1L;
     private static final String TENANT_CODE = "platform";
+    private static final String ADMIN_PASSWORD = "E2eAdmin@123456";
 
     private final HttpClient http = HttpClient.newHttpClient();
 
@@ -80,9 +86,23 @@ class MallHttpFlowIntegrationTest {
     private String token;
     private Long goodsId;
     private Long skuId;
+    /** 平台超管令牌:/mall/admin/** 与 /system/** 用它(权限码由 4.10 短路;这条链路在权限矩阵用例里验证过)。 */
+    private String adminToken;
+    private String adminUsername;
+
+    @Autowired
+    private SysUserRepository sysUserRepository;
+    @Autowired
+    private UserService sysUserService;
+    @Autowired
+    private org.springframework.data.redis.core.StringRedisTemplate redis;
 
     @BeforeEach
     void setUp() {
+        // 登录按 IP 限流(10 次/分钟):本类每个用例要登录两次(客户 + 超管),
+        // 不清计数器的话跑到后面会莫名其妙拿到 429
+        redis.delete(redis.keys("*127.0.0.1*"));
+
         inTenant(() -> {
             MallGoods goods = new MallGoods();
             goods.setCategoryId(0L);
@@ -107,6 +127,19 @@ class MallHttpFlowIntegrationTest {
             skuId = skuRepository.save(sku).getId();
             return null;
         });
+
+        // 造一个平台超管账号:商家侧接口要它。is_super 只能靠改库设置(4.10:接口既不接受也不暴露)
+        adminUsername = "e2eadmin" + System.nanoTime();
+        inTenant(() -> {
+            sysUserService.create(new UserSaveRequest(adminUsername, ADMIN_PASSWORD, "端到端超管",
+                    null, null, List.of(), 1));
+            SysUser superUser = sysUserRepository.findByTenantIdAndUsername(TENANT_ID, adminUsername).orElseThrow();
+            superUser.setIsSuper(1);
+            superUser.setMustChangePassword(0);
+            sysUserRepository.save(superUser);
+            return null;
+        });
+        adminToken = loginAdmin();
     }
 
     @AfterEach
@@ -141,6 +174,14 @@ class MallHttpFlowIntegrationTest {
 
         // 伪造令牌同样被拒(签名校验不通过)
         assertThat(get("/mall/api/profile", "fake.token.value").status()).isEqualTo(401);
+
+        // 评价列表必须游客可读(商品页要展示评价),但**发表评价不能**:
+        // 白名单里放的是 /mall/api/reviews/goods/**,不是 /mall/api/reviews/** ——
+        // 多一个斜杠就会把"提交评价"也开放出去。这条断言就是防止那次误改
+        assertThat(get("/mall/api/reviews/goods/" + goodsId, null).status()).isEqualTo(200);
+        assertThat(post("/mall/api/reviews", "{\"orderItemId\":1,\"rating\":5}", null).status())
+                .as("发表评价需要登录:下单过才能评价")
+                .isEqualTo(401);
     }
 
     @Test
@@ -252,6 +293,114 @@ class MallHttpFlowIntegrationTest {
         assertThat(list.body()).contains("待商家处理");
         // 订单进入"售后中"(状态联动,3.9)
         assertThat(get("/mall/api/orders/" + orderId, token).text("status")).isEqualTo("6");
+    }
+
+    // ---------------------------------------------------------------- 商家侧写接口
+
+    @Test
+    @DisplayName("商家订单:待发货可发货,待付款可商家取消")
+    void merchantOrderShipAndCancel() {
+        login();
+        Long addressId = createAddress("e2e商家订单", "13900000031");
+
+        // ① 已支付(待发货)→ 发货 → 买家侧看到"待收货"
+        long[] paid = createPaidOrder(addressId, 1);
+        Response ship = post("/mall/admin/orders/" + paid[0] + "/ship",
+                "{\"logisticsCompany\":\"顺丰速运\",\"logisticsNo\":\"SF" + System.nanoTime() + "\"}", adminToken);
+        assertThat(ship.status()).as("发货失败:%s", ship.body()).isEqualTo(200);
+        assertThat(ship.code()).isZero();
+        assertThat(get("/mall/api/orders/" + paid[0], token).text("status"))
+                .as("发货后买家侧要变成待收货").isEqualTo("3");
+
+        // ② 待付款的订单不能由商家取消:该状态归买家自己取消或超时任务处理。
+        //    这条守卫写错会让商家替买家把还没付钱的订单关掉
+        long unpaid = createOrderOnly(addressId, 1);
+        Response cancelUnpaid = post("/mall/admin/orders/" + unpaid + "/cancel", "{\"reason\":\"缺货\"}", adminToken);
+        assertThat(cancelUnpaid.code())
+                .as("只有待发货的订单可以由商家取消,响应=%s", cancelUnpaid.body())
+                .isNotZero();
+
+        // ③ 已支付(待发货)可以由商家取消,且已实扣的库存要放回去
+        long[] second = createPaidOrder(addressId, 1);
+        Response cancelPaid = post("/mall/admin/orders/" + second[0] + "/cancel", "{\"reason\":\"缺货\"}", adminToken);
+        assertThat(cancelPaid.status()).as("商家取消失败:%s", cancelPaid.body()).isEqualTo(200);
+        assertThat(cancelPaid.code()).isZero();
+        assertThat(get("/mall/api/orders/" + second[0], token).text("status"))
+                .as("取消后不再是待发货").isNotEqualTo("2");
+    }
+
+    @Test
+    @DisplayName("商家售后:同意 / 拒绝 / 确认收货 / 拒绝收货 / 仲裁五个动作")
+    void merchantAfterSaleActions() {
+        login();
+        Long addressId = createAddress("e2e商家售后", "13900000032");
+
+        // ① 仅退款 → 商家拒绝 → 买家申请客服介入 → 商家仲裁通过
+        long[] first = createPaidOrder(addressId, 1);
+        Long as1 = applyAfterSale(first[1], 1);
+        assertThat(post("/mall/admin/after-sales/" + as1 + "/reject", "{\"reason\":\"不符合仅退款条件\"}", adminToken)
+                .code()).as("拒绝售后").isZero();
+        assertThat(post("/mall/api/after-sales/" + as1 + "/arbitration", null, token).code()).isZero();
+        assertThat(post("/mall/admin/after-sales/" + as1 + "/arbitrate",
+                "{\"pass\":true,\"remark\":\"支持买家诉求\"}", adminToken).code()).as("仲裁").isZero();
+
+        // ② 退货退款 → 商家同意 → 买家寄回 → 商家确认收货
+        long[] second = createPaidOrder(addressId, 1);
+        Long as2 = applyAfterSale(second[1], 2);
+        assertThat(post("/mall/admin/after-sales/" + as2 + "/approve", "{\"refundAmount\":60.00}", adminToken)
+                .code()).as("同意售后").isZero();
+        assertThat(post("/mall/api/after-sales/" + as2 + "/return-logistics",
+                "{\"company\":\"顺丰速运\",\"no\":\"SF-A\"}", token).code()).isZero();
+        Response confirm = post("/mall/admin/after-sales/" + as2 + "/confirm-receive",
+                "{\"logisticsCompany\":\"顺丰速运\",\"logisticsNo\":\"SF-A\"}", adminToken);
+        assertThat(confirm.status()).as("确认收货失败:%s", confirm.body()).isEqualTo(200);
+        assertThat(confirm.code()).as("确认收货").isZero();
+        assertThat(get("/mall/api/after-sales/" + as2, token).body()).contains("售后完成");
+
+        // ③ 退货退款 → 同意 → 寄回 → 商家拒绝收货(买家据此可申请客服介入)
+        long[] third = createPaidOrder(addressId, 1);
+        Long as3 = applyAfterSale(third[1], 2);
+        assertThat(post("/mall/admin/after-sales/" + as3 + "/approve", "{\"refundAmount\":60.00}", adminToken)
+                .code()).isZero();
+        assertThat(post("/mall/api/after-sales/" + as3 + "/return-logistics",
+                "{\"company\":\"顺丰速运\",\"no\":\"SF-B\"}", token).code()).isZero();
+        assertThat(post("/mall/admin/after-sales/" + as3 + "/reject-receive",
+                "{\"reason\":\"商品有损坏\"}", adminToken).code()).as("拒绝收货").isZero();
+    }
+
+    @Test
+    @DisplayName("评价:买家评价后商家可回复,隐藏后不在展示列表里")
+    void reviewReplyAndHide() {
+        login();
+        Long addressId = createAddress("e2e评价", "13900000033");
+
+        // 评价要求订单已完成(3.8):支付 → 发货 → 确认收货
+        long[] paid = createPaidOrder(addressId, 1);
+        inTenant(() -> {
+            orderAdminService.ship(paid[0], "顺丰速运", "SF" + System.nanoTime());
+            return null;
+        });
+        assertThat(post("/mall/api/orders/" + paid[0] + "/receive", null, token).code()).isZero();
+
+        String comment = "端到端好评" + System.nanoTime() % 100000;
+        Response created = post("/mall/api/reviews",
+                "{\"orderItemId\":" + paid[1] + ",\"rating\":5,\"content\":\"" + comment + "\",\"anonymous\":false}",
+                token);
+        assertThat(created.status()).as("提交评价失败:%s", created.body()).isEqualTo(200);
+        Long reviewId = Long.valueOf(created.text("data"));
+
+        // 商品评价列表是公开接口(游客也能看)
+        assertThat(get("/mall/api/reviews/goods/" + goodsId, null).body()).contains(comment);
+
+        assertThat(put("/mall/admin/reviews/" + reviewId + "/reply", "{\"content\":\"感谢支持\"}", adminToken).code())
+                .as("商家回复").isZero();
+        assertThat(get("/mall/api/reviews/goods/" + goodsId, null).body())
+                .as("回复要能展示给买家").contains("感谢支持");
+
+        assertThat(put("/mall/admin/reviews/" + reviewId + "/status?status=0", null, adminToken).code())
+                .as("隐藏评价").isZero();
+        assertThat(get("/mall/api/reviews/goods/" + goodsId, null).body())
+                .as("隐藏后不该再出现在展示列表里").doesNotContain(comment);
     }
 
     // ---------------------------------------------------------------- 客户端写接口
@@ -490,6 +639,17 @@ class MallHttpFlowIntegrationTest {
 
     private Response get(String path, String bearer) {
         return send(HttpRequest.newBuilder().uri(uri(path)).GET(), bearer);
+    }
+
+    /** 平台超管登录:商家侧接口(/mall/admin/**)用它的令牌,权限码被 4.10 短路。 */
+    private String loginAdmin() {
+        Response login = post("/auth/login", "{\"tenantCode\":\"" + TENANT_CODE + "\",\"username\":\""
+                + adminUsername + "\",\"password\":\"" + ADMIN_PASSWORD + "\",\"deviceId\":\"e2e-admin\"}", null);
+        assertThat(login.status()).as("超管登录失败:%s", login.body()).isEqualTo(200);
+        assertThat(login.code()).as("超管登录失败:%s", login.body()).isZero();
+        String issued = login.text("token");
+        assertThat(issued).isNotBlank();
+        return issued;
     }
 
     private Response post(String path, String body, String bearer) {

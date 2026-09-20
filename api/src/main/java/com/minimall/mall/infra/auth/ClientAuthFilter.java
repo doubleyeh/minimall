@@ -68,7 +68,12 @@ public class ClientAuthFilter extends OncePerRequestFilter {
             "/mall/api/goods/**",
             // 领券列表:与商品浏览同理,先看到优惠再登录,转化更好。
             // 注意只放行"可领取列表",/mine(我的券)与 /claim(领取)仍需要令牌
-            "/mall/api/coupons/claimable"
+            "/mall/api/coupons/claimable",
+            // 商品评价列表:与商品浏览同理 —— 一个"没有评价"的商品页会让人怀疑没人买过。
+            // 这里只放行**按商品查评价**这一条(内容只有脱敏昵称、评分与文字)。
+            // 不能写成 /mall/api/reviews/**:那会把"发表评价"(POST /mall/api/reviews)也放给游客,
+            // 而下单才能评价,允许游客提交只会得到一串无主评论
+            "/mall/api/reviews/goods/**"
     };
 
     private static final String AUTH_HEADER = "Authorization";
