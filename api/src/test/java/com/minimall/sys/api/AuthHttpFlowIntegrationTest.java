@@ -8,6 +8,7 @@ import com.minimall.sys.api.dto.UserSaveRequest;
 import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.infra.audit.AuditContext;
+import com.minimall.infra.security.LoginProperties;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.RoleService;
 import com.minimall.sys.service.TenantService;
@@ -29,6 +30,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -94,6 +96,9 @@ class AuthHttpFlowIntegrationTest {
     private RoleService roleService;
     @Autowired
     private UserService userService;
+    /** 锁定阈值与锁定时长不写死在用例里:它们是可配的,写死会让改配置后用例失去意义。 */
+    @Autowired
+    private LoginProperties loginProperties;
 
     @BeforeEach
     void prepareSeedState() {
@@ -281,6 +286,199 @@ class AuthHttpFlowIntegrationTest {
         assertThat(refresh.status()).as("被禁用用户的刷新请求必须 401,响应体=%s", refresh.body()).isEqualTo(401);
     }
 
+    // ================================================================ 凭据状态流转
+
+    /**
+     * 失败累加与锁定。
+     *
+     * <p>这条用例同时是 {@code AuthServiceImpl} 那个 {@code noRollbackFor = BusinessException} 的回归测试:
+     * 登录失败抛业务异常,如果它触发回滚,失败计数与锁定时间会被一起回滚掉,
+     * 表现为"错 5 次也不锁号"——安全机制静默失效,不报任何错。
+     */
+    @Test
+    @DisplayName("失败计数与锁定:达阈值即锁定,锁定期内密码正确也拒绝,解锁后计数归零")
+    void loginFailureCountingAndLockout() throws Exception {
+        int maxFail = loginProperties.maxFailCount();
+
+        // 前 maxFail-1 次:只累计,不锁定
+        for (int i = 1; i < maxFail; i++) {
+            Response failed = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, "wrong-" + i), null);
+            assertThat(failed.code()).isEqualTo("40001");
+        }
+        assertThat(seedUser().getLoginFailCount())
+                .as("失败次数必须真的落库:被业务异常回滚掉就会变成\"错多少次都不锁\"")
+                .isEqualTo(maxFail - 1);
+        assertThat(seedUser().getLockTime()).isNull();
+
+        // 第 maxFail 次:达到阈值 → 写锁定时间,并把计数归零重新计
+        assertThat(post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, "wrong-final"), null).code())
+                .isEqualTo("40001");
+        assertThat(seedUser().getLockTime()).as("达到阈值必须写锁定时间").isNotNull();
+        assertThat(seedUser().getLoginFailCount())
+                .as("计数归零重新计:否则解锁后再错一次就被立刻锁死")
+                .isZero();
+
+        // 锁定期内**即使密码正确**也拒绝,且提示是"已锁定"而不是"密码错误"
+        // (锁定期内按密码对错给不同提示,等于变相泄露密码是否猜对)
+        Response correctButLocked = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null);
+        assertThat(correctButLocked.code()).as("锁定期内不能已经比对密码就放行").isEqualTo("40002");
+        assertThat(correctButLocked.body()).contains("账号已锁定");
+
+        // 锁定期过后可以登录,成功时清掉失败计数与锁定时间
+        setSeedLockTime(LocalDateTime.now().minusMinutes(1));
+        assertThat(post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null).code())
+                .as("锁定时间已过就该能登录")
+                .isEqualTo("0");
+        assertThat(seedUser().getLockTime()).isNull();
+        assertThat(seedUser().getLoginFailCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("改密:原密码不对、新旧密码相同都要拒绝,且两次都不能改动密码")
+    void changePasswordRejectsWrongOldAndIdenticalNew() throws Exception {
+        Response login = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null);
+        String token = login.text("token");
+
+        Response wrongOld = post("/auth/password",
+                "{\"oldPassword\":\"not-the-password\",\"newPassword\":\"Brand@123456\"}", token);
+        assertThat(wrongOld.code()).isEqualTo("40003");
+        assertThat(wrongOld.body()).contains("原密码不正确");
+
+        Response identical = post("/auth/password",
+                "{\"oldPassword\":\"" + SEED_PASSWORD + "\",\"newPassword\":\"" + SEED_PASSWORD + "\"}", token);
+        assertThat(identical.code()).isEqualTo("40003");
+        assertThat(identical.body()).contains("新密码不能与原密码相同");
+
+        // 两次都被拒 → 密码没被改动,原密码仍然能登录。不断言这一点的话,
+        // "拒绝了但还是把密码改了"这种实现也能通过上面的断言
+        assertThat(post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null).code())
+                .isEqualTo("0");
+    }
+
+    @Test
+    @DisplayName("登出:访问令牌与会话里的刷新令牌同时失效,再次登出被拒(未登录态)")
+    void logoutInvalidatesAccessAndRefreshToken() throws Exception {
+        Response login = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null);
+        String token = login.text("token");
+        String refreshToken = login.text("refreshToken");
+        assertThat(get("/auth/permissions", token).status()).as("登出前先确认令牌可用").isEqualTo(200);
+
+        assertThat(post("/auth/logout", "{}", token).status()).isEqualTo(200);
+
+        assertThat(get("/auth/permissions", token).status())
+                .as("登出后访问令牌必须立刻失效")
+                .isEqualTo(401);
+        assertThat(post("/auth/refresh", refreshBody(refreshToken), null).status())
+                .as("登出要撤销本次登录的刷新令牌,否则等于登出没登干净")
+                .isEqualTo(401);
+        assertThat(post("/auth/logout", "{}", token).status())
+                .as("登出接口不在白名单里,未登录态访问会被拦截器先挡掉 —— "
+                        + "这也是 logout 里登录态为空那条分支走不到 HTTP 的原因")
+                .isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("刷新令牌重放:再用一次旧的 → 401,且该用户全部会话被踢(宁可误伤)")
+    void refreshReplayRevokesAllSessions() throws Exception {
+        Response login = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null);
+        String firstRefresh = login.text("refreshToken");
+
+        Response rotated = post("/auth/refresh", refreshBody(firstRefresh), null);
+        assertThat(rotated.code()).isEqualTo("0");
+        String newAccess = rotated.text("token");
+        assertThat(rotated.text("refreshToken")).as("刷新必须轮换令牌").isNotEqualTo(firstRefresh);
+        assertThat(get("/auth/permissions", newAccess).status()).isEqualTo(200);
+
+        // 重放:第一张已经被轮换掉了,再用它说明令牌可能已泄露
+        assertThat(post("/auth/refresh", refreshBody(firstRefresh), null).status()).isEqualTo(401);
+
+        assertThat(get("/auth/permissions", newAccess).status())
+                .as("""
+                        检测到重放要撤销该用户全部凭据,连刚换出来的新令牌也一起失效。
+                        代价是用户重新登录一次,收益是不放过可能已泄露的令牌 —— 这个取舍是有意的,
+                        所以用例把它固定住:若哪天改成"只拒绝这次刷新",这条会失败,提醒重新评估。""")
+                .isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("刷新:伪造令牌 401;空令牌在参数校验阶段就被挡下(200 + 40003)")
+    void refreshRejectsUnknownToken() throws Exception {
+        // 非空但不存在/已撤销/已过期:走到服务层,统一 401 且不区分原因(避免成为探测接口)
+        assertThat(post("/auth/refresh", refreshBody("not-a-real-token"), null).status()).isEqualTo(401);
+
+        // 空串先被 @NotBlank 拦在控制器之前,压根到不了刷新逻辑。
+        // 这类"参数不合法"按项目约定是 HTTP 200 + 40003 —— GlobalExceptionHandler 只给
+        // 未登录(401)/无权限(403)/限流(429)三类带真实状态码,其余业务失败一律 200 + 业务码。
+        // 断言这一点是为了防止有人"顺手统一成 401":那会让前端把"参数没填"当成登录过期,
+        // 表现成用户填错一个字段却被踢回登录页。
+        Response blank = post("/auth/refresh", refreshBody(""), null);
+        assertThat(blank.status()).as("参数校验失败不是 401").isEqualTo(200);
+        assertThat(blank.code()).isEqualTo("40003");
+    }
+
+    @Test
+    @DisplayName("租户不存在与密码错误必须是同一句提示(否则等于提供了批量探测有效 tenantCode 的接口)")
+    void unknownTenantAndWrongPasswordShareTheSameMessage() throws Exception {
+        Response unknownTenant = post("/auth/login",
+                loginBody("no-such-tenant-" + suffix(), SEED_USERNAME, SEED_PASSWORD), null);
+        Response wrongPassword = post("/auth/login",
+                loginBody(SEED_TENANT_CODE, SEED_USERNAME, "definitely-wrong"), null);
+
+        assertThat(unknownTenant.code()).isEqualTo(wrongPassword.code());
+        assertThat(messageOf(unknownTenant))
+                .as("两种情况必须无法区分:租户不存在/被禁用/过期,与密码错误共用同一句提示")
+                .isEqualTo(messageOf(wrongPassword))
+                .isEqualTo("用户名或密码错误");
+    }
+
+    @Test
+    @DisplayName("禁用用户不能登录,提示与密码错误一致(不暴露账号状态)")
+    void disabledUserCannotLogin() throws Exception {
+        String tenantCode = "http-dis-" + suffix();
+        String adminUsername = "admin" + suffix();
+        TenantCreateResponse created = asSuperUser(() -> tenantService.create(new TenantCreateRequest(
+                tenantCode, "禁用用户用例租户", FULL_PACKAGE_ID, null, adminUsername, "用例管理员", null)));
+
+        // 置为禁用走仓储而不是接口:这条用例要验的是"登录时会不会检查启用状态",
+        // 不该顺带依赖"哪个接口能改用户状态"
+        asUserInTenant(created.tenantId(), created.adminUserId(), () -> {
+            SysUser admin = userRepository.findById(created.adminUserId()).orElseThrow();
+            admin.setStatus(0);
+            userRepository.save(admin);
+            return null;
+        });
+
+        Response login = post("/auth/login", loginBody(tenantCode, adminUsername, created.initialPassword()), null);
+        assertThat(login.code()).isEqualTo("40001");
+        assertThat(login.body())
+                .as("被停用的账号若给出不同提示,这个接口就成了\"哪些账号被停用了\"的探测器")
+                .contains("用户名或密码错误");
+    }
+
+    @Test
+    @DisplayName("deviceId 缺省时服务端生成一个,不回空值")
+    void loginGeneratesDeviceIdWhenAbsent() throws Exception {
+        Response login = post("/auth/login",
+                "{\"tenantCode\":\"" + SEED_TENANT_CODE + "\",\"username\":\"" + SEED_USERNAME
+                        + "\",\"password\":\"" + SEED_PASSWORD + "\"}", null);
+        assertThat(login.code()).isEqualTo("0");
+        assertThat(login.text("deviceId")).as("端上要拿它做设备维度标识,不能是空串").isNotBlank();
+    }
+
+    @Test
+    @DisplayName("权限快照:菜单与权限码都要返回(前端菜单与按钮都靠它)")
+    void currentPermissionsReturnsMenusAndCodes() throws Exception {
+        String token = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, SEED_PASSWORD), null)
+                .text("token");
+
+        Response permissions = get("/auth/permissions", token);
+        assertThat(permissions.status()).isEqualTo(200);
+        assertThat(permissions.body())
+                .as("空快照与\"没有权限\"在前端表现一样,会让人以为账号配错了")
+                .contains("\"menus\":[")
+                .contains("\"permCodes\":[");
+    }
+
     private String loginAndGetToken(String tenantCode, String username) throws Exception {
         Response login = post("/auth/login", loginBody(tenantCode, username, MATRIX_USER_PASSWORD), null);
         assertThat(login.code()).as("登录失败:%s", login.body()).isEqualTo("0");
@@ -395,5 +593,32 @@ class AuthHttpFlowIntegrationTest {
             userRepository.save(user);
             return null;
         });
+    }
+
+    /** 读种子账号当前状态(失败计数、锁定时间)。必须带平台租户上下文,否则租户过滤器读不到它。 */
+    private SysUser seedUser() {
+        return TenantContext.callAsTenant(PLATFORM_TENANT_ID, true, () ->
+                userRepository.findById(SEED_ADMIN_ID).orElseThrow());
+    }
+
+    /** 把锁定时间改到过去,用来验证"锁定期过后可以登录",而不是真的等 15 分钟。 */
+    private void setSeedLockTime(LocalDateTime lockTime) {
+        TenantContext.callAsTenant(PLATFORM_TENANT_ID, true, () -> {
+            SysUser user = userRepository.findById(SEED_ADMIN_ID).orElseThrow();
+            user.setLockTime(lockTime);
+            userRepository.save(user);
+            return null;
+        });
+    }
+
+    /**
+     * 取响应体里的 message。
+     *
+     * <p>登录失败的不同原因 HTTP 状态码与业务码都可能相同,唯一能区分的是这句话 ——
+     * 而"必须无法区分"正是我们要断言的安全性,所以需要一个能读它的方法。
+     */
+    private String messageOf(Response response) {
+        Matcher matcher = Pattern.compile("\"message\":\"([^\"]*)\"").matcher(response.body());
+        return matcher.find() ? matcher.group(1) : null;
     }
 }
