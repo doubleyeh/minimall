@@ -97,9 +97,13 @@ public class FreightTemplateServiceImpl implements FreightTemplateService {
      */
     private void validateRules(FreightTemplateSaveRequest request) {
         List<FreightTemplateSaveRequest.Rule> rules = request.rules();
+        // 兜底判断必须与**存储时**用同一个归一化方法。两处各写一套大小写规则会分叉:
+        // 原先这里用大小写敏感的 equals,而 normalizeRegion 用 equalsIgnoreCase,
+        // 于是商家把兜底写成小写 all 时会收到"必须配置一条不限区域(ALL)的兜底规则"——
+        // 明明配了却说没配,而那条规则本来会被存成 ALL。报错信息与实现互相矛盾,
+        // 排查时只能去看源码才发现。走同一个方法后,两者的口径不可能再不一致。
         boolean hasFallback = rules.stream()
-                .anyMatch(rule -> rule.region() == null || rule.region().isBlank()
-                        || MallFreightTemplateRule.REGION_ALL.equals(rule.region().trim()));
+                .anyMatch(rule -> MallFreightTemplateRule.REGION_ALL.equals(normalizeRegion(rule.region())));
         if (!hasFallback) {
             throw new BusinessException(ErrorCode.PARAM_INVALID,
                     "必须配置一条不限区域(ALL)的兜底规则,否则部分省份无法计算运费");
