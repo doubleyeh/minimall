@@ -27,6 +27,7 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysDeptRepository;
 import com.minimall.sys.domain.repository.SysPackageRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
+import com.minimall.sys.api.dto.TenantView;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -791,6 +792,50 @@ class SysAdminServiceBranchIntegrationTest {
 
         PageResult<UserView> hugePage = asTenantAdmin(() -> userService.page(null, null, null, 9999, 5));
         assertThat(hugePage.list()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("租户:编码重复被拒;列表按编码与状态过滤,查不到时也要正常返回空页")
+    void tenantCreateAndPageFilters() {
+        String tenantCode = "syspage-" + suffix();
+        asPlatformAdmin(() -> tenantService.create(new TenantCreateRequest(
+                tenantCode, "过滤用例租户", FULL_PACKAGE_ID, null, "admin" + suffix(), "用例管理员", null)));
+
+        assertThatThrownBy(() -> asPlatformAdmin(() -> tenantService.create(new TenantCreateRequest(
+                tenantCode, "重复编码", FULL_PACKAGE_ID, null, "admin" + suffix(), "用例管理员", null))))
+                .as("租户编码是登录时定位租户的唯一依据,重复了整条登录链路都不可用")
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode())
+                        .isEqualTo(ErrorCode.DATA_CONFLICT));
+
+        PageResult<TenantView> byCode = asPlatformAdmin(() -> tenantService.page(tenantCode, null, 1, 50));
+        assertThat(byCode.list()).extracting(TenantView::tenantCode).containsExactly(tenantCode);
+        assertThat(byCode.list().get(0).packageName())
+                .as("列表要带套餐名,前端不然只显示一个 id")
+                .isNotBlank();
+
+        assertThat(asPlatformAdmin(() -> tenantService.page(tenantCode, 0, 1, 50)).list())
+                .as("刚建的租户是启用状态")
+                .isEmpty();
+
+        // 查不到任何租户时,页内没有任何 packageId —— 拼套餐名那一步必须走"空集合直接返回 Map.of()",
+        // 否则 findAllById(空集合) 在某些实现下会退化成全表查询
+        PageResult<TenantView> empty = asPlatformAdmin(() -> tenantService.page("no-such-code-" + suffix(), null, 1, 50));
+        assertThat(empty.total()).isZero();
+        assertThat(empty.list()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("租户换套餐:换成同一个套餐时直接返回,不重复做一次全量同步")
+    void changePackageToSamePackageIsNoop() {
+        // 本类共用租户的套餐就是全量套餐;再"换"成它是空操作 ——
+        // 不挡这一下的话,每次保存租户表单都会对全部角色做一次全量差异同步
+        asPlatformAdmin(() -> {
+            tenantService.changePackage(tenantId, new com.minimall.sys.api.dto.TenantPackageChangeRequest(FULL_PACKAGE_ID));
+            return null;
+        });
+        assertThat(asPlatformAdmin(() -> tenantService.page(null, null, 1, 100)).list())
+                .as("租户应当照常可用").isNotEmpty();
     }
 
     @Test
