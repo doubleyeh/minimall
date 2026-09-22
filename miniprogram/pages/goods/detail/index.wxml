@@ -1,0 +1,87 @@
+<view wx:if="{{loadFailed}}" class="fail">
+  <text class="fail__text">{{loadFailed}}</text>
+</view>
+
+<view wx:else class="page page-with-action-bar">
+  <swiper class="gallery" indicator-dots circular autoplay="{{false}}">
+    <swiper-item wx:for="{{images}}" wx:key="*this">
+      <image
+        class="gallery__img"
+        src="{{item}}"
+        mode="aspectFill"
+        bindtap="onImageTap"
+        data-src="{{item}}"
+      ></image>
+    </swiper-item>
+  </swiper>
+
+  <view class="card">
+    <view class="row-between">
+      <view class="price">
+        <text class="price__symbol">¥</text>
+        <text class="price__value">{{priceText}}</text>
+        <text wx:if="{{priceSuffix}}" class="price__suffix">{{priceSuffix}}</text>
+      </view>
+      <text class="text-muted">已售 {{saleCountText}}</text>
+    </view>
+    <view class="title">{{goodsName}}</view>
+    <view wx:if="{{goodsSubtitle}}" class="subtitle">{{goodsSubtitle}}</view>
+  </view>
+
+  <view wx:if="{{specGroups.length > 0}}" class="card">
+    <view
+      wx:for="{{specGroups}}"
+      wx:for-item="group"
+      wx:for-index="gi"
+      wx:key="name"
+      class="spec"
+    >
+      <view class="spec__name">{{group.name}}</view>
+      <view class="spec__values">
+        <view
+          wx:for="{{group.values}}"
+          wx:for-item="val"
+          wx:key="*this"
+          class="spec__value {{selected[gi] === val ? 'spec__value--active' : ''}}"
+          bindtap="onValueTap"
+          data-gi="{{gi}}"
+          data-value="{{val}}"
+        >{{val}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card row-between">
+    <text>购买数量</text>
+    <view class="stepper">
+      <view class="stepper__btn {{quantity <= 1 ? 'stepper__btn--off' : ''}}" bindtap="onMinus">−</view>
+      <text class="stepper__value">{{quantity}}</text>
+      <view class="stepper__btn" bindtap="onPlus">＋</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">商品详情</view>
+    <rich-text wx:if="{{detailHtml}}" nodes="{{detailHtml}}"></rich-text>
+    <view wx:else class="text-muted">商家还没有补充详情</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">商品评价({{reviewTotal}})</view>
+    <view wx:if="{{reviews.length === 0}}" class="text-muted">还没有评价</view>
+    <view wx:for="{{reviews}}" wx:key="id" class="review">
+      <view class="row-between">
+        <text class="review__who">{{item.nicknameText}}</text>
+        <text class="text-muted">{{item.createTimeText}}</text>
+      </view>
+      <view class="review__stars">{{item.starsText}}</view>
+      <view wx:if="{{item.content}}" class="review__content">{{item.content}}</view>
+      <view wx:if="{{item.replyContent}}" class="review__reply">商家回复:{{item.replyContent}}</view>
+    </view>
+  </view>
+
+  <view class="action-bar">
+    <view class="action-bar__btn" bindtap="onAddCart">加入购物车</view>
+    <view class="action-bar__btn action-bar__btn--primary" bindtap="onBuyNow">立即购买</view>
+  </view>
+</view>

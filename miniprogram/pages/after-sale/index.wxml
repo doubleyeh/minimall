@@ -1,0 +1,29 @@
+<view class="page">
+  <view wx:if="{{list.length === 0}}" class="empty">还没有售后申请</view>
+
+  <view wx:for="{{list}}" wx:key="id" class="as">
+    <view class="as__head">
+      <text class="as__no">{{item.afterSaleNo}}</text>
+      <text class="as__status">{{item.statusText}}</text>
+    </view>
+
+    <view class="as__body">
+      <image class="as__img" src="{{item.image}}" mode="aspectFill"></image>
+      <view class="as__info">
+        <view class="as__name ellipsis-2">{{item.goodsName}}</view>
+        <view class="as__meta">{{item.skuName}} × {{item.quantity}}</view>
+        <view class="as__meta">{{item.typeText}} · 退款 ¥{{item.refundAmountText}}</view>
+      </view>
+    </view>
+
+    <view class="as__reason">原因:{{item.applyReason}}</view>
+    <view wx:if="{{item.rejectReason}}" class="as__reject">商家驳回:{{item.rejectReason}}</view>
+    <view class="as__time">{{item.createTimeText}}</view>
+
+    <view class="as__actions">
+      <view wx:if="{{item.status === 1}}" class="btn" bindtap="onCancel" data-id="{{item.id}}">撤销申请</view>
+      <view wx:if="{{item.status === 2}}" class="btn btn--primary" bindtap="onReturnLogistics" data-id="{{item.id}}">填写退货物流</view>
+      <view wx:if="{{item.status === 5 || item.status === 6}}" class="btn btn--primary" bindtap="onArbitration" data-id="{{item.id}}">申请平台介入</view>
+    </view>
+  </view>
+</view>

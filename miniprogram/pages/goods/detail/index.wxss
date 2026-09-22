@@ -1,0 +1,156 @@
+.gallery {
+  height: 750rpx;
+  background: var(--bg-soft);
+}
+
+.gallery__img {
+  width: 100%;
+  height: 100%;
+}
+
+.title {
+  margin-top: 12rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.subtitle {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: var(--text-2);
+}
+
+.price__suffix {
+  font-size: 22rpx;
+  color: var(--price);
+  margin-left: 4rpx;
+}
+
+.spec {
+  margin-bottom: 24rpx;
+}
+
+.spec:last-child {
+  margin-bottom: 0;
+}
+
+.spec__name {
+  font-size: 26rpx;
+  color: var(--text-2);
+  margin-bottom: 16rpx;
+}
+
+.spec__values {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.spec__value {
+  padding: 10rpx 28rpx;
+  margin: 0 16rpx 16rpx 0;
+  font-size: 26rpx;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border: 1rpx solid var(--line-strong);
+  border-radius: 8rpx;
+}
+
+.spec__value--active {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
+/* 数量加减:自己实现而不用组件,少一个依赖就少一处无法验证的 props */
+.stepper {
+  display: flex;
+  align-items: center;
+}
+
+.stepper__btn {
+  width: 56rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  text-align: center;
+  font-size: 32rpx;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border-radius: 8rpx;
+}
+
+.stepper__btn--off {
+  color: var(--line-strong);
+}
+
+.stepper__value {
+  min-width: 72rpx;
+  text-align: center;
+  font-size: 28rpx;
+}
+
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.review {
+  padding: 20rpx 0;
+  border-top: 1rpx solid var(--bg-soft);
+}
+
+.review__who {
+  font-size: 26rpx;
+  color: var(--text-2);
+}
+
+.review__stars {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: #f5a623;
+  letter-spacing: 4rpx;
+}
+
+.review__content {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: var(--text);
+}
+
+.review__reply {
+  margin-top: 8rpx;
+  padding: 12rpx 16rpx;
+  font-size: 24rpx;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border-radius: 8rpx;
+}
+
+.action-bar__btn {
+  flex: 1;
+  height: 80rpx;
+  line-height: 80rpx;
+  text-align: center;
+  font-size: 28rpx;
+  border-radius: 40rpx;
+  margin-right: 16rpx;
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.action-bar__btn--primary {
+  margin-right: 0;
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.fail {
+  padding: 160rpx 48rpx;
+  text-align: center;
+}
+
+.fail__text {
+  font-size: 28rpx;
+  color: var(--text-2);
+}

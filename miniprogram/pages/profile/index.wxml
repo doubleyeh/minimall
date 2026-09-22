@@ -1,0 +1,53 @@
+<view class="page">
+  <view class="header">
+    <image wx:if="{{hasAvatar}}" class="header__avatar" src="{{avatarUrl}}" mode="aspectFill"></image>
+    <view wx:else class="header__avatar header__avatar--placeholder">{{avatarChar}}</view>
+    <view class="header__body">
+      <view class="header__name" bindtap="onEditNickname">
+        {{nickname}}
+        <text class="header__edit">修改</text>
+      </view>
+      <view class="header__stats">
+        <text>积分 {{points}}</text>
+        <text class="header__dot">·</text>
+        <text>成长值 {{growthValue}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title" bindtap="onAllOrders">
+      我的订单
+      <text class="section-title__more">全部订单 ›</text>
+    </view>
+    <view class="counts">
+      <view
+        wx:for="{{counts}}"
+        wx:key="label"
+        class="counts__item"
+        bindtap="onOrderEntry"
+        data-status="{{item.status}}"
+      >
+        <view class="counts__value">{{item.value}}</view>
+        <view class="counts__label">{{item.label}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card entries">
+    <view class="entry" bindtap="onCouponsTap">
+      <text>优惠券</text>
+      <text class="entry__arrow">›</text>
+    </view>
+    <view class="entry" bindtap="onAddressTap">
+      <text>收货地址</text>
+      <text class="entry__arrow">›</text>
+    </view>
+    <view class="entry" bindtap="onAfterSaleTap">
+      <text>我的售后</text>
+      <text class="entry__arrow">›</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loadFailed}}" class="fail text-muted">{{loadFailed}}</view>
+</view>

@@ -1,24 +1,70 @@
 /*
- * 全局样式。
+ * 设计基线:暖·电商。
  *
- * 不需要引入组件库主题:tdesign-miniprogram 每个组件的 wxss 自己会
- * `@import '../common/style/index.wxss'`(见 node_modules 下 button/button.wxss),
- * 所以在 app.wxss 里再引一次是多余的,还会让样式体积翻倍。
+ * 两点是刻意的:
+ * 1. **主色是橙红,不是蓝。** 蓝色是管理后台的语言(信息密度、工具感),
+ *    商城要的是"想买"——暖色 + 大号红价格 + 白卡留白,这是国内电商公认的视觉语言。
+ * 2. **所有颜色收进 CSS 变量,只在这里定义一次。** 换主题 = 换下面这一块,
+ *    页面里不允许再出现颜色字面量(除极少数必须写死的地方,如 app.json 的 tabBar,
+ *    它读不了 CSS 变量)。
+ *
+ * 备用主题(把 --brand 三兄弟与 --price 换掉即可,其余不用动):
+ *
+ *   橙焰(当前)  --brand #FF4D1C  --brand-deep #E23A0E  --brand-soft #FFF1EB  --price #FF2E2E
+ *   正红礼      --brand #E0322F  --brand-deep #C01F1C  --brand-soft #FDECEC  --price #D81E1E
+ *   墨绿金      --brand #0F5C4A  --brand-deep #0A4437  --brand-soft #E8F2EE  --price #C9A227
  */
 
 page {
-  background: #f5f5f5;
-  color: #1a1a1a;
+  /* —— 品牌色 —— */
+  --brand: #ff4d1c;
+  --brand-deep: #e23a0e;
+  --brand-soft: #fff1eb;
+  --brand-disabled: #ffb7a0;
+  --brand-grad: linear-gradient(135deg, #ff6a2b 0%, #ff3d0f 100%);
+  /* 价格单独一档:比主色更红一点,在商品卡里跳出来。国内电商普遍这么做 */
+  --price: #ff2e2e;
+
+  /* —— 中性色,暖调 —— */
+  --bg: #f7f5f2;
+  --bg-soft: #f3f0ec;
+  --card: #ffffff;
+  --line: #f0ece7;
+  --line-strong: #e2dcd5;
+  --text: #1f1b18;
+  --text-2: #6b625b;
+  --text-3: #a79e96;
+
+  /* —— 语义色 —— */
+  --success: #07c160;
+  --warn: #ffa318;
+
+  /* —— 形状与阴影:阴影带暖色调,纯黑阴影在米白底上会发灰 —— */
+  --r-card: 20rpx;
+  --r-pill: 999rpx;
+  --shadow: 0 6rpx 24rpx rgba(31, 27, 24, 0.06);
+  --shadow-brand: 0 8rpx 20rpx rgba(255, 77, 28, 0.28);
+
+  background: var(--bg);
+  color: var(--text);
   font-size: 28rpx;
   line-height: 1.5;
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
+/* ================================ 通用块 ================================ */
+
 .card {
-  background: #ffffff;
-  border-radius: 16rpx;
-  margin: 24rpx;
+  background: var(--card);
+  border-radius: var(--r-card);
+  margin: 20rpx 24rpx 0;
   padding: 24rpx;
+  box-shadow: var(--shadow);
+}
+
+.card--flush {
+  padding: 0;
+  overflow: hidden;
 }
 
 .row-between {
@@ -27,42 +73,109 @@ page {
   justify-content: space-between;
 }
 
+/* 小节标题:左侧一道主色竖条,比纯文字更有层次,也省掉一条分割线 */
+.section-title {
+  display: flex;
+  align-items: center;
+  font-size: 30rpx;
+  font-weight: 600;
+  letter-spacing: 0.5rpx;
+}
+
+.section-title::before {
+  content: '';
+  width: 6rpx;
+  height: 28rpx;
+  margin-right: 14rpx;
+  border-radius: 3rpx;
+  background: var(--brand-grad);
+}
+
 .text-muted {
-  color: #8a8a8a;
+  color: var(--text-3);
   font-size: 24rpx;
 }
 
-/* 价格:符号与数字不同字号,避免大数字把小数字顶得很大 */
+/* ================================ 价格 ================================ */
+
 .price {
-  color: #e34d59;
-  font-weight: 600;
+  color: var(--price);
+  font-weight: 700;
+  font-family: -apple-system, 'DIN Alternate', 'PingFang SC', sans-serif;
 }
 
 .price__symbol {
   font-size: 22rpx;
+  font-weight: 600;
+  margin-right: 2rpx;
 }
 
 .price__value {
-  font-size: 36rpx;
+  font-size: 38rpx;
+  letter-spacing: -0.5rpx;
 }
 
 .price--origin {
-  color: #999999;
+  color: var(--text-3);
   font-size: 24rpx;
   font-weight: 400;
   text-decoration: line-through;
   margin-left: 12rpx;
 }
 
-/* 两行截断:小程序里没有 CSS 的 line-clamp 简写,必须四件套一起写 */
-.ellipsis-2 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+/* ================================ 按钮 ================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 36rpx;
+  height: 68rpx;
+  font-size: 27rpx;
+  color: var(--text-2);
+  background: var(--card);
+  border: 1rpx solid var(--line-strong);
+  border-radius: var(--r-pill);
 }
 
-/* 底部固定操作条:详情页、结算页、购物车都用它,统一留出安全区 */
+.btn--primary {
+  color: #ffffff;
+  background: var(--brand-grad);
+  border: none;
+  box-shadow: var(--shadow-brand);
+}
+
+.btn--ghost {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border: none;
+}
+
+.btn--small {
+  height: 54rpx;
+  padding: 0 26rpx;
+  font-size: 24rpx;
+}
+
+.btn--disabled {
+  color: #ffffff;
+  background: var(--brand-disabled);
+  box-shadow: none;
+}
+
+/* ================================ 标签 ================================ */
+
+.tag {
+  display: inline-block;
+  padding: 2rpx 12rpx;
+  font-size: 20rpx;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 6rpx;
+}
+
+/* ================================ 底部操作条 ================================ */
+
 .action-bar {
   position: fixed;
   left: 0;
@@ -71,15 +184,70 @@ page {
   display: flex;
   align-items: center;
   padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
-  background: #ffffff;
-  border-top: 1rpx solid #eeeeee;
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1rpx solid var(--line);
 }
 
-/* 有底部操作条的页面给内容留出空间,否则最后一行会被盖住 */
+.action-bar__total {
+  flex: 1;
+  font-size: 26rpx;
+}
+
+.action-bar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 48rpx;
+  height: 76rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--brand-grad);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-brand);
+}
+
+.action-bar__btn--off {
+  background: var(--brand-disabled);
+  box-shadow: none;
+}
+
 .page-with-action-bar {
-  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
-.empty-block {
-  padding: 120rpx 0;
+/* ================================ 状态 ================================ */
+
+.ellipsis-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ellipsis-1 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  padding: 160rpx 48rpx;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 28rpx;
+}
+
+.fail {
+  padding: 160rpx 48rpx;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 28rpx;
+}
+
+.tip {
+  padding: 32rpx 0;
+  text-align: center;
+  font-size: 25rpx;
+  color: var(--text-3);
 }

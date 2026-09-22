@@ -1,49 +1,88 @@
 <view class="page">
-  <view class="search" bindtap="onSearchTap">
-    <text class="search__icon">搜索</text>
-    <text class="search__placeholder">搜索商品</text>
+  <!-- 顶部品牌区:渐变打底 + 搜索药丸。国内电商首屏的通用语言,比一片冷灰更有"想逛"的感觉 -->
+  <view class="hero">
+    <view class="hero__title">好物商城</view>
+    <view class="hero__search" bindtap="onSearchTap">
+      <text class="hero__search-icon">⌕</text>
+      <text class="hero__search-text">搜索你想要的商品</text>
+    </view>
   </view>
 
-  <scroll-view class="cats" scroll-x enable-flex show-scrollbar="{{false}}">
-    <view
-      class="cats__item {{activeCategoryId === '' ? 'cats__item--active' : ''}}"
-      bindtap="onCategoryTap"
-      data-id=""
-    >全部</view>
-    <view
-      wx:for="{{tabs}}"
+  <!-- 轮播:取推荐商品的主图。没有数据时整块不渲染,不留一条空槽 -->
+  <swiper
+    wx:if="{{banners.length > 0}}"
+    class="banner"
+    indicator-dots
+    indicator-color="rgba(255,255,255,0.45)"
+    indicator-active-color="#ffffff"
+    circular
+    autoplay
+    interval="4000"
+    duration="400"
+  >
+    <swiper-item
+      wx:for="{{banners}}"
       wx:key="id"
-      class="cats__item {{activeCategoryId === item.id ? 'cats__item--active' : ''}}"
+      class="banner__item"
+      bindtap="onGoodsTap"
+      data-id="{{item.id}}"
+    >
+      <image class="banner__img" src="{{item.image}}" mode="aspectFill"></image>
+      <view class="banner__mask">
+        <view class="banner__name ellipsis-1">{{item.name}}</view>
+        <view class="banner__price"><text class="banner__yuan">¥</text>{{item.priceText}}</view>
+      </view>
+    </swiper-item>
+  </swiper>
+
+  <!-- 分类金刚区。再点一次已选中的分类 = 回到"全部",所以不需要额外一排筛选按钮 -->
+  <view wx:if="{{catCells.length > 0}}" class="cats">
+    <view
+      wx:for="{{catCells}}"
+      wx:key="id"
+      class="cats__item"
       bindtap="onCategoryTap"
       data-id="{{item.id}}"
-    >{{item.label}}</view>
-  </scroll-view>
+    >
+      <view class="cats__badge cats__badge--{{item.tone}} {{activeCategoryId === item.id ? 'cats__badge--on' : ''}}">
+        {{item.char}}
+      </view>
+      <view class="cats__label ellipsis-1 {{activeCategoryId === item.id ? 'cats__label--on' : ''}}">
+        {{item.label}}
+      </view>
+    </view>
+  </view>
+
+  <view class="reco">
+    <view class="section-title">{{sectionTitle}}</view>
+    <text wx:if="{{activeCategoryId !== ''}}" class="reco__reset" bindtap="onCategoryTap" data-id="">看全部</text>
+  </view>
 
   <view class="goods">
     <view
       wx:for="{{cards}}"
       wx:key="id"
-      class="goods__card"
+      class="gcard"
       bindtap="onGoodsTap"
       data-id="{{item.id}}"
     >
-      <image class="goods__image" src="{{item.image}}" mode="aspectFill" lazy-load></image>
-      <view class="goods__body">
-        <view class="goods__name ellipsis-2">{{item.name}}</view>
-        <view wx:if="{{item.subtitle}}" class="goods__subtitle ellipsis-2">{{item.subtitle}}</view>
-        <view class="goods__foot row-between">
+      <image class="gcard__img" src="{{item.image}}" mode="aspectFill" lazy-load></image>
+      <view class="gcard__body">
+        <view class="gcard__name ellipsis-2">{{item.name}}</view>
+        <view class="gcard__sub ellipsis-1">{{item.subtitle}}</view>
+        <view class="gcard__foot">
           <view class="price">
             <text class="price__symbol">¥</text>
             <text class="price__value">{{item.priceText}}</text>
-            <text wx:if="{{item.priceSuffix}}" class="price__suffix">{{item.priceSuffix}}</text>
+            <text wx:if="{{item.priceSuffix}}" class="gcard__suffix">{{item.priceSuffix}}</text>
           </view>
-          <text class="text-muted">已售 {{item.saleCountText}}</text>
+          <text class="gcard__sold">{{item.saleCountText}} 人已购</text>
         </view>
       </view>
     </view>
   </view>
 
-  <view wx:if="{{loading}}" class="tip">加载中…</view>
-  <view wx:elif="{{cards.length === 0}}" class="tip">还没有商品</view>
-  <view wx:elif="{{finished}}" class="tip">没有更多了</view>
+  <view wx:if="{{loading}}" class="tip">正在加载…</view>
+  <view wx:elif="{{cards.length === 0}}" class="empty">这个分类下还没有商品</view>
+  <view wx:elif="{{finished}}" class="tip">— 到底了 —</view>
 </view>

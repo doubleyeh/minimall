@@ -1,0 +1,50 @@
+<view class="tabs">
+  <view
+    wx:for="{{tabs}}"
+    wx:key="label"
+    class="tabs__item {{activeIndex === index ? 'tabs__item--active' : ''}}"
+    bindtap="onTabTap"
+    data-index="{{index}}"
+  >{{item.label}}</view>
+</view>
+
+<view wx:if="{{orders.length === 0 && !loading}}" class="empty">还没有订单</view>
+
+<view wx:for="{{orders}}" wx:key="id" class="order" bindtap="onDetailTap" data-id="{{item.id}}">
+  <view class="order__head">
+    <text class="order__no">{{item.orderNo}}</text>
+    <text class="order__status">{{item.statusText}}</text>
+  </view>
+
+  <view wx:for="{{item.lines}}" wx:for-item="line" wx:key="id" class="line">
+    <image class="line__img" src="{{line.image}}" mode="aspectFill"></image>
+    <view class="line__body">
+      <view class="line__name ellipsis-2">{{line.name}}</view>
+      <view class="line__sku">{{line.skuName}} × {{line.quantity}}</view>
+    </view>
+    <text class="line__amount">¥{{line.amountText}}</text>
+  </view>
+
+  <view class="order__foot">
+    <text>共 {{item.itemCountText}} 件,实付</text>
+    <text class="price">
+      <text class="price__symbol">¥</text>
+      <text class="price__value">{{item.payAmountText}}</text>
+    </text>
+  </view>
+
+  <view class="order__actions" catchtap="noop">
+    <view wx:if="{{item.status === 1}}" class="btn" bindtap="onCancel" data-id="{{item.id}}">取消订单</view>
+    <view wx:if="{{item.status === 1}}" class="btn btn--primary" bindtap="onPay" data-id="{{item.id}}">去支付</view>
+    <view wx:if="{{item.status === 3}}" class="btn btn--primary" bindtap="onReceive" data-id="{{item.id}}">确认收货</view>
+    <view
+      wx:if="{{item.status === 2 || item.status === 3 || item.status === 4}}"
+      class="btn"
+      bindtap="onAfterSale"
+      data-id="{{item.id}}"
+    >申请售后</view>
+  </view>
+</view>
+
+<view wx:if="{{loading}}" class="tip">加载中…</view>
+<view wx:elif="{{orders.length > 0 && !hasMore}}" class="tip">没有更多了</view>

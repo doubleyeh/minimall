@@ -1,0 +1,66 @@
+<view wx:if="{{loadFailed}}" class="fail">
+  <text>{{loadFailed}}</text>
+</view>
+
+<view wx:else class="page page-with-action-bar">
+  <view class="status-card">
+    <view class="status-card__text">{{statusText}}</view>
+    <view wx:if="{{payTip}}" class="status-card__tip">{{payTip}}</view>
+  </view>
+
+  <view wx:if="{{closeReason}}" class="card text-muted">{{closeReason}}</view>
+
+  <view class="card">
+    <view class="section-title">收货信息</view>
+    <view class="line-text">{{receiverName}} {{receiverPhone}}</view>
+    <view class="line-text text-muted">{{receiverAddress}}</view>
+    <view wx:if="{{logisticsNo}}" class="line-text">物流:{{logisticsCompany}} {{logisticsNo}}</view>
+    <view wx:if="{{remark}}" class="line-text text-muted">买家留言:{{remark}}</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">商品</view>
+    <view wx:for="{{lines}}" wx:key="id" class="line">
+      <image class="line__img" src="{{item.image}}" mode="aspectFill"></image>
+      <view class="line__body">
+        <view class="line__name ellipsis-2">{{item.name}}</view>
+        <view class="line__sku">{{item.skuName}} × {{item.quantity}}</view>
+        <view class="line__after">{{item.afterSaleText}}</view>
+      </view>
+      <view class="line__right">
+        <text class="line__amount">¥{{item.amountText}}</text>
+        <view wx:if="{{canReview}}" class="btn btn--small" bindtap="onReview" data-item-id="{{item.id}}">评价</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">金额</view>
+    <view class="row-between amount-line"><text>商品金额</text><text>¥{{goodsAmountText}}</text></view>
+    <view class="row-between amount-line"><text>运费</text><text>¥{{freightAmountText}}</text></view>
+    <view class="row-between amount-line"><text>满减优惠</text><text>-¥{{promotionText}}</text></view>
+    <view class="row-between amount-line"><text>优惠券</text><text>-¥{{couponText}}</text></view>
+    <view class="row-between amount-line amount-line--total">
+      <text>实付</text>
+      <text class="price">
+        <text class="price__symbol">¥</text>
+        <text class="price__value">{{payAmountText}}</text>
+      </text>
+    </view>
+  </view>
+
+  <view wx:if="{{timeLines.length > 0}}" class="card">
+    <view class="section-title">时间</view>
+    <view wx:for="{{timeLines}}" wx:key="label" class="row-between amount-line">
+      <text class="text-muted">{{item.label}}</text>
+      <text class="text-muted">{{item.value}}</text>
+    </view>
+  </view>
+</view>
+
+<view wx:if="{{!loadFailed}}" class="action-bar">
+  <view wx:if="{{status === 1}}" class="btn" bindtap="onCancel">取消订单</view>
+  <view wx:if="{{status === 1}}" class="btn btn--primary" bindtap="onPay">去支付</view>
+  <view wx:if="{{status === 3}}" class="btn btn--primary" bindtap="onReceive">确认收货</view>
+  <view wx:if="{{canAfterSale}}" class="btn" bindtap="onAfterSale">申请售后</view>
+</view>

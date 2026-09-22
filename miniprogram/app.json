@@ -1,13 +1,48 @@
 {
   "pages": [
-    "pages/home/index"
+    "pages/home/index",
+    "pages/goods/detail/index",
+    "pages/cart/index",
+    "pages/orders/index",
+    "pages/profile/index",
+    "pages/checkout/index",
+    "pages/order-detail/index",
+    "pages/coupons/index",
+    "pages/address/index",
+    "pages/after-sale/index",
+    "pages/after-sale/apply/index",
+    "pages/review/create/index"
   ],
   "window": {
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTitleText": "商城",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f5f5f5",
+    "backgroundColor": "#F7F5F2",
     "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#6B625B",
+    "selectedColor": "#FF4D1C",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/cart/index",
+        "text": "购物车"
+      },
+      {
+        "pagePath": "pages/orders/index",
+        "text": "订单"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的"
+      }
+    ]
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

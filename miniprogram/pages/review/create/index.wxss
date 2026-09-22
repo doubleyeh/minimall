@@ -1,0 +1,52 @@
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.stars {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.star {
+  font-size: 64rpx;
+  line-height: 1;
+  margin-right: 20rpx;
+  color: var(--line-strong);
+}
+
+.star--on {
+  color: #f5a623;
+}
+
+.textarea {
+  width: 100%;
+  height: 240rpx;
+  padding: 16rpx;
+  box-sizing: border-box;
+  font-size: 27rpx;
+  background: var(--bg-soft);
+  border-radius: 12rpx;
+}
+
+.hint {
+  padding: 8rpx 32rpx 0;
+  line-height: 1.6;
+}
+
+.action-bar__btn {
+  flex: 1;
+  height: 76rpx;
+  line-height: 76rpx;
+  text-align: center;
+  font-size: 28rpx;
+  border-radius: 38rpx;
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.action-bar__btn--off {
+  background: var(--brand-disabled);
+}

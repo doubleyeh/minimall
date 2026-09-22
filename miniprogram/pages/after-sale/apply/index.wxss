@@ -1,0 +1,62 @@
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 14rpx 36rpx;
+  margin: 0 16rpx 16rpx 0;
+  font-size: 27rpx;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border: 1rpx solid var(--line-strong);
+  border-radius: 40rpx;
+}
+
+.chip--active {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
+.input {
+  height: 72rpx;
+  font-size: 28rpx;
+}
+
+.textarea {
+  width: 100%;
+  height: 180rpx;
+  margin-top: 12rpx;
+  padding: 16rpx;
+  box-sizing: border-box;
+  font-size: 27rpx;
+  background: var(--bg-soft);
+  border-radius: 12rpx;
+}
+
+.hint {
+  padding: 8rpx 32rpx 0;
+  line-height: 1.6;
+}
+
+.action-bar__btn {
+  flex: 1;
+  height: 76rpx;
+  line-height: 76rpx;
+  text-align: center;
+  font-size: 28rpx;
+  border-radius: 38rpx;
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.action-bar__btn--off {
+  background: var(--brand-disabled);
+}

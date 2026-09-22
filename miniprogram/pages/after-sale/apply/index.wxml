@@ -1,0 +1,51 @@
+<view class="page page-with-action-bar">
+  <view class="card">
+    <view class="section-title">售后类型</view>
+    <view class="chips">
+      <view
+        wx:for="{{types}}"
+        wx:key="value"
+        class="chip {{item.value === afterSaleType ? 'chip--active' : ''}}"
+        bindtap="onTypeTap"
+        data-value="{{item.value}}"
+      >{{item.label}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">退款金额</view>
+    <input
+      class="input"
+      type="digit"
+      value="{{refundAmount}}"
+      placeholder="不超过该商品实付金额"
+      bindinput="onAmountInput"
+    />
+  </view>
+
+  <view class="card">
+    <view class="section-title">申请原因</view>
+    <input
+      class="input"
+      value="{{applyReason}}"
+      placeholder="例如:商品有破损"
+      maxlength="50"
+      bindinput="onReasonInput"
+    />
+    <textarea
+      class="textarea"
+      value="{{applyDesc}}"
+      placeholder="补充说明(选填)"
+      maxlength="200"
+      bindinput="onDescInput"
+    ></textarea>
+  </view>
+
+  <view class="hint text-muted">
+    暂不支持上传凭证图片:后端目前没有文件上传接口,而本地图片路径不传上去存不住。
+  </view>
+</view>
+
+<view class="action-bar">
+  <view class="action-bar__btn {{submitting ? 'action-bar__btn--off' : ''}}" bindtap="onSubmit">提交申请</view>
+</view>

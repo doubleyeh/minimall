@@ -1,0 +1,53 @@
+<view class="page {{showForm ? 'page-with-action-bar' : ''}}">
+  <view wx:if="{{list.length === 0 && !showForm}}" class="empty">还没有收货地址</view>
+
+  <view wx:for="{{list}}" wx:key="id" class="addr">
+    <view class="addr__head">
+      <text class="addr__name">{{item.receiverName}}</text>
+      <text class="addr__phone">{{item.receiverPhone}}</text>
+      <text wx:if="{{item.isDefault}}" class="addr__badge">默认</text>
+    </view>
+    <view class="addr__detail">{{item.full}}</view>
+    <view class="addr__actions">
+      <text wx:if="{{!item.isDefault}}" class="addr__action" bindtap="onSetDefault" data-id="{{item.id}}">设为默认</text>
+      <text class="addr__action" bindtap="onEdit" data-id="{{item.id}}">编辑</text>
+      <text class="addr__action" bindtap="onDelete" data-id="{{item.id}}">删除</text>
+    </view>
+  </view>
+
+  <view wx:if="{{showForm}}" class="form">
+    <view class="form__title">{{editingId ? '编辑地址' : '新增地址'}}</view>
+
+    <view class="field">
+      <text class="field__label">收货人</text>
+      <input class="field__input" value="{{form.receiverName}}" placeholder="姓名" bindinput="onInput" data-field="receiverName" />
+    </view>
+
+    <view class="field">
+      <text class="field__label">手机号</text>
+      <input class="field__input" value="{{form.receiverPhone}}" type="number" maxlength="11" placeholder="11 位手机号" bindinput="onInput" data-field="receiverPhone" />
+    </view>
+
+    <picker mode="region" value="{{form.region}}" bindchange="onRegionChange">
+      <view class="field">
+        <text class="field__label">所在地区</text>
+        <text class="field__input {{regionText ? '' : 'field__input--empty'}}">{{regionText || '请选择'}}</text>
+      </view>
+    </picker>
+
+    <view class="field">
+      <text class="field__label">详细地址</text>
+      <input class="field__input" value="{{form.detailAddress}}" placeholder="街道、门牌号等" bindinput="onInput" data-field="detailAddress" />
+    </view>
+
+    <view class="field row-between">
+      <text>设为默认地址</text>
+      <switch checked="{{form.defaultAddress}}" bindchange="onDefaultChange" color="#FF4D1C" />
+    </view>
+  </view>
+</view>
+
+<view class="action-bar">
+  <view wx:if="{{showForm}}" class="action-bar__btn action-bar__btn--ghost" bindtap="onCancelForm">取消</view>
+  <view class="action-bar__btn" bindtap="onToggleForm">{{showForm ? '保存' : '新增地址'}}</view>
+</view>

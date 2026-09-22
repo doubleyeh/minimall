@@ -1,0 +1,116 @@
+.empty {
+  padding: 180rpx 0;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 28rpx;
+}
+
+.addr {
+  margin: 20rpx 24rpx 0;
+  padding: 24rpx;
+  background: #ffffff;
+  border-radius: 16rpx;
+}
+
+.addr__head {
+  display: flex;
+  align-items: center;
+}
+
+.addr__name {
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.addr__phone {
+  margin-left: 16rpx;
+  font-size: 26rpx;
+  color: var(--text-2);
+}
+
+.addr__badge {
+  margin-left: 16rpx;
+  padding: 2rpx 12rpx;
+  font-size: 20rpx;
+  color: var(--brand);
+  border: 1rpx solid var(--brand);
+  border-radius: 6rpx;
+}
+
+.addr__detail {
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.addr__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid var(--bg-soft);
+}
+
+.addr__action {
+  margin-left: 32rpx;
+  font-size: 25rpx;
+  color: var(--text-2);
+}
+
+.form {
+  margin: 20rpx 24rpx 0;
+  padding: 24rpx;
+  background: #ffffff;
+  border-radius: 16rpx;
+}
+
+.form__title {
+  font-size: 29rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid var(--bg-soft);
+  font-size: 27rpx;
+}
+
+.field:last-child {
+  border-bottom: none;
+}
+
+.field__label {
+  width: 170rpx;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.field__input {
+  flex: 1;
+  font-size: 27rpx;
+}
+
+.field__input--empty {
+  color: var(--text-3);
+}
+
+.action-bar__btn {
+  flex: 1;
+  height: 76rpx;
+  line-height: 76rpx;
+  text-align: center;
+  font-size: 28rpx;
+  border-radius: 38rpx;
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.action-bar__btn--ghost {
+  margin-right: 20rpx;
+  background: var(--bg-soft);
+  color: var(--text-2);
+}

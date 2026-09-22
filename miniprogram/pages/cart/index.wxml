@@ -1,0 +1,59 @@
+<view class="page page-with-action-bar">
+  <view wx:if="{{rows.length === 0}}" class="empty">购物车还是空的</view>
+
+  <view wx:for="{{rows}}" wx:key="id" class="item {{item.valid ? '' : 'item--invalid'}}">
+    <view
+      class="check {{item.selected ? 'check--on' : ''}} {{item.valid ? '' : 'check--off'}}"
+      bindtap="onToggle"
+      data-id="{{item.id}}"
+    >
+      <text wx:if="{{item.selected}}">✓</text>
+    </view>
+
+    <image
+      class="item__img"
+      src="{{item.image}}"
+      mode="aspectFill"
+      bindtap="onGoodsTap"
+      data-goods-id="{{item.goodsId}}"
+    ></image>
+
+    <view class="item__body">
+      <view class="item__name ellipsis-2" bindtap="onGoodsTap" data-goods-id="{{item.goodsId}}">{{item.name}}</view>
+      <view class="item__sku">{{item.skuName}}</view>
+      <view wx:if="{{!item.valid}}" class="item__invalid">已失效(已下架或售罄),结算时会跳过</view>
+      <view class="row-between item__foot">
+        <view class="price">
+          <text class="price__symbol">¥</text>
+          <text class="price__value">{{item.priceText}}</text>
+        </view>
+        <view class="stepper">
+          <view class="stepper__btn {{item.quantity <= 1 ? 'stepper__btn--off' : ''}}" bindtap="onMinus" data-id="{{item.id}}">−</view>
+          <text class="stepper__value">{{item.quantity}}</text>
+          <view class="stepper__btn" bindtap="onPlus" data-id="{{item.id}}">＋</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="item__remove" bindtap="onRemove" data-id="{{item.id}}">删除</view>
+  </view>
+
+  <view wx:if="{{rows.length > 0}}" class="clear-row">
+    <text class="clear-row__link" bindtap="onClear">清空购物车</text>
+  </view>
+</view>
+
+<view wx:if="{{rows.length > 0}}" class="action-bar">
+  <view class="check {{allSelected ? 'check--on' : ''}}" bindtap="onToggleAll">
+    <text wx:if="{{allSelected}}">✓</text>
+  </view>
+  <text class="action-bar__label">全选</text>
+  <view class="action-bar__total">
+    <text>合计 </text>
+    <text class="price">
+      <text class="price__symbol">¥</text>
+      <text class="price__value">{{totalText}}</text>
+    </text>
+  </view>
+  <view class="action-bar__btn" bindtap="onCheckout">去结算</view>
+</view>

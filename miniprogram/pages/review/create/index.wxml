@@ -1,0 +1,39 @@
+<view class="page page-with-action-bar">
+  <view class="card">
+    <view class="section-title">评分</view>
+    <view class="stars">
+      <text
+        wx:for="{{starList}}"
+        wx:key="value"
+        class="star {{item.on ? 'star--on' : ''}}"
+        bindtap="onStarTap"
+        data-value="{{item.value}}"
+      >{{item.char}}</text>
+    </view>
+    <view class="text-muted">{{rating}} 分</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">评价内容</view>
+    <textarea
+      class="textarea"
+      value="{{content}}"
+      placeholder="说说这次购物体验(选填)"
+      maxlength="500"
+      bindinput="onContentInput"
+    ></textarea>
+  </view>
+
+  <view class="card row-between">
+    <text>匿名评价</text>
+    <switch checked="{{anonymous}}" color="#FF4D1C" bindchange="onAnonymousChange" />
+  </view>
+
+  <view class="hint text-muted">
+    暂不支持上传图片:后端目前没有文件上传接口。传本地路径没有意义,提交后另一端打不开。
+  </view>
+</view>
+
+<view class="action-bar">
+  <view class="action-bar__btn {{submitting ? 'action-bar__btn--off' : ''}}" bindtap="onSubmit">提交评价</view>
+</view>

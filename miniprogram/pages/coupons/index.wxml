@@ -1,0 +1,31 @@
+<view class="tabs">
+  <view
+    class="tabs__item {{tab === 'claimable' ? 'tabs__item--active' : ''}}"
+    bindtap="onTabTap"
+    data-tab="claimable"
+  >可领取</view>
+  <view
+    class="tabs__item {{tab === 'mine' ? 'tabs__item--active' : ''}}"
+    bindtap="onTabTap"
+    data-tab="mine"
+  >我的</view>
+</view>
+
+<view wx:if="{{list.length === 0}}" class="empty">
+  {{tab === 'claimable' ? '暂无可领取的优惠券' : '还没有优惠券'}}
+</view>
+
+<view wx:for="{{list}}" wx:key="key" class="coupon">
+  <view class="coupon__body">
+    <view class="coupon__title">{{item.title}}</view>
+    <view class="coupon__value">{{item.valueText}}</view>
+    <view class="coupon__time">{{item.timeText}}</view>
+  </view>
+  <view
+    wx:if="{{tab === 'claimable'}}"
+    class="coupon__btn {{item.canClaim ? '' : 'coupon__btn--off'}}"
+    bindtap="onClaim"
+    data-id="{{item.couponId}}"
+  >{{item.statusText}}</view>
+  <view wx:else class="coupon__status">{{item.statusText}}</view>
+</view>

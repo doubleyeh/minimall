@@ -1,105 +1,219 @@
-.page {
-  padding-bottom: 24rpx;
+/* 顶部品牌区。渐变从主色到深主色,配一点向右下的暖光,避免死板的纯色块 */
+.hero {
+  padding: 40rpx 32rpx 56rpx;
+  background: var(--brand-grad);
+  border-radius: 0 0 32rpx 32rpx;
 }
 
-/* 搜索入口。这里不做真搜索框,点进搜索页再输入 —— 首页少一个输入焦点,滚动更顺 */
-.search {
+.hero__title {
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 2rpx;
+}
+
+.hero__search {
   display: flex;
   align-items: center;
   height: 72rpx;
-  margin: 20rpx 24rpx;
-  padding: 0 24rpx;
-  background: #ffffff;
-  border-radius: 36rpx;
+  margin-top: 24rpx;
+  padding: 0 28rpx;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: var(--r-pill);
 }
 
-.search__icon {
-  font-size: 24rpx;
-  color: #8a8a8a;
+.hero__search-icon {
+  font-size: 34rpx;
+  line-height: 1;
+  color: var(--text-3);
   margin-right: 12rpx;
 }
 
-.search__placeholder {
+.hero__search-text {
   font-size: 26rpx;
-  color: #b0b0b0;
+  color: var(--text-3);
 }
 
-/* 分类横滑。white-space: nowrap 是 scroll-view 横滑生效的关键,漏了会换行 */
+/* 轮播往上叠进品牌区,做出层次 */
+.banner {
+  height: 300rpx;
+  margin: -36rpx 24rpx 0;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.banner__item {
+  position: relative;
+}
+
+.banner__img {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-soft);
+}
+
+.banner__mask {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20rpx 24rpx;
+  background: linear-gradient(to top, rgba(20, 12, 8, 0.72), rgba(20, 12, 8, 0));
+}
+
+.banner__name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.banner__price {
+  margin-top: 4rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #ffd9a8;
+}
+
+.banner__yuan {
+  font-size: 22rpx;
+  margin-right: 2rpx;
+}
+
+/* 金刚区:五个一行。用分类名首字做圆形徽标 —— 没有图标字体,首字反而比占位图清爽 */
 .cats {
-  white-space: nowrap;
-  padding: 0 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  margin: 24rpx 24rpx 0;
+  padding: 28rpx 8rpx 12rpx;
+  background: var(--card);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
 }
 
 .cats__item {
-  display: inline-block;
-  padding: 12rpx 28rpx;
-  margin: 0 12rpx;
-  font-size: 26rpx;
-  color: #4b4b4b;
-  background: #ffffff;
-  border-radius: 32rpx;
-}
-
-.cats__item--active {
-  color: #ffffff;
-  background: #0052d9;
-}
-
-.goods {
-  padding: 12rpx 24rpx 0;
-}
-
-.goods__card {
-  display: flex;
-  padding: 20rpx;
-  margin-bottom: 20rpx;
-  background: #ffffff;
-  border-radius: 16rpx;
-}
-
-.goods__image {
-  width: 200rpx;
-  height: 200rpx;
-  border-radius: 12rpx;
-  /* 图片没加载出来时是这个底色,而不是一条白缝 */
-  background: #f0f0f0;
-  flex-shrink: 0;
-}
-
-.goods__body {
+  width: 20%;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  flex: 1;
-  min-width: 0;
-  margin-left: 20rpx;
+  align-items: center;
+  margin-bottom: 20rpx;
 }
 
-.goods__name {
-  font-size: 28rpx;
+.cats__badge {
+  width: 88rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  border-radius: 50%;
+}
+
+/* 四种浅底轮换,让一排徽标不显得单调;都来自暖色域,不引入新的色相 */
+.cats__badge--0 {
+  color: #e2542a;
+  background: #fff0e8;
+}
+
+.cats__badge--1 {
+  color: #c9483f;
+  background: #fdeceb;
+}
+
+.cats__badge--2 {
+  color: #b06a12;
+  background: #fdf2e2;
+}
+
+.cats__badge--3 {
+  color: #a34c6b;
+  background: #fbeaf0;
+}
+
+.cats__badge--on {
+  color: #ffffff;
+  background: var(--brand-grad);
+  box-shadow: var(--shadow-brand);
+}
+
+.cats__label {
+  margin-top: 12rpx;
+  max-width: 100%;
+  font-size: 24rpx;
+  color: var(--text-2);
+}
+
+.cats__label--on {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.reco {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 36rpx 24rpx 20rpx;
+}
+
+.reco__reset {
+  font-size: 24rpx;
+  color: var(--brand);
+}
+
+/* 两列瀑布流:用 48.4% + space-between,比 grid 在小程序里更稳(低版本基础库也支持) */
+.goods {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 0 24rpx;
+}
+
+.gcard {
+  width: 48.4%;
+  margin-bottom: 20rpx;
+  background: var(--card);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.gcard__img {
+  width: 100%;
+  height: 336rpx;
+  background: var(--bg-soft);
+}
+
+.gcard__body {
+  padding: 16rpx 18rpx 20rpx;
+}
+
+.gcard__name {
+  font-size: 27rpx;
   font-weight: 600;
   line-height: 1.4;
+  min-height: 76rpx;
 }
 
-.goods__subtitle {
-  margin-top: 8rpx;
-  font-size: 24rpx;
-  color: #8a8a8a;
+.gcard__sub {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
 }
 
-.goods__foot {
+.gcard__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   margin-top: 12rpx;
 }
 
-.price__suffix {
-  font-size: 22rpx;
-  color: #e34d59;
-  margin-left: 4rpx;
+.gcard__suffix {
+  font-size: 20rpx;
+  color: var(--price);
+  margin-left: 2rpx;
 }
 
-.tip {
-  padding: 40rpx 0;
-  text-align: center;
-  font-size: 26rpx;
-  color: #999999;
+.gcard__sold {
+  font-size: 20rpx;
+  color: var(--text-3);
 }
