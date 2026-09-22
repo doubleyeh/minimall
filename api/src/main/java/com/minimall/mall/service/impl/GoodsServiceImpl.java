@@ -288,8 +288,14 @@ public class GoodsServiceImpl implements GoodsService {
         goods.setMainImage(request.mainImage());
         goods.setDetailContent(request.detailContent());
         goods.setFreightTemplateId(request.freightTemplateId());
+        // 缺省排序列 = 0,与 status 同样处理:库上是 NOT NULL,
+        // 只在"传了才设置"会让不传 sortOrder 的新建直接撞非空约束
+        // (被兜底成 50002「数据已存在或存在引用关系」,与真实原因完全对不上)。
+        // 分类与部门的 create 早就是这个写法,这里对齐它们。
         if (request.sortOrder() != null) {
             goods.setSortOrder(request.sortOrder());
+        } else if (goods.getId() == null) {
+            goods.setSortOrder(0);
         }
         if (request.status() != null) {
             goods.setStatus(request.status());

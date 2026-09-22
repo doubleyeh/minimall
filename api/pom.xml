@@ -233,6 +233,17 @@
                             <goals>
                                 <goal>prepare-agent</goal>
                             </goals>
+                            <configuration>
+                                <!--
+                                  每次运行重置覆盖率数据(默认 append=true 会跨次累加)。
+                                  累积的表现:报告是"自上次 clean 以来所有运行的并集",
+                                  跑一次单元层再跑一次全量,数字会被历史运行抬高,无法判断某批用例的
+                                  真实增量 —— 实测同一份代码累积值比单跑高 10 行 / 7 分支。
+                                  注意 append 是 prepare-agent 的参数,所以配在这个 execution 里,
+                                  而不是插件级 configuration(report 目标没有这个参数)。
+                                -->
+                                <append>false</append>
+                            </configuration>
                         </execution>
                         <execution>
                             <id>report</id>

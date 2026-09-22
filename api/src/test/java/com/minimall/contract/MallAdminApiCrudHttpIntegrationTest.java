@@ -117,7 +117,8 @@ class MallAdminApiCrudHttpIntegrationTest {
         Long goodsId = created.dataAsNumber();
         assertThat(goodsId).isNotNull();
 
-        assertThat(get("/mall/admin/goods?pageNo=1&pageSize=50", token).body()).contains(goodsName);
+        assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&pageSize=50", token).body())
+                .as("新建的商品要能在列表里查到").contains(goodsName);
 
         // 改价改名。提交里带的是**新** SKU:旧 SKU 会被停售而不是删除(历史订单要能回查)
         assertThat(put("/mall/admin/goods/" + goodsId,
@@ -144,6 +145,154 @@ class MallAdminApiCrudHttpIntegrationTest {
                 goodsBody(999999L, "分类不存在" + suffix(), 1, "SKU-X" + suffix(), "1.00"));
         assertThat(unknownCategory.code()).as("分类必须存在:%s", unknownCategory.body()).isNotEqualTo("0");
         assertThat(categoryId).isNotNull();
+    }
+
+    /**
+     * 商品保存时对外部引用与 SKU 编码的校验。
+     *
+     * <p>共同点是:**错误的引用必须在保存这一步被挡住,而不是等到使用时才爆**。运费模板不存在,
+     * 商品存得进去但下单时算不出运费;SKU 编码重复,库上的唯一索引确实能兜底,但抛出来的是
+     * SQL 异常 —— 前端只会看到"系统异常",而这里提前给 50002 才能提示到具体字段。
+     */
+    @Test
+    @DisplayName("商品:运费模板不存在、SKU 编码重复、编码被别的商品占用,都要在保存时被拒")
+    void goodsRejectsBadReferencesAndDuplicateSkuCodes() throws Exception {
+        Long categoryId = post("/mall/admin/categories", categoryBody("引用校验分类" + suffix())).dataAsNumber();
+        String conflict = String.valueOf(ErrorCode.DATA_CONFLICT.code());
+        String notFound = String.valueOf(ErrorCode.NOT_FOUND.code());
+
+        // ① 运费模板指向一个不存在的主键
+        Response badTemplate = post("/mall/admin/goods",
+                goodsBody(categoryId, "坏模板" + suffix(), 1, "SKU-T" + suffix(), "10.00")
+                        .replace("\"freightTemplateId\":null", "\"freightTemplateId\":999999999"));
+        assertThat(badTemplate.code())
+                .as("运费模板不存在要返回资源不存在,响应=%s", badTemplate.body())
+                .isEqualTo(notFound);
+
+        // ② 同一次提交里两个 SKU 用了同一个编码
+        String duplicated = "SKU-D" + suffix();
+        Response dupInBatch = post("/mall/admin/goods", goodsWithSkus(categoryId, "批内重复" + suffix(),
+                skuJson(duplicated, "10.00") + "," + skuJson(duplicated, "20.00")));
+        assertThat(dupInBatch.code())
+                .as("同一批里 SKU 编码重复要被拒,响应=%s", dupInBatch.body())
+                .isEqualTo(conflict);
+
+        // ③ 编码已经被另一个商品占用(@NotEmpty 之外还要查库,库上有唯一索引兜底)
+        String taken = "SKU-TAKEN" + suffix();
+        Long firstGoods = post("/mall/admin/goods",
+                goodsWithSkus(categoryId, "先占编码" + suffix(), skuJson(taken, "10.00"))).dataAsNumber();
+        assertThat(firstGoods).as("建第一个商品").isNotNull();
+        Response reused = post("/mall/admin/goods",
+                goodsWithSkus(categoryId, "复用编码" + suffix(), skuJson(taken, "10.00")));
+        assertThat(reused.code())
+                .as("SKU 编码被其他商品占用要被拒,响应=%s", reused.body())
+                .isEqualTo(conflict);
+    }
+
+    /**
+     * 商品保存里"提交内容有缺陷"的那几条分支。
+     *
+     * <p>它们不是参数校验(注解看不见),也不是主流程,但每条都对应一个真实的数据清理规则 ——
+     * 缺省字段要保留原值、空白轮播图不该入库、null 规格值要挡住、改自己的 SKU 编码不算被占用。
+     * 这些分支<b>只能从 HTTP 打进来</b>:它们靠的是 JSON 数组里夹 null 这类输入,
+     * 服务层用例构造请求对象时反而绕不过去。
+     */
+    @Test
+    @DisplayName("商品:缺省字段保留原值、空白图片跳过、null 规格值被拒、改自己的 SKU 编码不算占用")
+    void goodsDefensiveBranches() throws Exception {
+        Long categoryId = post("/mall/admin/categories", categoryBody("边界分类" + suffix())).dataAsNumber();
+        String goodsName = "CRUD 边界商品" + suffix();
+        String skuCode = "SKU-BD" + suffix();
+
+        // ① 不传 sortOrder / status / specs,且轮播图数组里夹了 null 与空白项。
+        //    sortOrder 这条曾经是坏的:实体上是 @Column(nullable = false)、DTO 上却是可选,
+        //    而 applyBasicFields 只在"传了才设置" → 不传就把 NULL 发给库,撞非空约束后
+        //    被兜底成 50002「数据已存在或存在引用关系」,与真实原因完全对不上
+        Response created = post("/mall/admin/goods",
+                "{\"categoryId\":" + categoryId + ",\"goodsName\":\"" + goodsName + "\","
+                        + "\"mainImage\":\"https://example.com/main.png\","
+                        + "\"images\":[\"https://example.com/1.png\",null,\"  \"],"
+                        + "\"skus\":[" + skuJson(skuCode, "10.00") + "]}");
+        assertThat(created.code())
+                .as("可选字段缺失不该报错(库上都是 NOT NULL,缺省值必须由服务层补):%s", created.body())
+                .isEqualTo("0");
+        Long goodsId = created.dataAsNumber();
+        assertThat(goodsId).as("建商品").isNotNull();
+
+        Response detail = get("/mall/admin/goods/" + goodsId, token);
+        assertThat(detail.body()).as("不传 status 时新建商品默认下架").contains("\"status\":0");
+        assertThat(detail.body()).as("不传 sortOrder 时缺省为 0").contains("\"sortOrder\":0");
+        assertThat(detail.body())
+                .as("null 与空白的轮播图要跳过,只留真实的那一条 —— 否则商品页会出现空图位")
+                .contains("\"images\":[\"https://example.com/1.png\"]");
+        Long skuId = firstSkuId(detail.body());
+
+        // ② 空白关键词不当事:与分类组合后仍能查到它(单靠空白词会退化成"返回全量",断不准)
+        assertThat(get("/mall/admin/goods?goodsName=%20%20&categoryId=" + categoryId + "&pageSize=50", token).body())
+                .as("全空白的关键词必须按「没有关键词」处理").contains(goodsName);
+
+        // ③ 上架后原样提交:带自己的 SKU id 与编码、省略 status。
+        //    一箭三雕 —— 缺省 status 要保留原值、判重时要排除自己(否则改个价都会被判编码冲突)、
+        //    而且这里只能用**自己的 id 原样提交**:若换成 id=null 的同编码 SKU,
+        //    库上的 uk_tenant_sku_code 会真的撞唯一键(旧 SKU 只停售不删除)
+        assertThat(put("/mall/admin/goods/" + goodsId + "/status?status=1", null).code()).isEqualTo("0");
+        assertThat(put("/mall/admin/goods/" + goodsId,
+                "{\"categoryId\":" + categoryId + ",\"goodsName\":\"" + goodsName + "\","
+                        + "\"mainImage\":\"https://example.com/main.png\","
+                        + "\"skus\":[{\"id\":" + skuId + ",\"skuCode\":\"" + skuCode + "\","
+                        + "\"skuName\":\"默认规格\",\"price\":12.00,\"stock\":50,\"specValues\":[]}]}").code())
+                .as("保留自己的 SKU 与编码、省略 status 都该成功(编码判重必须排除自己)")
+                .isEqualTo("0");
+        Response afterUpdate = get("/mall/admin/goods/" + goodsId, token);
+        assertThat(afterUpdate.body())
+                .as("提交里没有 status 时应当保留原来的上架状态,不能被悄悄改成下架")
+                .contains("\"status\":1");
+        assertThat(afterUpdate.body()).as("改价生效").contains("12.00");
+
+        // ④ 规格值数组里夹了 null:计数时 null 被过滤掉,于是"长度对不上"按重复处理并拒绝。
+        //    报错文案说的是"重复的规格值",而真实原因是夹了空项 —— 这里只钉住"被拒",不钉文案
+        assertThat(post("/mall/admin/goods",
+                "{\"categoryId\":" + categoryId + ",\"goodsName\":\"空规格值" + suffix() + "\","
+                        + "\"mainImage\":\"https://example.com/main.png\","
+                        + "\"specs\":[{\"specName\":\"颜色\",\"values\":[null,\"红\"]}],"
+                        + "\"skus\":[" + skuJson("SKU-NV" + suffix(), "10.00") + "]}").code())
+                .as("规格值里夹 null 必须被拒,否则会建出一条没有名字的规格值")
+                .isEqualTo(ErrorCode.PARAM_INVALID.code() + "");
+
+        // ⑤ SKU 引用了一个 null 规格值:关联建不起来,必须挡在保存这一步
+        assertThat(post("/mall/admin/goods",
+                "{\"categoryId\":" + categoryId + ",\"goodsName\":\"空引用" + suffix() + "\","
+                        + "\"mainImage\":\"https://example.com/main.png\","
+                        + "\"specs\":[{\"specName\":\"颜色\",\"values\":[\"红\"]}],"
+                        + "\"skus\":[{\"id\":null,\"skuCode\":\"SKU-NR" + suffix() + "\",\"skuName\":\"红\","
+                        + "\"price\":10.00,\"stock\":1,\"specValues\":[null]}]}").code())
+                .as("SKU 的规格值必须是本次提交里的,空值同样要拒")
+                .isEqualTo(ErrorCode.PARAM_INVALID.code() + "");
+
+        // ⑥ 更新时提交了**别的商品**的 SKU 编码:要在服务层提前挡住,并给出能定位字段的文案。
+        //    光断言 50002 是不够的 —— 库上的 uk_tenant_sku_code 也会抛同一个码,
+        //    所以这里必须断言那句话,才能证明是守卫先命中、而不是让 SQL 异常漏出去
+        String takenCode = "SKU-TK" + suffix();
+        assertThat(post("/mall/admin/goods",
+                goodsWithSkus(categoryId, "占用方" + suffix(), skuJson(takenCode, "10.00"))).code()).isEqualTo("0");
+        Response stolen = put("/mall/admin/goods/" + goodsId,
+                "{\"categoryId\":" + categoryId + ",\"goodsName\":\"" + goodsName + "\","
+                        + "\"mainImage\":\"https://example.com/main.png\","
+                        + "\"skus\":[{\"id\":" + skuId + ",\"skuCode\":\"" + takenCode + "\","
+                        + "\"skuName\":\"默认规格\",\"price\":12.00,\"stock\":50,\"specValues\":[]}]}");
+        assertThat(stolen.code())
+                .as("占用别的商品的 SKU 编码要被拒,响应=%s", stolen.body())
+                .isEqualTo(ErrorCode.DATA_CONFLICT.code() + "");
+        assertThat(stolen.body())
+                .as("必须是服务层守卫给出的可读文案,而不是数据库唯一键的「数据已存在或存在引用关系」")
+                .contains("已被其他商品使用");
+    }
+
+    /** 从商品详情的 skus 数组里取第一个 SKU 的 id。 */
+    private Long firstSkuId(String detailBody) {
+        Matcher matcher = Pattern.compile("\"skus\":\\[\\{\"id\":(\\d+)").matcher(detailBody);
+        assertThat(matcher.find()).as("详情里应当能取到 SKU id,响应=%s", detailBody).isTrue();
+        return Long.valueOf(matcher.group(1));
     }
 
     // ================================================================ 运费模板
@@ -184,7 +333,8 @@ class MallAdminApiCrudHttpIntegrationTest {
         assertThat(created.code()).as("新建满减:%s", created.body()).isEqualTo("0");
         Long activityId = created.dataAsNumber();
 
-        assertThat(get("/mall/admin/promotions?pageNo=1&pageSize=50", token).body()).contains(name);
+        assertThat(get("/mall/admin/promotions?activityName=" + enc(name) + "&pageSize=50", token).body())
+                .as("新建的活动要能在列表里查到").contains(name);
         assertThat(put("/mall/admin/promotions/" + activityId, promotionBody(name + "改")).code()).isEqualTo("0");
         assertThat(put("/mall/admin/promotions/" + activityId + "/status?status=0", null).code()).isEqualTo("0");
     }
@@ -207,7 +357,8 @@ class MallAdminApiCrudHttpIntegrationTest {
         assertThat(created.code()).as("新建优惠券:%s", created.body()).isEqualTo("0");
         Long couponId = created.dataAsNumber();
 
-        assertThat(get("/mall/admin/coupons?pageNo=1&pageSize=50", token).body()).contains(name);
+        assertThat(get("/mall/admin/coupons?couponName=" + enc(name) + "&pageSize=50", token).body())
+                .as("新建的券要能在列表里查到").contains(name);
         assertThat(put("/mall/admin/coupons/" + couponId, couponBody(name + "改", "15.00")).code()).isEqualTo("0");
         assertThat(put("/mall/admin/coupons/" + couponId + "/status?status=0", null).code()).isEqualTo("0");
     }
@@ -238,6 +389,130 @@ class MallAdminApiCrudHttpIntegrationTest {
                         + "\"discountRate\":0.9,\"status\":1}").code()).isEqualTo("0");
     }
 
+    @Test
+    @DisplayName("优惠券:状态只能是 0 或 1,传别的值要被拒")
+    void couponChangeStatusRejectsBadValue() throws Exception {
+        Long couponId = post("/mall/admin/coupons", couponBody("状态校验券" + suffix(), "10.00")).dataAsNumber();
+        assertThat(couponId).as("建券").isNotNull();
+
+        Response bad = put("/mall/admin/coupons/" + couponId + "/status?status=2", null);
+        assertThat(bad.code())
+                .as("状态只能是 0(停用)或 1(启用),响应=%s", bad.body())
+                .isEqualTo(String.valueOf(ErrorCode.PARAM_INVALID.code()));
+    }
+
+    /**
+     * 券的两个配置校验。
+     *
+     * <p>有效期倒置是最常见的人工笔误(起止时间填反),放行的话这张券会永远处于"未开始/已结束",
+     * 运营在列表里看到它却领不了,排查成本很高。减免金额为 0 或负则是"发一张没有用的券",
+     * 更糟的是负数会把订单金额往上加。
+     */
+    @Test
+    @DisplayName("优惠券:有效期倒置、减免金额非正都要被拒")
+    void couponRejectsInvertedPeriodAndNonPositiveAmount() throws Exception {
+        String paramInvalid = String.valueOf(ErrorCode.PARAM_INVALID.code());
+
+        Response inverted = post("/mall/admin/coupons",
+                "{\"couponName\":\"CRUD 倒置券" + suffix() + "\",\"couponType\":1,\"discountAmount\":10.00,"
+                        + "\"discountRate\":null,\"minOrderAmount\":0,\"totalCount\":10,\"perCustomerLimit\":1,"
+                        + "\"validStartTime\":\"" + VALID_TO + "\",\"validEndTime\":\"" + VALID_FROM
+                        + "\",\"status\":1}");
+        assertThat(inverted.code())
+                .as("结束时间早于开始时间要被拒,响应=%s", inverted.body())
+                .isEqualTo(paramInvalid);
+
+        Response zeroAmount = post("/mall/admin/coupons",
+                "{\"couponName\":\"CRUD 零减免" + suffix() + "\",\"couponType\":1,\"discountAmount\":0,"
+                        + "\"discountRate\":null,\"minOrderAmount\":0,\"totalCount\":10,\"perCustomerLimit\":1,"
+                        + "\"validStartTime\":\"" + VALID_FROM + "\",\"validEndTime\":\"" + VALID_TO
+                        + "\",\"status\":1}");
+        assertThat(zeroAmount.code())
+                .as("减免金额必须大于 0,响应=%s", zeroAmount.body())
+                .isEqualTo(paramInvalid);
+    }
+
+    // ================================================================ 列表筛选
+
+    /**
+     * 三个后台列表的筛选参数。
+     *
+     * <p>此前这些列表只有"能返回"的断言,筛选谓词是不是真的生效从没验过 —— 而谓词写漏**不会报错**,
+     * 只会让运营筛任何条件都看到全量数据,页面上看不出来。所以每条都做"命中 / 不命中"两侧断言,
+     * 单侧断言对谓词写漏是绿的。名称类字段在实现里是 LIKE(contains),"不命中"那侧必须用
+     * 与原名无包含关系的值,否则会因为包含关系反而命中。
+     */
+    @Test
+    @DisplayName("商品列表:按名称、分类、状态筛选要真的生效")
+    void goodsListFiltering() throws Exception {
+        Long categoryId = post("/mall/admin/categories", categoryBody("筛选分类" + suffix())).dataAsNumber();
+        String goodsName = "CRUD 筛选商品" + suffix();
+        Long goodsId = post("/mall/admin/goods", goodsBody(categoryId, goodsName, 1, "SKU-F" + suffix(), "10.00"))
+                .dataAsNumber();
+        assertThat(goodsId).as("建商品").isNotNull();
+
+        assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&pageSize=50", token).body())
+                .as("按名称筛选要命中").contains("\"id\":" + goodsId);
+        assertThat(get("/mall/admin/goods?goodsName=" + enc("绝无此商品" + suffix()) + "&pageSize=50", token).body())
+                .as("按不存在的名称筛选不该命中").doesNotContain("\"id\":" + goodsId);
+
+        assertThat(get("/mall/admin/goods?categoryId=" + categoryId + "&pageSize=50", token).body())
+                .as("按分类筛选要命中").contains("\"id\":" + goodsId);
+        assertThat(get("/mall/admin/goods?categoryId=999999&pageSize=50", token).body())
+                .as("按不存在的分类不该命中").doesNotContain("\"id\":" + goodsId);
+
+        assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=1&pageSize=50", token).body())
+                .as("上架状态下要能命中").contains("\"id\":" + goodsId);
+        assertThat(put("/mall/admin/goods/" + goodsId + "/status?status=0", null).code()).isEqualTo("0");
+        assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=1&pageSize=50", token).body())
+                .as("下架后不该再出现在上架列表里").doesNotContain("\"id\":" + goodsId);
+        assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=0&pageSize=50", token).body())
+                .as("下架后应当出现在下架列表里").contains("\"id\":" + goodsId);
+    }
+
+    @Test
+    @DisplayName("优惠券列表:按名称与状态筛选要真的生效")
+    void couponListFiltering() throws Exception {
+        String name = "CRUD 筛选券" + suffix();
+        Long couponId = post("/mall/admin/coupons", couponBody(name, "10.00")).dataAsNumber();
+        assertThat(couponId).as("建券").isNotNull();
+
+        assertThat(get("/mall/admin/coupons?couponName=" + enc(name) + "&pageSize=50", token).body())
+                .as("按名称筛选要命中").contains(name);
+        assertThat(get("/mall/admin/coupons?couponName=" + enc("绝无此券" + suffix()) + "&pageSize=50", token).body())
+                .as("按不存在的名称筛选不该命中").doesNotContain(name);
+        assertThat(get("/mall/admin/coupons?couponName=" + enc(name) + "&status=1&pageSize=50", token).body())
+                .as("新建的券默认启用").contains(name);
+
+        assertThat(put("/mall/admin/coupons/" + couponId + "/status?status=0", null).code()).isEqualTo("0");
+        assertThat(get("/mall/admin/coupons?couponName=" + enc(name) + "&status=1&pageSize=50", token).body())
+                .as("停用后不该再出现在启用列表里").doesNotContain(name);
+        assertThat(get("/mall/admin/coupons?couponName=" + enc(name) + "&status=0&pageSize=50", token).body())
+                .as("停用后应当出现在停用列表里").contains(name);
+    }
+
+    @Test
+    @DisplayName("满减列表:按活动名与状态筛选要真的生效")
+    void promotionListFiltering() throws Exception {
+        String name = "CRUD 筛选满减" + suffix();
+        Long activityId = post("/mall/admin/promotions", promotionBody(name)).dataAsNumber();
+        assertThat(activityId).as("建满减活动").isNotNull();
+
+        assertThat(get("/mall/admin/promotions?activityName=" + enc(name) + "&pageSize=50", token).body())
+                .as("按活动名筛选要命中").contains(name);
+        assertThat(get("/mall/admin/promotions?activityName=" + enc("绝无此活动" + suffix()) + "&pageSize=50", token)
+                .body())
+                .as("按不存在的活动名筛选不该命中").doesNotContain(name);
+        assertThat(get("/mall/admin/promotions?activityName=" + enc(name) + "&status=1&pageSize=50", token).body())
+                .as("新建的活动默认启用").contains(name);
+
+        assertThat(put("/mall/admin/promotions/" + activityId + "/status?status=0", null).code()).isEqualTo("0");
+        assertThat(get("/mall/admin/promotions?activityName=" + enc(name) + "&status=1&pageSize=50", token).body())
+                .as("停用后不该再出现在启用列表里").doesNotContain(name);
+        assertThat(get("/mall/admin/promotions?activityName=" + enc(name) + "&status=0&pageSize=50", token).body())
+                .as("停用后应当出现在停用列表里").contains(name);
+    }
+
     // ================================================================ 请求构造
 
     private String categoryBody(String name) {
@@ -253,6 +528,20 @@ class MallAdminApiCrudHttpIntegrationTest {
         return "{\"templateName\":\"" + name + "\",\"chargeType\":1,\"rules\":["
                 + "{\"region\":\"ALL\",\"firstUnit\":1,\"firstFee\":" + firstFee + ",\"additionalUnit\":1,"
                 + "\"additionalFee\":" + additionalFee + ",\"freeShippingAmount\":null}]}";
+    }
+
+    /** 只带 SKU 列表的商品请求体:编码冲突类用例不需要其余字段。 */
+    private String goodsWithSkus(Long categoryId, String goodsName, String skusJson) {
+        return "{\"categoryId\":" + categoryId + ",\"goodsName\":\"" + goodsName + "\","
+                + "\"goodsSubtitle\":\"副标题\",\"mainImage\":\"https://example.com/main.png\","
+                + "\"detailContent\":\"<p>详情</p>\",\"freightTemplateId\":null,\"sortOrder\":1,\"status\":1,"
+                + "\"images\":[],\"specs\":[],\"skus\":[" + skusJson + "]}";
+    }
+
+    private String skuJson(String skuCode, String price) {
+        return "{\"id\":null,\"skuCode\":\"" + skuCode + "\",\"skuName\":\"默认规格\",\"skuImage\":null,"
+                + "\"price\":" + price + ",\"costPrice\":null,\"stock\":50,\"weight\":null,\"status\":1,"
+                + "\"specValues\":[]}";
     }
 
     private String goodsBody(Long categoryId, String goodsName, Integer status, String skuCode, String price) {
@@ -293,6 +582,11 @@ class MallAdminApiCrudHttpIntegrationTest {
                 AuditContext.clear();
             }
         });
+    }
+
+    /** 查询参数的值要编码:中文与空格都不能直接进 URI。 */
+    private String enc(String value) {
+        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private String suffix() {

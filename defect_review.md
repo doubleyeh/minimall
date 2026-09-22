@@ -193,3 +193,106 @@ BUILD SUCCESS
 | 长尾 241 行 / 75 个类 | 94.7% | 防御性分支(需构造坏数据)、无人调用的访问器。**在文档里标注为残留,而不是假装测了** |
 
 排除这两类后,`api` 的行覆盖为 **94.7%、分支 76.2%**;`mvn test`(默认层)54 项约 50 秒,**不依赖 MySQL/Redis**。
+
+---
+
+## 七、跟进(2026-09-22):核对后不成立的三条前提
+
+补测试前按"直觉 + 文档"列了一份"应该存在的守卫"清单,其中三条核对实现后不成立。
+记在这里,免得以后有人照着旧清单再补一遍 —— 这与第五节"端点清单会腐化"是同一类问题:
+**清单本身没有机制保证有效,结论要落到核对**。
+
+| 清单里的前提 | 核对结果 |
+|---|---|
+| 售后 `reject` 必须带拒绝原因,缺 `reason` 要被拒 | **规则不存在**。`MallAfterSaleController.RejectRequest` 只是 `record RejectRequest(String reason)`,没有 `@NotBlank`;`AfterSaleServiceImpl.reject` 对 null 是容忍的,只在操作日志里写「未填写原因」。所以"缺 reason → 40003"这条断言写不出来 |
+| 订单状态机要单独钉"已取消的订单不能发货" | 守卫**存在**,但与"未付款不能发货"**是同一个分支**:`OrderAdminServiceImpl.ship` 只判断 `status != STATUS_PENDING_SHIP`。单写它不增加分支覆盖,只让业务场景更贴切 |
+| `/mall/admin/member-levels/{id}` 删除接口零覆盖 | 该控制器**没有 DELETE 端点**(只有 list / create / update),这个缺口不存在 |
+
+同一批跟进里**确认成立并已补测**的,是列表筛选参数:此前只有 6 个列表验过筛选谓词,
+`deptId`、`dictType/dictName`、`packageName`、`roleName`、`tenantCode`、`goodsName/categoryId`、
+`couponName`、`activityName`、`afterSaleNo`、以及客户端订单/商品/我的券的 `status`/`categoryId`/`keyword`
+全部没有任何用例,现已按"命中 / 不命中"两侧补齐。
+
+### 7.1 顺带清掉的一类测试隐患:断言依赖"数据落在第几页"
+
+补完上面的用例后,全量跑挂了一条 `userCrudCycle` —— **单独跑该类是绿的**。根因不在业务:
+它用 `GET /system/users?pageNo=1&pageSize=50` 断言"刚建的用户在列表里",而平台侧的用户列表是
+**跨租户**的,全量一轮累积到 53 个(光权限矩阵用例每个用例就建 3 个账号),新用户翻到了第二页。
+
+这是第 8 条("测试自身的累积性失败")的同一类问题,但更隐蔽:它不是"跑多了才撞唯一约束",
+而是**断言本身没有收敛到被断言的那条记录**,把"这一条在列表里"偷换成了"这一条在第 1 页里"。
+两个方向都会出问题:
+
+- `contains(新记录)` 会以与业务无关的原因失败(数据量增长);
+- `doesNotContain(新记录)` 则可能因为"它其实在第 2 页"而**假装通过** —— 这个方向不会报错,更危险。
+
+同一写法在 `SysApiCrudHttpIntegrationTest` / `MallAdminApiCrudHttpIntegrationTest` /
+`MallHttpFlowIntegrationTest` 里还有 7 处(`roles`、`packages`、`dicts`、`tenants`、
+`mall/admin` 的 goods / coupons / promotions),另有 2 处按 `status` 筛选但结果集是整租户的
+(商家订单、商家售后)。**已全部改成用一个能收敛到该记录的参数**(单号 / 名称 / 唯一分类)来断言;
+需要验 `status` 谓词时,就与单号组合查询,而不是靠"翻不到第二页"。
+
+**防复发**:凡"断言某条新记录出现在列表里",查询必须收敛到该记录(或它的极小等价类);
+用分页参数兜底等于把断言绑在数据量上。这条与第五节的"语义型断言"是同一个要求。
+
+### 7.2 撞出一个真实缺陷:不传 `sortOrder` 建商品会 50002
+
+写"可选字段缺省"用例时撞出来的,**不是测试写错**。
+
+- **现象**:`POST /mall/admin/goods` 的请求体里不带 `sortOrder` → `50002 数据已存在或存在引用关系`。
+- **根因**:`MallGoods.sortOrder` 是 `@Column(name = "sort_order", nullable = false)`,库上也是
+  `NOT NULL DEFAULT 0`,**而 DTO 里 `sortOrder` 没有任何 `@NotNull`(声明为可选)**。
+  `GoodsServiceImpl.applyBasicFields` 只在 `request.sortOrder() != null` 时赋值 →
+  新建时该字段为 null,Hibernate 把 NULL 发给库、撞非空约束,再被统一异常处理翻译成"数据冲突"。
+- **为什么难查**:报错说"数据已存在或存在引用关系",真实原因却是"少传了一个可选字段",两者毫不相干。
+  前端一直传 `sortOrder`,所以没在线上暴露。
+- **同类对照**:**分类与部门早就是对的** —— `GoodsCategoryServiceImpl.create` 与 `DeptServiceImpl.create`
+  都写 `request.sortOrder() == null ? 0 : request.sortOrder()`,只有商品这一处漏了。
+- **修法**:让商品与它们对齐(缺省且是新建 → 0),而**不是**去给 DTO 加 `@NotNull` ——
+  库上本来就 `DEFAULT 0`,`sortOrder` 设计上确实是可选的。
+- **回归用例**:`MallAdminApiCrudHttpIntegrationTest.goodsDefensiveBranches` 的 ①。
+
+这条属于第二节的模式 A(「看起来做了这件事,实际没生效」的一种变体:声明可选、实际必填),
+而且和第四节一样,是**只有真实请求才暴露**的一类 —— 服务层用例都显式传了 `sortOrder`,永远碰不到。
+
+### 7.3 两个类的分支:24 个缺口里只有一半出头是真可达的
+
+本轮啃了分支缺口最大的两个类(各 24 个)。补完 **`GoodsServiceImpl` 24 → 16、
+`AfterSaleServiceImpl` 24 → 12**。剩下的不是"还没写",而是**达不到**,分三类:
+
+**① 被 DTO 校验挡住(参数校验已经在管,服务层不该重复测)**
+
+| 位置 | 分支数 | 挡在哪 |
+|---|---|---|
+| `GoodsServiceImpl.validateSkuCodesUnique` 的 skuCode 为空/null | 3 | `SkuSaveRequest.skuCode` 是 `@NotBlank` |
+| `GoodsServiceImpl` 里的 `stock == null`(汇总重算、手工改库存流水) | 3 | `SkuSaveRequest.stock` 是 `@NotNull` |
+| `GoodsServiceImpl.changeStatus` 的 `status == null` | 1 | 端点是 `@RequestParam Integer status`(必填) |
+
+**② 被数据库非空约束挡住**
+
+`mall_sku.stock` / `mall_sku.status` 都是 `NOT NULL`,所以"实体字段为 null"的分支
+(按 `status == null` 过滤、`totalStock == null`、`getStatus() == null`)在真实数据里不可能出现,
+除非直接改库造脏数据。共 3 个。
+
+**③ 逻辑上走不到**
+
+| 位置 | 分支数 | 为什么走不到 |
+|---|---|---|
+| `GoodsServiceImpl.saveSpecs` 跳过空白规格值 | 2 | 前面的 `validateSpecValues` 已经把夹空项/重复值的提交拒掉了,这段永远轮不到 |
+| `validateSkuCodesUnique` 的 `tenantId == null` | 1 | 调用方(`create`/`update`)必然在租户上下文里 |
+| `categoryNames` / `specValueNamesBySku` 里的空集合与 null 名 | 4 | 需要"商品无分类""关联的规格值已被删"这类脏数据 |
+| `AfterSaleServiceImpl.apply` 的 `countActiveByOrderItemId > 0` | 1 | 第一次申请就把订单置为"售后中",而 `apply` 的状态守卫在它**之前**且不接受售后中 —— 这条守卫被完全遮住(**已用用例把现状钉住**) |
+| `restoreOrderStatus` 的 `from == target` | 1 | 售后单存续期间订单恒为"售后中",回退目标不可能是它 |
+| `markOrderAfterSale` 的"已在售后中" | 2 | 需要双明细订单且两个明细都申请售后;本次已补了双明细部分退款用例,但那条路径走的是"另一件没申请",所以只覆盖到"整单不该被取消",覆盖不到这一条 |
+| `restoreStock` 的 `item == null`、`autoApproveTimeout` 的 `target == null`、`saveImages` 的空数组、`currentUserId` 的无审计上下文、`finish` 里换货+仲裁通过 | 6 | 需要"明细被删""查完就消失"这类并发/脏数据场景 |
+
+**结论**:这两个类再往上推,边际上只剩"造脏数据才能碰到"的分支,收益与风险都不划算。
+第六节早就把这类列为「标注为残留,而不是假装测了」,这里把它具体化到位置级别。
+
+**顺带钉住的两条真实规则**(原来只是"代码里有",没有用例):
+
+- **被拒的售后单不是终态** —— 商家拒绝后订单仍保持"售后中",因为买家还能申请客服介入。
+  容易写成"商家拒了就结束了"。
+- **双明细订单只退一件不整单取消** —— 订单状态回落要看"是否还有明细没退完/有没有收货时间",
+  单明细订单永远走"整单退掉 → 已取消",这条规则以前从没被触发过。
+

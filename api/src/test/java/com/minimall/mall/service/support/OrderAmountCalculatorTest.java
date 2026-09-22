@@ -179,6 +179,124 @@ class OrderAmountCalculatorTest {
                 .hasMessageContaining("超过订单金额");
     }
 
+    // ---------------------------------------------------------------- 防御分支
+
+    /**
+     * 这一组覆盖的是"配置缺了一半"的情况。
+     *
+     * <p>它们的共同点是:**不抛异常比算对更重要**。运营在后台把满减规则写成 JSON 对象、
+     * 券只填了折扣率没填面额,这类数据一定会出现;金额计算里抛 NPE 的表现是整个下单页面 500,
+     * 而按"不减免"处理最坏只是少减一点钱。所以这里逐条钉住这些分支都返回确定值。
+     */
+    @Test
+    @DisplayName("满减:规则为空/非数组/元素缺字段,一律按不减免处理")
+    void reductionIgnoresUnusableRules() {
+        assertThat(calculator.reductionFor(null, new BigDecimal("500"))).isEqualByComparingTo("0");
+        assertThat(calculator.reductionFor("   ", new BigDecimal("500"))).isEqualByComparingTo("0");
+        assertThat(calculator.reductionFor(RULE_NORMAL, null)).isEqualByComparingTo("0");
+        assertThat(calculator.reductionFor(RULE_NORMAL, BigDecimal.ZERO)).isEqualByComparingTo("0");
+        // 合法 JSON 但不是数组(写成对象是最常见的笔误)
+        assertThat(calculator.reductionFor("{\"amount\":100,\"reduce\":10}", new BigDecimal("500")))
+                .isEqualByComparingTo("0");
+        // 数组里缺 amount 或 reduce 的档位要跳过,而不是当成 0 门槛命中
+        assertThat(calculator.reductionFor("[{\"reduce\":10},{\"amount\":100,\"reduce\":20}]",
+                new BigDecimal("500"))).isEqualByComparingTo("20");
+    }
+
+    @Test
+    @DisplayName("优惠券:券为空、金额非正、折扣率缺失、面额缺失,都不抵扣")
+    void couponDiscountHandlesMissingConfiguration() {
+        assertThat(calculator.couponDiscount(null, new BigDecimal("100"))).isEqualByComparingTo("0");
+
+        MallCoupon cash = coupon(MallCoupon.TYPE_CASH, new BigDecimal("20"), null, BigDecimal.ZERO);
+        assertThat(calculator.couponDiscount(cash, null)).isEqualByComparingTo("0");
+        assertThat(calculator.couponDiscount(cash, BigDecimal.ZERO)).isEqualByComparingTo("0");
+
+        // 折扣券没配折扣率:算不出来就按不抵扣,不能 NPE
+        assertThat(calculator.couponDiscount(
+                coupon(MallCoupon.TYPE_DISCOUNT, null, null, BigDecimal.ZERO), new BigDecimal("100")))
+                .isEqualByComparingTo("0");
+        // 满减券没配面额
+        assertThat(calculator.couponDiscount(
+                coupon(MallCoupon.TYPE_FULL_REDUCTION, null, null, BigDecimal.ZERO), new BigDecimal("100")))
+                .isEqualByComparingTo("0");
+        // 门槛没配等价于 0 门槛,且抵扣额仍然不超过待付金额
+        assertThat(calculator.couponDiscount(
+                coupon(MallCoupon.TYPE_CASH, new BigDecimal("20"), null, null), new BigDecimal("1")))
+                .isEqualByComparingTo("1");
+        // couponType 缺失走"按面额"分支
+        MallCoupon noType = new MallCoupon();
+        noType.setDiscountAmount(new BigDecimal("15"));
+        assertThat(calculator.couponDiscount(noType, new BigDecimal("100"))).isEqualByComparingTo("15");
+    }
+
+    @Test
+    @DisplayName("运费:分组/规则缺失、计量缺失、续件参数缺失,都要算出确定值而不是抛异常")
+    void freightHandlesMissingInputs() {
+        var threeItems = new OrderAmountCalculator.FreightGroup(1L, MallFreightTemplate.CHARGE_BY_QUANTITY,
+                BigDecimal.valueOf(3), BigDecimal.ZERO, new BigDecimal("10"));
+        MallFreightTemplateRule stepOne = rule("ALL", "1", "5", "1", "2", null);
+
+        assertThat(calculator.freight(null, List.of(stepOne), "广东省")).isEqualByComparingTo("0");
+        assertThat(calculator.freight(threeItems, null, "广东省")).isEqualByComparingTo("0");
+        assertThat(calculator.freight(threeItems, List.of(), "广东省")).isEqualByComparingTo("0");
+
+        // 按件计费但件数为 null → 计量按 0,只收首件费
+        var noQuantity = new OrderAmountCalculator.FreightGroup(1L, MallFreightTemplate.CHARGE_BY_QUANTITY,
+                null, BigDecimal.ZERO, new BigDecimal("10"));
+        assertThat(calculator.freight(noQuantity, List.of(stepOne), "广东省")).isEqualByComparingTo("5");
+
+        // 按重量计费但重量为 null → 计量按 0
+        var noWeight = new OrderAmountCalculator.FreightGroup(1L, MallFreightTemplate.CHARGE_BY_WEIGHT,
+                BigDecimal.valueOf(3), null, new BigDecimal("10"));
+        assertThat(calculator.freight(noWeight, List.of(stepOne), "广东省")).isEqualByComparingTo("5");
+
+        // chargeType 缺失按件计费处理:3 件 = 首件 5 + 续 2 件 × 2
+        var noChargeType = new OrderAmountCalculator.FreightGroup(1L, null,
+                BigDecimal.valueOf(3), BigDecimal.ZERO, new BigDecimal("10"));
+        assertThat(calculator.freight(noChargeType, List.of(stepOne), "广东省")).isEqualByComparingTo("9");
+
+        // 续件步长为 0:不收续件费(除零保护)
+        assertThat(calculator.freight(threeItems, List.of(rule("ALL", "1", "5", "0", "2", null)), "广东省"))
+                .isEqualByComparingTo("5");
+
+        // 件数没超过首件:不收续件费
+        var oneItem = new OrderAmountCalculator.FreightGroup(1L, MallFreightTemplate.CHARGE_BY_QUANTITY,
+                BigDecimal.ONE, BigDecimal.ZERO, new BigDecimal("10"));
+        assertThat(calculator.freight(oneItem, List.of(stepOne), "广东省")).isEqualByComparingTo("5");
+
+        // 首件费与续件费都缺失:按 0 计
+        MallFreightTemplateRule noFee = new MallFreightTemplateRule();
+        noFee.setTemplateId(1L);
+        noFee.setRegion("ALL");
+        noFee.setFirstUnit(BigDecimal.ONE);
+        noFee.setAdditionalUnit(BigDecimal.ONE);
+        assertThat(calculator.freight(threeItems, List.of(noFee), "广东省")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("运费规则:区域为空或空白都当兜底,省份为 null 时只走兜底,多条兜底取第一条")
+    void pickRuleFallbackRules() {
+        MallFreightTemplateRule blankRegion = rule("  ", "1", "5", "1", "1", null);
+        MallFreightTemplateRule nullRegion = rule(null, "1", "7", "1", "1", null);
+        MallFreightTemplateRule all = rule("ALL", "1", "9", "1", "1", null);
+
+        assertThat(calculator.pickRule(List.of(nullRegion, all), "广东省")).isSameAs(nullRegion);
+        assertThat(calculator.pickRule(List.of(blankRegion), "广东省")).isSameAs(blankRegion);
+        // 省份为 null:任何区域规则都不可能命中,只能落到兜底
+        assertThat(calculator.pickRule(List.of(rule("广东省", "1", "5", "1", "1", null), all), null))
+                .isSameAs(all);
+    }
+
+    @Test
+    @DisplayName("金额规整与实付:null 当作 0 处理")
+    void moneyAndPayableTreatNullAsZero() {
+        assertThat(calculator.money(null)).isEqualByComparingTo("0");
+        assertThat(calculator.payable(new BigDecimal("100"), null, null, null)).isEqualByComparingTo("100");
+        assertThat(calculator.payable(new BigDecimal("100"), new BigDecimal("10"), null, new BigDecimal("5")))
+                .isEqualByComparingTo("95");
+    }
+
     // ---------------------------------------------------------------- 辅助
 
     private BigDecimal freightQty(MallFreightTemplateRule rule, int quantity) {

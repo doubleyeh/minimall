@@ -107,7 +107,10 @@ class SysApiCrudHttpIntegrationTest {
         Long userId = created.number("userId");
         assertThat(userId).isNotNull();
 
-        assertThat(get("/system/users?pageNo=1&pageSize=50", token).body()).contains(username);
+        // 按用户名筛选来断言"进了列表",不要用 pageNo=1&pageSize=50 赌它落在第一页 ——
+        // 平台侧的用户列表是跨租户的,全量跑一轮后总数会超过 50(权限矩阵用例每个用例建 3 个账号),
+        // 那时新用户翻到第二页,断言就会以一个与业务无关的原因失败
+        assertThat(get("/system/users?username=" + username + "&pageSize=50", token).body()).contains(username);
 
         assertThat(put("/system/users/" + userId, userBody(username, "新昵称", 1, null)).code()).isEqualTo("0");
         assertThat(get("/system/users/" + userId, token).body())
@@ -121,7 +124,7 @@ class SysApiCrudHttpIntegrationTest {
         assertThat(post("/system/users/" + userId + "/unlock", null).code()).isEqualTo("0");
 
         assertThat(delete("/system/users/" + userId).code()).isEqualTo("0");
-        assertThat(get("/system/users?pageNo=1&pageSize=50", token).body()).doesNotContain(username);
+        assertThat(get("/system/users?username=" + username + "&pageSize=50", token).body()).doesNotContain(username);
     }
 
     @Test
@@ -157,14 +160,17 @@ class SysApiCrudHttpIntegrationTest {
     @DisplayName("角色:新建 → 改名 → 停用 → 授权菜单 → 删除")
     void roleCrudCycle() throws Exception {
         String roleKey = "crudrole" + suffix();
-        Response created = post("/system/roles", roleBody(roleKey, "CRUD 角色", 1));
+        // 角色名也带上后缀:列表只支持按 roleName 筛选(没有 roleKey 参数),用固定名字就没法把查询
+        // 收敛到刚建的这一条,只能赌它落在第一页 —— 数据一多就会以一个与业务无关的原因失败
+        String roleName = "CRUD 角色" + suffix();
+        Response created = post("/system/roles", roleBody(roleKey, roleName, 1));
         assertThat(created.code()).as("新建角色:%s", created.body()).isEqualTo("0");
         Long roleId = created.dataAsNumber();
         assertThat(roleId).isNotNull();
 
-        assertThat(get("/system/roles?pageNo=1&pageSize=50", token).body()).contains(roleKey);
+        assertThat(get("/system/roles?roleName=" + enc(roleName) + "&pageSize=50", token).body()).contains(roleKey);
 
-        assertThat(put("/system/roles/" + roleId, roleBody(roleKey, "CRUD 角色改名", 1)).code()).isEqualTo("0");
+        assertThat(put("/system/roles/" + roleId, roleBody(roleKey, roleName + "改", 1)).code()).isEqualTo("0");
         assertThat(put("/system/roles/" + roleId + "/status?status=0", null).code()).isEqualTo("0");
 
         // 授权要带上完整父链:只有子菜单没有父级会被拒(见 5.2 的父链校验)
@@ -205,7 +211,8 @@ class SysApiCrudHttpIntegrationTest {
         Long packageId = created.dataAsNumber();
         assertThat(packageId).isNotNull();
 
-        assertThat(get("/system/packages?pageNo=1&pageSize=50", token).body()).contains(packageName);
+        assertThat(get("/system/packages?packageName=" + enc(packageName) + "&pageSize=50", token).body())
+                .as("新建的套餐要能在列表里查到").contains(packageName);
 
         assertThat(put("/system/packages/" + packageId,
                 "{\"packageName\":\"" + packageName + "改\",\"remark\":\"用例\"}").code()).isEqualTo("0");
@@ -239,7 +246,8 @@ class SysApiCrudHttpIntegrationTest {
 
         assertThat(put("/system/dicts/types/" + typeId,
                 "{\"dictType\":\"" + dictType + "\",\"dictName\":\"CRUD 字典改名\"}").code()).isEqualTo("0");
-        assertThat(get("/system/dicts/types?pageNo=1&pageSize=50", token).body()).contains(dictType);
+        assertThat(get("/system/dicts/types?dictType=" + dictType + "&pageSize=50", token).body())
+                .as("新建的字典类型要能在列表里查到").contains(dictType);
 
         Response data = post("/system/dicts/data",
                 "{\"dictType\":\"" + dictType + "\",\"dictLabel\":\"选项一\",\"dictValue\":\"1\",\"sortOrder\":1}");
@@ -331,7 +339,273 @@ class SysApiCrudHttpIntegrationTest {
                 .isEqualTo("0");
 
         assertThat(put("/system/tenants/" + tenantId + "/status?status=0", null).code()).isEqualTo("0");
-        assertThat(get("/system/tenants?pageNo=1&pageSize=50", token).body()).contains(tenantCode);
+        assertThat(get("/system/tenants?tenantCode=" + tenantCode + "&pageSize=50", token).body())
+                .as("新建的租户要能在列表里查到").contains(tenantCode);
+    }
+
+    // ================================================================ 列表筛选与不存在资源
+
+    /**
+     * 用户列表的筛选参数。
+     *
+     * <p>现有用例只断言"列表能返回",**查询谓词是不是真的生效从没验过** —— 谓词写漏的表现是
+     * 不管传什么条件都返回全量,页面上看不出来,只觉得"用户好多"。这里用"命中 / 不命中"两侧都断言。
+     */
+    @Test
+    @DisplayName("用户列表:按用户名与状态筛选要真的生效")
+    void userListFiltering() throws Exception {
+        String username = "crudfilter" + suffix();
+        Response created = post("/system/users", userBody(username, "筛选用例", 1, null));
+        assertThat(created.code()).as("新建用户:%s", created.body()).isEqualTo("0");
+        Long userId = created.number("userId");
+        assertThat(userId).as("新建用户要返回主键").isNotNull();
+
+        try {
+            Response byName = get("/system/users?username=" + username + "&pageSize=50", token);
+            assertThat(byName.code()).as("用户列表查询失败:%s", byName.body()).isEqualTo("0");
+            assertThat(byName.body()).as("按用户名筛选要命中这个用户").contains(username);
+            assertThat(get("/system/users?username=" + username + "不存在&pageSize=50", token).body())
+                    .as("按不存在的用户名筛选不该命中").doesNotContain(username);
+
+            // 停用之后再筛:启用(1)里不该有它,停用(0)里该有它
+            assertThat(put("/system/users/" + userId + "/status?status=0", null).code()).isEqualTo("0");
+            assertThat(get("/system/users?username=" + username + "&status=1&pageSize=50", token).body())
+                    .as("按启用状态筛选不该包含已停用的用户").doesNotContain(username);
+            assertThat(get("/system/users?username=" + username + "&status=0&pageSize=50", token).body())
+                    .as("按停用状态筛选应当包含它").contains(username);
+        } finally {
+            delete("/system/users/" + userId);
+        }
+    }
+
+    /**
+     * 不存在的资源要返回统一的 40400,而不是 500 或空响应。
+     *
+     * <p>7.3 约定:"存在但无权"与"不存在"返回同一个码。这里顺便钉住这一点 ——
+     * 如果哪天改成分开返回,等于向调用方泄露了"这个 id 存在"这一信息。
+     */
+    @Test
+    @DisplayName("不存在的主键:查询/更新/删除都要返回资源不存在(40400)")
+    void missingResourcesReturnNotFound() throws Exception {
+        String missing = String.valueOf(ErrorCode.NOT_FOUND.code());
+        String absent = "999999999";
+
+        assertThat(get("/system/users/" + absent, token).code())
+                .as("查不存在的用户").isEqualTo(missing);
+        assertThat(put("/system/users/" + absent, userBody("absent" + suffix(), "不存在", 1, null)).code())
+                .as("改不存在的用户").isEqualTo(missing);
+        assertThat(delete("/system/users/" + absent).code())
+                .as("删不存在的用户").isEqualTo(missing);
+        assertThat(post("/system/users/" + absent + "/password/reset", null).code())
+                .as("给不存在的用户重置密码").isEqualTo(missing);
+        assertThat(post("/system/users/" + absent + "/unlock", null).code())
+                .as("给不存在的用户解锁").isEqualTo(missing);
+    }
+
+    @Test
+    @DisplayName("部门与菜单树:按状态筛选要真的生效")
+    void deptAndMenuTreeFiltering() throws Exception {
+        String deptName = "CRUD 停用部门" + suffix();
+        Response dept = post("/system/depts",
+                "{\"parentId\":0,\"deptName\":\"" + deptName + "\",\"sortOrder\":1,\"status\":0}");
+        assertThat(dept.code()).as("新建停用部门:%s", dept.body()).isEqualTo("0");
+        Long deptId = dept.dataAsNumber();
+
+        String menuName = "CRUD 停用菜单" + suffix();
+        Response menu = post("/system/menus", menuBody(1L, menuName, 2, null));
+        assertThat(menu.code()).as("新建菜单:%s", menu.body()).isEqualTo("0");
+        Long menuId = menu.dataAsNumber();
+        assertThat(put("/system/menus/" + menuId, menuBody(1L, menuName, 2, null)).code()).isEqualTo("0");
+
+        try {
+            // 部门树:status=1(启用)里不该出现停用部门,全量树里该出现
+            assertThat(get("/system/depts/tree?status=1", token).body())
+                    .as("按启用筛选不该包含停用部门").doesNotContain(deptName);
+            assertThat(get("/system/depts/tree", token).body())
+                    .as("不带状态筛选时应当包含停用部门").contains(deptName);
+
+            // 菜单树:按 menuType=2(页面)筛选要能命中新菜单
+            assertThat(get("/system/menus/tree?menuType=2", token).body())
+                    .as("按页面类型筛选应当包含新建的页面菜单").contains(menuName);
+            assertThat(get("/system/menus/tree?menuType=9", token).body())
+                    .as("按不存在的菜单类型筛选不该包含它").doesNotContain(menuName);
+        } finally {
+            delete("/system/menus/" + menuId);
+            delete("/system/depts/" + deptId);
+        }
+    }
+
+    /**
+     * 列表筛选参数的第二批。
+     *
+     * <p>上面那条只覆盖了用户名与状态,这几个接口此前都只有"列表能返回"的断言。
+     * 筛选谓词写漏是**不会报错**的一类缺陷:不管传什么条件都返回全量,页面上看不出来,
+     * 只觉得"数据好多"。所以每条都用"命中 / 不命中"两侧断言 —— 单侧断言对谓词写漏是绿的。
+     *
+     * <p>名称/编码类字段在实现里是 LIKE(contains),所以"不命中"那侧不能拿原名加个后缀当关键字:
+     * 那样反而会因为包含关系命中。这里一律用与原名无包含关系的独立文案。
+     */
+    @Test
+    @DisplayName("用户列表:按部门筛选要真的生效(deptId 写漏会让部门页显示全公司的人)")
+    void userListFilteringByDept() throws Exception {
+        Long deptA = post("/system/depts", deptBody("CRUD 筛选部门A" + suffix(), 1)).dataAsNumber();
+        Long deptB = post("/system/depts", deptBody("CRUD 筛选部门B" + suffix(), 2)).dataAsNumber();
+        assertThat(deptA).as("建 A 部门").isNotNull();
+        assertThat(deptB).as("建 B 部门").isNotNull();
+
+        String userA = "cruddepta" + suffix();
+        String userB = "cruddeptb" + suffix();
+        Response a = post("/system/users", userBody(userA, "A 部门的人", 1, deptA));
+        Response b = post("/system/users", userBody(userB, "B 部门的人", 1, deptB));
+        assertThat(a.code()).as("建 A 部门用户:%s", a.body()).isEqualTo("0");
+        assertThat(b.code()).as("建 B 部门用户:%s", b.body()).isEqualTo("0");
+
+        try {
+            Response inA = get("/system/users?deptId=" + deptA + "&pageSize=100", token);
+            assertThat(inA.code()).as("按部门查用户失败:%s", inA.body()).isEqualTo("0");
+            assertThat(inA.body()).as("A 部门要能查到自己部门的人").contains(userA);
+            assertThat(inA.body()).as("A 部门不该查出 B 部门的人").doesNotContain(userB);
+
+            assertThat(get("/system/users?deptId=" + deptB + "&pageSize=100", token).body())
+                    .as("B 部门要能查到自己部门的人").contains(userB);
+        } finally {
+            delete("/system/users/" + a.number("userId"));
+            delete("/system/users/" + b.number("userId"));
+            delete("/system/depts/" + deptA);
+            delete("/system/depts/" + deptB);
+        }
+    }
+
+    @Test
+    @DisplayName("字典类型列表:按类型编码与名称筛选要真的生效")
+    void dictTypeListFiltering() throws Exception {
+        String dictType = "crud_dt_" + suffix();
+        String dictName = "CRUD 字典名" + suffix();
+        Long typeId = post("/system/dicts/types",
+                "{\"dictType\":\"" + dictType + "\",\"dictName\":\"" + dictName + "\"}").dataAsNumber();
+        assertThat(typeId).as("建字典类型").isNotNull();
+
+        try {
+            assertThat(get("/system/dicts/types?dictType=" + dictType + "&pageSize=50", token).body())
+                    .as("按类型编码筛选要命中").contains(dictType);
+            assertThat(get("/system/dicts/types?dictType=" + enc("nomatch_" + suffix()) + "&pageSize=50", token).body())
+                    .as("按不存在的编码筛选不该命中").doesNotContain(dictType);
+
+            assertThat(get("/system/dicts/types?dictName=" + enc(dictName) + "&pageSize=50", token).body())
+                    .as("按名称筛选要命中").contains(dictType);
+            assertThat(get("/system/dicts/types?dictName=" + enc("绝无此字典" + suffix()) + "&pageSize=50", token).body())
+                    .as("按不存在的名称筛选不该命中").doesNotContain(dictType);
+        } finally {
+            delete("/system/dicts/types/" + typeId);
+        }
+    }
+
+    @Test
+    @DisplayName("套餐列表:按名称与状态筛选要真的生效")
+    void packageListFiltering() throws Exception {
+        String packageName = "CRUD 筛选套餐" + suffix();
+        Long packageId = post("/system/packages",
+                "{\"packageName\":\"" + packageName + "\",\"remark\":null}").dataAsNumber();
+        assertThat(packageId).as("建套餐").isNotNull();
+
+        assertThat(get("/system/packages?packageName=" + enc(packageName) + "&pageSize=50", token).body())
+                .as("按名称筛选要命中").contains(packageName);
+        assertThat(get("/system/packages?packageName=" + enc("绝无此套餐" + suffix()) + "&pageSize=50", token).body())
+                .as("按不存在的名称筛选不该命中").doesNotContain(packageName);
+        assertThat(get("/system/packages?packageName=" + enc(packageName) + "&status=1&pageSize=50", token).body())
+                .as("新建的套餐默认启用").contains(packageName);
+
+        assertThat(put("/system/packages/" + packageId + "/disable", null).code()).isEqualTo("0");
+        assertThat(get("/system/packages?packageName=" + enc(packageName) + "&status=1&pageSize=50", token).body())
+                .as("禁用后不该再出现在启用列表里").doesNotContain(packageName);
+        assertThat(get("/system/packages?packageName=" + enc(packageName) + "&status=0&pageSize=50", token).body())
+                .as("禁用后应当出现在停用列表里").contains(packageName);
+    }
+
+    @Test
+    @DisplayName("角色列表:按名称与状态筛选要真的生效")
+    void roleListFiltering() throws Exception {
+        String roleName = "CRUD 筛选角色" + suffix();
+        Long roleId = post("/system/roles", roleBody("crudfr" + suffix(), roleName, 1)).dataAsNumber();
+        assertThat(roleId).as("建角色").isNotNull();
+
+        try {
+            assertThat(get("/system/roles?roleName=" + enc(roleName) + "&pageSize=50", token).body())
+                    .as("按名称筛选要命中").contains(roleName);
+            assertThat(get("/system/roles?roleName=" + enc("绝无此角色" + suffix()) + "&pageSize=50", token).body())
+                    .as("按不存在的名称筛选不该命中").doesNotContain(roleName);
+            assertThat(get("/system/roles?roleName=" + enc(roleName) + "&status=1&pageSize=50", token).body())
+                    .as("新建的角色默认启用").contains(roleName);
+
+            assertThat(put("/system/roles/" + roleId + "/status?status=0", null).code()).isEqualTo("0");
+            assertThat(get("/system/roles?roleName=" + enc(roleName) + "&status=1&pageSize=50", token).body())
+                    .as("停用后不该再出现在启用列表里").doesNotContain(roleName);
+            assertThat(get("/system/roles?roleName=" + enc(roleName) + "&status=0&pageSize=50", token).body())
+                    .as("停用后应当出现在停用列表里").contains(roleName);
+        } finally {
+            delete("/system/roles/" + roleId);
+        }
+    }
+
+    @Test
+    @DisplayName("租户列表:按编码与状态筛选要真的生效")
+    void tenantListFiltering() throws Exception {
+        String tenantCode = "crudft" + suffix();
+        Response created = post("/system/tenants", "{\"tenantCode\":\"" + tenantCode
+                + "\",\"tenantName\":\"CRUD 筛选租户\",\"packageId\":" + FULL_PACKAGE_ID
+                + ",\"expireTime\":\"2030-01-01T00:00:00\",\"adminUsername\":\"crudftadmin" + suffix()
+                + "\",\"adminNickname\":\"筛选租户管理员\"}");
+        assertThat(created.code()).as("建租户:%s", created.body()).isEqualTo("0");
+        Long tenantId = created.number("tenantId");
+        assertThat(tenantId).as("建租户要返回主键").isNotNull();
+
+        assertThat(get("/system/tenants?tenantCode=" + tenantCode + "&pageSize=50", token).body())
+                .as("按编码筛选要命中").contains(tenantCode);
+        assertThat(get("/system/tenants?tenantCode=" + enc("nomatch" + suffix()) + "&pageSize=50", token).body())
+                .as("按不存在的编码筛选不该命中").doesNotContain(tenantCode);
+        assertThat(get("/system/tenants?tenantCode=" + tenantCode + "&status=1&pageSize=50", token).body())
+                .as("新建的租户默认启用").contains(tenantCode);
+
+        assertThat(put("/system/tenants/" + tenantId + "/status?status=0", null).code()).isEqualTo("0");
+        assertThat(get("/system/tenants?tenantCode=" + tenantCode + "&status=1&pageSize=50", token).body())
+                .as("停用后不该再出现在启用列表里").doesNotContain(tenantCode);
+        assertThat(get("/system/tenants?tenantCode=" + tenantCode + "&status=0&pageSize=50", token).body())
+                .as("停用后应当出现在停用列表里").contains(tenantCode);
+    }
+
+    @Test
+    @DisplayName("字典取值:未知字典类型返回空列表而不是报错(否则前端下拉会因配置缺失整页炸)")
+    void dictValuesOfUnknownTypeIsEmpty() throws Exception {
+        Response unknown = get("/system/dicts/values/绝对不存在的字典类型" + suffix(), token);
+        assertThat(unknown.code()).as("响应=%s", unknown.body()).isEqualTo("0");
+        assertThat(unknown.body()).as("未知类型应当返回空列表").contains("\"data\":[]");
+    }
+
+    /**
+     * 全局异常处理的两个兜底分支(架构文档 7.2)。
+     *
+     * <p>这两个分支此前没有任何用例:请求体不是合法 JSON 时走 {@code HttpMessageNotReadable} 分支;
+     * 而路径变量类型对不上时没有专门的 handler,会落到 {@code Exception} 兜底。
+     *
+     * <p>它们都是"调用方写错"的场景,**必须返回能看懂的业务码而不是把堆栈抛给前端**。
+     * 第二条断言的是当前实现:类型不匹配被兜底成 50001。严格说它更适合 40003(是调用方的错),
+     * 但改成 40003 需要新增 handler —— 这条用例的作用是把现状钉住,让"改"变成一个显式决定,
+     * 而不是某次重构顺手改掉却没人知道。
+     */
+    @Test
+    @DisplayName("异常处理:请求体不是合法 JSON、路径变量类型不对,都要返回业务码")
+    void malformedRequestsAreTranslatedToBusinessCodes() throws Exception {
+        Response unreadable = post("/system/users", "{不是 JSON");
+        assertThat(unreadable.code())
+                .as("请求体解析失败要翻译成 40003,响应=%s", unreadable.body())
+                .isEqualTo(String.valueOf(ErrorCode.PARAM_INVALID.code()));
+        assertThat(unreadable.body()).as("要给前端一句能直接显示的话").contains("请求体格式不正确");
+
+        Response badPathVariable = get("/system/users/not-a-number", token);
+        assertThat(badPathVariable.status()).as("不能把异常抛成 500 页面").isEqualTo(200);
+        assertThat(badPathVariable.code())
+                .as("路径变量类型不匹配应当落到兜底分支,响应=%s", badPathVariable.body())
+                .isEqualTo(String.valueOf(ErrorCode.SYSTEM_ERROR.code()));
     }
 
     // ================================================================ 请求构造
@@ -357,6 +631,15 @@ class SysApiCrudHttpIntegrationTest {
         return "{\"parentId\":" + parentId + ",\"menuName\":\"" + menuName + "\",\"menuType\":" + menuType
                 + ",\"routePath\":null,\"permCode\":" + (permCode == null ? "null" : "\"" + permCode + "\"")
                 + ",\"icon\":null,\"sortOrder\":1,\"status\":1}";
+    }
+
+    private String deptBody(String deptName, Integer status) {
+        return "{\"parentId\":0,\"deptName\":\"" + deptName + "\",\"sortOrder\":1,\"status\":" + status + "}";
+    }
+
+    /** 查询参数的值要编码:中文与空格都不能直接进 URI。 */
+    private String enc(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private String login() throws Exception {
