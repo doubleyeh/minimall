@@ -182,7 +182,7 @@ class SysApiCrudHttpIntegrationTest {
         Response granted = get("/system/roles/" + roleId + "/menus", token);
         assertThat(granted.body())
                 .as("刚授权的菜单要能读回来,否则授权页每次打开都是空的(它回的是 id 列表,不是菜单对象)")
-                .contains("\"data\":[1,2,11]");
+                .contains("\"data\":[\"1\",\"2\",\"11\"]");
 
         assertThat(delete("/system/roles/" + roleId).code()).isEqualTo("0");
     }
@@ -226,7 +226,8 @@ class SysApiCrudHttpIntegrationTest {
 
         // 套餐配置页要的这两个查询(已选菜单同样回 id 列表)
         assertThat(get("/system/packages/" + packageId + "/menus/grantable", token).status()).isEqualTo(200);
-        assertThat(get("/system/packages/" + packageId + "/menus", token).body()).contains("\"data\":[1,2,11]");
+        assertThat(get("/system/packages/" + packageId + "/menus", token).body())
+                .contains("\"data\":[\"1\",\"2\",\"11\"]");
 
         assertThat(post("/system/packages/" + packageId + "/resync", null).code())
                 .as("重新同步").isEqualTo("0");
@@ -460,15 +461,32 @@ class SysApiCrudHttpIntegrationTest {
         assertThat(a.code()).as("建 A 部门用户:%s", a.body()).isEqualTo("0");
         assertThat(b.code()).as("建 B 部门用户:%s", b.body()).isEqualTo("0");
 
+        // 子部门:点父部门要能连带查出整棵子树的人
+        Response childDept = post("/system/depts",
+                "{\"parentId\":" + deptA + ",\"deptName\":\"CRUD 筛选子部门" + suffix()
+                        + "\",\"sortOrder\":1,\"status\":1}");
+        assertThat(childDept.code()).as("建子部门:%s", childDept.body()).isEqualTo("0");
+        Long childDeptId = childDept.dataAsNumber();
+        String userInChild = "cruddeptc" + suffix();
+        Response c = post("/system/users", userBody(userInChild, "子部门的人", 1, childDeptId));
+        assertThat(c.code()).as("建子部门用户:%s", c.body()).isEqualTo("0");
+
         try {
             Response inA = get("/system/users?deptId=" + deptA + "&pageSize=100", token);
             assertThat(inA.code()).as("按部门查用户失败:%s", inA.body()).isEqualTo("0");
             assertThat(inA.body()).as("A 部门要能查到自己部门的人").contains(userA);
+            assertThat(inA.body()).as("A 部门要连带查出子部门的人(点父部门看整棵子树)").contains(userInChild);
             assertThat(inA.body()).as("A 部门不该查出 B 部门的人").doesNotContain(userB);
 
             assertThat(get("/system/users?deptId=" + deptB + "&pageSize=100", token).body())
                     .as("B 部门要能查到自己部门的人").contains(userB);
+
+            // 往下看不往上:查子部门不该把父部门的人带出来
+            assertThat(get("/system/users?deptId=" + childDeptId + "&pageSize=100", token).body())
+                    .as("子部门只查自己的人").contains(userInChild).doesNotContain(userA);
         } finally {
+            delete("/system/users/" + c.number("userId"));
+            delete("/system/depts/" + childDeptId);
             delete("/system/users/" + a.number("userId"));
             delete("/system/users/" + b.number("userId"));
             delete("/system/depts/" + deptA);
@@ -712,7 +730,7 @@ class SysApiCrudHttpIntegrationTest {
         }
 
         Long number(String field) {
-            Matcher matcher = Pattern.compile("\"" + field + "\":(\\d+)").matcher(body);
+            Matcher matcher = Pattern.compile("\"" + field + "\":\"?(\\d+)\"?").matcher(body);
             return matcher.find() ? Long.valueOf(matcher.group(1)) : null;
         }
 
@@ -723,7 +741,7 @@ class SysApiCrudHttpIntegrationTest {
          * 并报参数类型转换失败(排查起来像"分页参数错了",其实根因在建返回值的解析上)。
          */
         Long dataAsNumber() {
-            Matcher matcher = Pattern.compile("\"data\":(\\d+)").matcher(body);
+            Matcher matcher = Pattern.compile("\"data\":\"?(\\d+)\"?").matcher(body);
             return matcher.find() ? Long.valueOf(matcher.group(1)) : null;
         }
     }

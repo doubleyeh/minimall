@@ -279,7 +279,7 @@ class MallHttpFlowIntegrationTest {
 
         // 待发货(=已支付)时才能申请仅退款(3.9 的入口限制)
         String orderDetail = get("/mall/api/orders/" + orderId, token).body();
-        Matcher matcher = Pattern.compile("\"items\":\\[\\{\"id\":(\\d+)").matcher(orderDetail);
+        Matcher matcher = Pattern.compile("\"items\":\\[\\{\"id\":\"?(\\d+)\"?").matcher(orderDetail);
         assertThat(matcher.find()).as("订单详情里应当能取到明细 ID").isTrue();
         long orderItemId = Long.parseLong(matcher.group(1));
 
@@ -551,7 +551,7 @@ class MallHttpFlowIntegrationTest {
 
     /** 订单明细 id 列表:双明细订单要**按件**申请售后,得把两个明细都取出来。 */
     private List<Long> orderItemIds(long orderId) {
-        Matcher matcher = Pattern.compile("\"id\":(\\d+),\"skuId\":")
+        Matcher matcher = Pattern.compile("\"id\":\"?(\\d+)\"?,\"skuId\":")
                 .matcher(get("/mall/api/orders/" + orderId, token).body());
         List<Long> ids = new java.util.ArrayList<>();
         while (matcher.find()) {
@@ -797,21 +797,21 @@ class MallHttpFlowIntegrationTest {
         // 待商家处理 = 1:新申请的单子必须在这儿,否则商家根本看不到它
         Response pending = get(byNoPath + "&status=1&pageSize=100", adminToken);
         assertThat(pending.code()).as("售后列表查询失败:%s", pending.body()).isZero();
-        assertThat(pending.body()).as("待处理列表要包含这一单").contains("\"id\":" + afterSaleId);
+        assertThat(pending.body()).as("待处理列表要包含这一单").contains("\"id\":\"" + afterSaleId + "\"");
 
         // 只按单号、不带 status 也要命中:两条谓词各自独立
         Response byNo = get(byNoPath + "&pageSize=100", adminToken);
         assertThat(byNo.code()).as("按售后单号查询失败:%s", byNo.body()).isZero();
-        assertThat(byNo.body()).as("按单号筛选要命中这一单").contains("\"id\":" + afterSaleId);
+        assertThat(byNo.body()).as("按单号筛选要命中这一单").contains("\"id\":\"" + afterSaleId + "\"");
         assertThat(get("/mall/admin/after-sales?afterSaleNo=NOSUCH" + System.nanoTime() + "&pageSize=100", adminToken)
                 .body())
-                .as("按不存在的单号筛选不该命中").doesNotContain("\"id\":" + afterSaleId);
+                .as("按不存在的单号筛选不该命中").doesNotContain("\"id\":\"" + afterSaleId + "\"");
 
         assertThat(post("/mall/admin/after-sales/" + afterSaleId + "/approve",
                 "{\"refundAmount\":60.00}", adminToken).code()).as("同意售后").isZero();
 
         assertThat(get(byNoPath + "&status=1&pageSize=100", adminToken).body())
-                .as("处理完就不该再出现在待处理列表里").doesNotContain("\"id\":" + afterSaleId);
+                .as("处理完就不该再出现在待处理列表里").doesNotContain("\"id\":\"" + afterSaleId + "\"");
     }
 
     /**
@@ -864,14 +864,14 @@ class MallHttpFlowIntegrationTest {
 
         try {
             assertThat(get("/mall/api/goods?keyword=" + enc(uniqueName) + "&pageSize=50", null).body())
-                    .as("按商品名关键字要能搜到").contains("\"id\":" + uniqueGoods);
+                    .as("按商品名关键字要能搜到").contains("\"id\":\"" + uniqueGoods + "\"");
             assertThat(get("/mall/api/goods?keyword=" + enc("绝无此商品" + System.nanoTime()) + "&pageSize=50", null)
                     .body())
-                    .as("按不存在的关键字不该命中").doesNotContain("\"id\":" + uniqueGoods);
+                    .as("按不存在的关键字不该命中").doesNotContain("\"id\":\"" + uniqueGoods + "\"");
             assertThat(get("/mall/api/goods?categoryId=" + uniqueCategory + "&pageSize=50", null).body())
-                    .as("按分类筛选要能查到").contains("\"id\":" + uniqueGoods);
+                    .as("按分类筛选要能查到").contains("\"id\":\"" + uniqueGoods + "\"");
             assertThat(get("/mall/api/goods?categoryId=999999&pageSize=50", null).body())
-                    .as("按不存在的分类不该命中").doesNotContain("\"id\":" + uniqueGoods);
+                    .as("按不存在的分类不该命中").doesNotContain("\"id\":\"" + uniqueGoods + "\"");
         } finally {
             inTenant(() -> {
                 goodsRepository.findById(uniqueGoods).ifPresent(goodsRepository::delete);
@@ -1085,18 +1085,18 @@ class MallHttpFlowIntegrationTest {
         Long afterSaleId = applyAfterSale(paid[1], 1);
         Response afterSaleDetail = get("/mall/admin/after-sales/" + afterSaleId, adminToken);
         assertThat(afterSaleDetail.code()).as("售后详情查询失败:%s", afterSaleDetail.body()).isZero();
-        assertThat(afterSaleDetail.body()).as("售后详情要带回这一单").contains("\"id\":" + afterSaleId);
+        assertThat(afterSaleDetail.body()).as("售后详情要带回这一单").contains("\"id\":\"" + afterSaleId + "\"");
 
         Long reviewId = createReview(addressId);
         Response visible = get("/mall/admin/reviews?goodsId=" + goodsId + "&status=1&pageSize=50", adminToken);
         assertThat(visible.code()).as("评价列表查询失败:%s", visible.body()).isZero();
-        assertThat(visible.body()).as("按商品 + 展示状态筛选要命中这条评价").contains("\"id\":" + reviewId);
+        assertThat(visible.body()).as("按商品 + 展示状态筛选要命中这条评价").contains("\"id\":\"" + reviewId + "\"");
 
         assertThat(put("/mall/admin/reviews/" + reviewId + "/status?status=0", null, adminToken).code()).isZero();
         assertThat(get("/mall/admin/reviews?goodsId=" + goodsId + "&status=1&pageSize=50", adminToken).body())
-                .as("隐藏后不该再出现在展示状态里").doesNotContain("\"id\":" + reviewId);
+                .as("隐藏后不该再出现在展示状态里").doesNotContain("\"id\":\"" + reviewId + "\"");
         assertThat(get("/mall/admin/reviews?goodsId=" + goodsId + "&status=0&pageSize=50", adminToken).body())
-                .as("按隐藏状态筛选应当命中它").contains("\"id\":" + reviewId);
+                .as("按隐藏状态筛选应当命中它").contains("\"id\":\"" + reviewId + "\"");
     }
 
     // ---------------------------------------------------------------- 客户端写接口
@@ -1329,7 +1329,7 @@ class MallHttpFlowIntegrationTest {
 
     /** 购物车条目的主键:列表里第一个 id。 */
     private Long firstCartId() {
-        Matcher matcher = Pattern.compile("\"id\":(\\d+)").matcher(get("/mall/api/cart", token).body());
+        Matcher matcher = Pattern.compile("\"id\":\"?(\\d+)\"?").matcher(get("/mall/api/cart", token).body());
         assertThat(matcher.find()).as("购物车列表里应当能取到条目 id").isTrue();
         return Long.valueOf(matcher.group(1));
     }
@@ -1357,7 +1357,7 @@ class MallHttpFlowIntegrationTest {
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("支付回调后应当进入待发货").isEqualTo("2");
 
-        Matcher matcher = Pattern.compile("\"items\":\\[\\{\"id\":(\\d+)")
+        Matcher matcher = Pattern.compile("\"items\":\\[\\{\"id\":\"?(\\d+)\"?")
                 .matcher(get("/mall/api/orders/" + orderId, token).body());
         assertThat(matcher.find()).as("订单详情里应当能取到明细 id").isTrue();
         return new long[]{orderId, Long.parseLong(matcher.group(1))};

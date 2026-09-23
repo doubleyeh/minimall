@@ -28,6 +28,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -80,7 +81,8 @@ public class UserServiceImpl implements UserService {
         }
         if (deptId != null) {
             // 这是"业务筛选条件",与数据权限的部门范围是"与"的关系(5.3)
-            where.and(qUser.deptId.eq(deptId));
+            // 按"本部门及以下"筛:点父部门要看整棵子树的人,口径与 5.3 的数据权限一致
+            where.and(qUser.deptId.in(selfAndDescendantDeptIds(deptId)));
         }
         if (status != null) {
             where.and(qUser.status.eq(status));
@@ -90,6 +92,16 @@ public class UserServiceImpl implements UserService {
         Map<Long, String> deptNames = deptNames(page.getContent().stream().map(SysUser::getDeptId).toList());
         List<UserView> views = page.getContent().stream().map(user -> toView(user, deptNames)).toList();
         return PageResult.of(page.getTotalElements(), views);
+    }
+
+    /** 本部门 + 全部下级部门 id。部门不存在时只返回它自己,让查询自然为空而不是报错。 */
+    private List<Long> selfAndDescendantDeptIds(Long deptId) {
+        List<Long> ids = new ArrayList<>();
+        ids.add(deptId);
+        deptRepository.findById(deptId).ifPresent(dept -> deptRepository
+                .findByAncestorsStartingWith(SysDept.pathPrefix(dept.getAncestors(), dept.getId()))
+                .forEach(child -> ids.add(child.getId())));
+        return ids;
     }
 
     @Override

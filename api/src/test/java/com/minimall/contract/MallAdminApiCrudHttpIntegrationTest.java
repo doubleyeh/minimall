@@ -290,7 +290,7 @@ class MallAdminApiCrudHttpIntegrationTest {
 
     /** 从商品详情的 skus 数组里取第一个 SKU 的 id。 */
     private Long firstSkuId(String detailBody) {
-        Matcher matcher = Pattern.compile("\"skus\":\\[\\{\"id\":(\\d+)").matcher(detailBody);
+        Matcher matcher = Pattern.compile("\"skus\":\\[\\{\"id\":\"?(\\d+)\"?").matcher(detailBody);
         assertThat(matcher.find()).as("详情里应当能取到 SKU id,响应=%s", detailBody).isTrue();
         return Long.valueOf(matcher.group(1));
     }
@@ -452,22 +452,35 @@ class MallAdminApiCrudHttpIntegrationTest {
         assertThat(goodsId).as("建商品").isNotNull();
 
         assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&pageSize=50", token).body())
-                .as("按名称筛选要命中").contains("\"id\":" + goodsId);
+                .as("按名称筛选要命中").contains("\"id\":\"" + goodsId + "\"");
         assertThat(get("/mall/admin/goods?goodsName=" + enc("绝无此商品" + suffix()) + "&pageSize=50", token).body())
-                .as("按不存在的名称筛选不该命中").doesNotContain("\"id\":" + goodsId);
+                .as("按不存在的名称筛选不该命中").doesNotContain("\"id\":\"" + goodsId + "\"");
 
         assertThat(get("/mall/admin/goods?categoryId=" + categoryId + "&pageSize=50", token).body())
-                .as("按分类筛选要命中").contains("\"id\":" + goodsId);
+                .as("按分类筛选要命中").contains("\"id\":\"" + goodsId + "\"");
         assertThat(get("/mall/admin/goods?categoryId=999999&pageSize=50", token).body())
-                .as("按不存在的分类不该命中").doesNotContain("\"id\":" + goodsId);
+                .as("按不存在的分类不该命中").doesNotContain("\"id\":\"" + goodsId + "\"");
+
+        // 二级分类下的商品:点一级分类要能连带查出来(与客户端商品列表同一套口径)
+        Long childCategoryId = post("/mall/admin/categories",
+                "{\"parentId\":" + categoryId + ",\"categoryName\":\"筛选子分类" + suffix()
+                        + "\",\"icon\":null,\"sortOrder\":1,\"status\":1}").dataAsNumber();
+        assertThat(childCategoryId).as("建子分类").isNotNull();
+        Long childGoodsId = post("/mall/admin/goods",
+                goodsBody(childCategoryId, "CRUD 子分类商品" + suffix(), 1, "SKU-FC" + suffix(), "20.00"))
+                .dataAsNumber();
+        assertThat(get("/mall/admin/goods?categoryId=" + categoryId + "&pageSize=50", token).body())
+                .as("按一级分类要连带查出子分类的商品").contains("\"id\":\"" + childGoodsId + "\"");
+        assertThat(get("/mall/admin/goods?categoryId=" + childCategoryId + "&pageSize=50", token).body())
+                .as("子分类不该反查出父分类的商品").doesNotContain("\"id\":\"" + goodsId + "\"");
 
         assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=1&pageSize=50", token).body())
-                .as("上架状态下要能命中").contains("\"id\":" + goodsId);
+                .as("上架状态下要能命中").contains("\"id\":\"" + goodsId + "\"");
         assertThat(put("/mall/admin/goods/" + goodsId + "/status?status=0", null).code()).isEqualTo("0");
         assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=1&pageSize=50", token).body())
-                .as("下架后不该再出现在上架列表里").doesNotContain("\"id\":" + goodsId);
+                .as("下架后不该再出现在上架列表里").doesNotContain("\"id\":\"" + goodsId + "\"");
         assertThat(get("/mall/admin/goods?goodsName=" + enc(goodsName) + "&status=0&pageSize=50", token).body())
-                .as("下架后应当出现在下架列表里").contains("\"id\":" + goodsId);
+                .as("下架后应当出现在下架列表里").contains("\"id\":\"" + goodsId + "\"");
     }
 
     @Test
@@ -636,9 +649,9 @@ class MallAdminApiCrudHttpIntegrationTest {
             return matcher.find() ? matcher.group(1) : null;
         }
 
-        /** 新建类接口把主键放在 data 上:{"code":0,"data":123}。 */
+        /** 新建类接口把主键放在 data 上:{"code":0,"data":123}。id 序列化成字符串后要带引号。 */
         Long dataAsNumber() {
-            Matcher matcher = Pattern.compile("\"data\":(\\d+)").matcher(body);
+            Matcher matcher = Pattern.compile("\"data\":\"?(\\d+)\"?").matcher(body);
             return matcher.find() ? Long.valueOf(matcher.group(1)) : null;
         }
     }

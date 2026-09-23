@@ -125,7 +125,7 @@ class AdminPermissionHttpTest {
 
         /** 取数字字段(如 userId):text() 只匹配带引号的字符串,数字字段要用这个。 */
         Long number(String field) {
-            Matcher matcher = Pattern.compile("\"" + field + "\":(\\d+)").matcher(body);
+            Matcher matcher = Pattern.compile("\"" + field + "\":\"?(\\d+)\"?").matcher(body);
             return matcher.find() ? Long.valueOf(matcher.group(1)) : null;
         }
     }

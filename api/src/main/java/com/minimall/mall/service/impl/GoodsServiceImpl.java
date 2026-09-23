@@ -102,7 +102,12 @@ public class GoodsServiceImpl implements GoodsService {
             where.and(qGoods.goodsName.contains(goodsName));
         }
         if (categoryId != null) {
-            where.and(qGoods.categoryId.eq(categoryId));
+            // 点一级分类要看它下面二级分类的商品,与客户端商品列表同一套口径
+            List<Long> categoryIds = new ArrayList<>();
+            categoryIds.add(categoryId);
+            categoryRepository.findByParentIdOrderBySortOrderAscIdAsc(categoryId)
+                    .forEach(child -> categoryIds.add(child.getId()));
+            where.and(qGoods.categoryId.in(categoryIds));
         }
         if (status != null) {
             where.and(qGoods.status.eq(status));
