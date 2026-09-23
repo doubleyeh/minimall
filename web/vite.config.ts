@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import type { IncomingMessage } from 'node:http'
 
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
@@ -16,6 +17,18 @@ import { defineConfig, loadEnv } from 'vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const proxyTarget = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
+
+  /**
+   * dev 代理。页面路由与接口共用前缀(/mall/goods 是页面、/mall/admin/goods 是接口),
+   * 所以用 Accept 区分:页面导航带 text/html,交给 Vite 的 SPA 兜底;其余转发到后端。
+   */
+  const apiProxy = {
+    target: proxyTarget,
+    changeOrigin: true,
+    // 返回字符串 = 不代理(交给 Vite 自己的 SPA 兜底去返回 index.html);返回 undefined = 转发
+    bypass: (req: IncomingMessage) =>
+      (req.headers.accept ?? '').includes('text/html') ? req.url : undefined,
+  }
 
   return {
     plugins: [
@@ -52,9 +65,9 @@ export default defineConfig(({ mode }) => {
       // 商城页面(分类/商品/订单/售后/优惠券/运费模板/会员等级/评价)全部走 /mall/admin/**,
       // 而代理是在工程骨架阶段写的,那时还没有这些接口。
       proxy: {
-        '/auth': { target: proxyTarget, changeOrigin: true },
-        '/system': { target: proxyTarget, changeOrigin: true },
-        '/mall': { target: proxyTarget, changeOrigin: true },
+        '/auth': apiProxy,
+        '/system': apiProxy,
+        '/mall': apiProxy,
       },
     },
     build: {

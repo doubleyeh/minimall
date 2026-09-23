@@ -9,6 +9,7 @@
  */
 export type {
   DataTableColumns,
+  DropdownOption,
   FormInst,
   FormRules,
   GlobalThemeOverrides,

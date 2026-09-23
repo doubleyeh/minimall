@@ -94,9 +94,9 @@ export const businessMenus: BusinessMenuNode[] = [
     icon: 'settings',
     menuKeys: ['/system'],
     children: [
+      // 部门已合进用户管理页(左侧部门树 + 右侧用户列表),不再单独占一个菜单项
       { path: '/system/user', title: '用户管理', icon: 'people', menuKeys: ['/system', 'user'] },
       { path: '/system/role', title: '角色管理', icon: 'shield', menuKeys: ['/system', 'role'] },
-      { path: '/system/dept', title: '部门管理', icon: 'business', menuKeys: ['/system', 'dept'] },
     ],
   },
   {
@@ -127,8 +127,9 @@ export const businessMenus: BusinessMenuNode[] = [
     icon: 'shopping',
     menuKeys: ['/mall'],
     children: [
+      // 商品分类已合进商品管理页(左侧树 + 右侧列表),不再单独占一个菜单项。
+      // 分类的增删改挂在树的节点后缀上,权限码(mall:category:*)没有变
       { path: '/mall/goods', title: '商品管理', icon: 'shop', menuKeys: ['/mall', 'goods'] },
-      { path: '/mall/category', title: '商品分类', icon: 'appstore', menuKeys: ['/mall', 'category'] },
       { path: '/mall/order', title: '订单管理', icon: 'profile', menuKeys: ['/mall', 'order'] },
       { path: '/mall/after-sale', title: '售后管理', icon: 'tool', menuKeys: ['/mall', 'after-sale'] },
       { path: '/mall/coupon', title: '优惠券', icon: 'gift', menuKeys: ['/mall', 'coupon'] },

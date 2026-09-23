@@ -15,7 +15,8 @@
         必须配置一条不限区域(ALL)的兜底规则,否则未列出的省份算不出运费。商品未关联模板时视为包邮。
       </n-alert>
 
-      <n-data-table :columns="columns" :data="rows" :loading="loading" :row-key="(row: FreightTemplateView) => row.id" />
+      <n-data-table
+        max-height="var(--mm-table-max-h)" :columns="columns" :data="rows" :loading="loading" :row-key="(row: FreightTemplateView) => row.id" />
     </n-card>
 
     <n-modal

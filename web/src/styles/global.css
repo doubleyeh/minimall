@@ -1,0 +1,178 @@
+/*
+ * 全局样式层。取值一律走主题写在 <html> 上的 --mm-*,不写死颜色。
+ * 字体不引 webfont:中文场景下系统字体最合适,个性靠字重、字距与数字字形。
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 列表页表格的最大高度:表体自己滚,表头固定。运行时由 layout 按内容区实际可用高覆写 */
+:root {
+  --mm-table-max-h: calc(100vh - 330px);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Source Han Sans SC', -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--mm-text-1);
+  background-color: var(--mm-page-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 页面氛围:两层很淡的径向光,强度由主题给 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 520px at 12% -8%, var(--mm-page-glow), transparent 62%),
+    radial-gradient(900px 420px at 100% 0%, var(--mm-page-glow), transparent 58%);
+}
+
+/* 内容压在氛围层之上 */
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+/* 数字对齐 */
+.n-data-table,
+.n-descriptions,
+.n-statistic,
+.mm-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ID、单号、权限码等需要逐位比对的文本用等宽 */
+code,
+kbd,
+samp,
+.mm-code {
+  font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
+  font-size: 0.92em;
+}
+
+/* 中文标题收紧字距 */
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.01em;
+}
+
+/* 页面外层滚动区,naive 的 global-style 覆盖不到 */
+* {
+  scrollbar-color: var(--mm-border) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--mm-border);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--mm-text-3);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 键盘焦点可见 */
+:focus-visible {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 内容区设计层:业务页面共用这组 naive 组件的结构样式(描边/阴影/圆角/字距) */
+
+/* ---------- 卡片 ---------- */
+.n-card {
+  background-color: var(--mm-surface);
+  border: 1px solid var(--mm-card-border);
+  border-radius: var(--mm-radius);
+  box-shadow: var(--mm-card-shadow);
+  transition:
+    background-color 0.28s ease,
+    border-color 0.28s ease,
+    box-shadow 0.28s ease;
+}
+
+/* 卡片标题 */
+.n-card .n-card-header__main {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mm-text-1);
+}
+
+/* 筛选表单与表格之间的间距 */
+.n-card .n-form--inline {
+  margin-bottom: 14px;
+}
+
+/* ---------- 表格 ---------- */
+/* 表头文字 */
+.n-data-table .n-data-table-th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* 单元格留白 */
+.n-data-table .n-data-table-td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+/* 行悬停 */
+.n-data-table .n-data-table-tr {
+  transition: background-color 0.15s ease;
+}
+
+/* ---------- 表单控件 ---------- */
+/* 输入控件圆角跟主题 */
+.n-input,
+.n-base-selection,
+.n-input-number {
+  border-radius: max(3px, calc(var(--mm-radius) - 4px));
+}
+
+/* ---------- 空状态 ---------- */
+.n-empty {
+  padding: 26px 0;
+}
+

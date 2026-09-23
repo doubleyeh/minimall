@@ -1,21 +1,77 @@
 <template>
-  <n-space vertical :size="16">
-    <n-card>
+  <div class="user-page">
+    <!-- 左:部门树,选中即筛选右侧用户 -->
+    <n-card class="user-page__side" size="small">
+      <template #header>
+        <div class="user-page__side-head">
+          <span>部门</span>
+          <n-space :size="4">
+            <n-button quaternary size="tiny" title="刷新" @click="loadDepts">
+              <template #icon><n-icon :component="RefreshOutline" /></template>
+            </n-button>
+            <n-button
+              v-perm="'system:dept:create'"
+              quaternary
+              size="tiny"
+              title="新增顶级部门"
+              @click="openCreateDept(null)"
+            >
+              <template #icon><n-icon :component="AddOutline" /></template>
+            </n-button>
+          </n-space>
+        </div>
+      </template>
+
+      <n-spin :show="deptLoading">
+        <n-tree
+          block-line
+          selectable
+          expand-on-click
+          :data="treeData"
+          :selected-keys="[selectedKey]"
+          :expanded-keys="expandedKeys"
+          :render-suffix="renderDeptActions"
+          @update:selected-keys="onSelectDept"
+          @update:expanded-keys="onExpand"
+        />
+      </n-spin>
+    </n-card>
+
+    <!-- 右:该部门下的用户 -->
+    <n-card class="user-page__main" size="small">
+      <template #header>
+        <div class="user-page__main-head">
+          <n-space align="center" :size="8">
+            <span>用户列表</span>
+            <n-tag v-if="selectedDept" size="small" closable :bordered="false" @close="clearDept">
+              {{ selectedDept.deptName }}
+            </n-tag>
+            <n-text v-else depth="3">全部部门</n-text>
+          </n-space>
+          <n-button v-perm="'system:user:create'" type="primary" size="small" @click="openCreateUser">
+            新增用户
+          </n-button>
+        </div>
+      </template>
+
       <n-form inline :model="query" label-placement="left">
         <n-form-item label="用户名">
-          <n-input v-model:value="query.username" clearable placeholder="模糊匹配" style="width: 160px" />
-        </n-form-item>
-        <n-form-item label="部门">
-          <n-tree-select
-            v-model:value="query.deptId"
-            :options="deptOptions"
+          <n-input
+            v-model:value="query.username"
             clearable
-            placeholder="全部部门"
-            style="width: 200px"
+            placeholder="模糊匹配"
+            style="width: 160px"
+            @keyup.enter="load(1)"
           />
         </n-form-item>
         <n-form-item label="状态">
-          <n-select v-model:value="query.status" :options="statusOptions" clearable placeholder="全部" style="width: 120px" />
+          <n-select
+            v-model:value="query.status"
+            :options="statusOptions"
+            clearable
+            placeholder="全部"
+            style="width: 120px"
+          />
         </n-form-item>
         <n-form-item>
           <n-space>
@@ -24,17 +80,9 @@
           </n-space>
         </n-form-item>
       </n-form>
-    </n-card>
-
-    <n-card>
-      <template #header>
-        <n-space justify="space-between" align="center">
-          <span>用户列表</span>
-          <n-button v-perm="'system:user:create'" type="primary" @click="openCreate">新增用户</n-button>
-        </n-space>
-      </template>
 
       <n-data-table
+        max-height="var(--mm-table-max-h)"
         :columns="columns"
         :data="rows"
         :loading="loading"
@@ -45,8 +93,49 @@
       />
     </n-card>
 
-    <!-- 新增 / 编辑 -->
-    <n-modal v-model:show="formVisible" preset="card" :title="editing ? '编辑用户' : '新增用户'" style="width: 560px">
+    <!-- 部门表单 -->
+    <n-modal
+      v-model:show="deptFormVisible"
+      preset="card"
+      :title="editingDept ? '编辑部门' : '新增部门'"
+      style="width: 480px"
+    >
+      <n-form ref="deptFormRef" :model="deptForm" :rules="deptRules" label-placement="top">
+        <n-form-item label="上级部门" path="parentId">
+          <n-tree-select
+            v-model:value="deptForm.parentId"
+            :options="parentOptions"
+            placeholder="顶级部门请选择「根部门」"
+          />
+        </n-form-item>
+        <n-form-item label="部门名称" path="deptName">
+          <n-input v-model:value="deptForm.deptName" />
+        </n-form-item>
+        <n-form-item label="排序">
+          <n-input-number v-model:value="deptForm.sortOrder" :min="0" />
+        </n-form-item>
+        <n-form-item label="状态">
+          <n-radio-group v-model:value="deptForm.status">
+            <n-radio :value="1">启用</n-radio>
+            <n-radio :value="0">停用</n-radio>
+          </n-radio-group>
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="deptFormVisible = false">取消</n-button>
+          <n-button type="primary" :loading="submitting" @click="onSubmitDept">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 用户表单 -->
+    <n-modal
+      v-model:show="formVisible"
+      preset="card"
+      :title="editing ? '编辑用户' : '新增用户'"
+      style="width: 560px"
+    >
       <n-form ref="formRef" :model="form" :rules="formRules" label-placement="top">
         <n-form-item label="用户名" path="username">
           <n-input v-model:value="form.username" :disabled="editing" placeholder="3-64 位字母/数字/下划线,字母开头" />
@@ -72,12 +161,12 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="formVisible = false">取消</n-button>
-          <n-button type="primary" :loading="submitting" @click="onSubmit">保存</n-button>
+          <n-button type="primary" :loading="submitting" @click="onSubmitUser">保存</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <!-- 一次性明文密码:只在本次响应里出现,必须提示立即保存(前端文档 6.3) -->
+    <!-- 一次性明文密码,只在本次响应里出现 -->
     <n-modal v-model:show="secretVisible" preset="card" title="初始密码" style="width: 460px">
       <n-alert type="warning" :show-icon="true">
         这个密码只显示这一次,关闭后无法再查看。请立即复制并交给使用者,对方首次登录会被要求改密。
@@ -87,14 +176,15 @@
         <n-button @click="copySecret">复制</n-button>
       </n-space>
     </n-modal>
-  </n-space>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { NButton, NTag, useDialog, useMessage } from 'naive-ui'
-import { h, onMounted, reactive, ref } from 'vue'
+import { AddOutline, CreateOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
+import { NButton, NIcon, NTag, useDialog, useMessage } from 'naive-ui'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 
-import { deptTree } from '@/api/dept'
+import { createDept, deleteDept, deptTree, updateDept } from '@/api/dept'
 import { pageRoles } from '@/api/role'
 import {
   changeUserStatus,
@@ -105,29 +195,259 @@ import {
   unlockUser,
   updateUser,
 } from '@/api/user'
-import type { Id } from '@/types/api'
-import type { DataTableColumns, FormInst, FormRules, SelectOption, TreeSelectOption } from 'naive-ui'
-import type { DeptTreeNode, RoleView, UserSaveRequest, UserView } from '@/types/system'
 import { usePermissionStore } from '@/stores/permission'
+import type { Id } from '@/types/api'
+import type {
+  DataTableColumns,
+  FormInst,
+  FormRules,
+  SelectOption,
+  TreeOption,
+  TreeSelectOption,
+} from 'naive-ui'
+import type {
+  DeptSaveRequest,
+  DeptTreeNode,
+  RoleView,
+  UserSaveRequest,
+  UserView,
+} from '@/types/system'
+
+/** 部门 + 用户合并为一页:左部门树(选中即筛选)+ 右用户列表。部门增删改挂在树节点后缀上。 */
 
 const message = useMessage()
 const dialog = useDialog()
 const permission = usePermissionStore()
 
+const ALL_KEY = 'all'
+const ROOT_KEY = '0'
+
+// ——— 部门树 ———
+
+const deptLoading = ref(false)
+const depts = ref<DeptTreeNode[]>([])
+const deptById = ref(new Map<string, DeptTreeNode>())
+const selectedKey = ref<string>(ALL_KEY)
+const expandedKeys = ref<string[]>([ALL_KEY])
+const parentOptions = ref<TreeSelectOption[]>([])
+
+const selectedDept = computed(() =>
+  selectedKey.value === ALL_KEY ? null : (deptById.value.get(selectedKey.value) ?? null),
+)
+
+const treeData = computed<TreeOption[]>(() => [
+  { key: ALL_KEY, label: '全部部门', children: depts.value.map(toTreeOption) },
+])
+
+/** 部门树是无限层级的,所以每个节点都能"新增下级" */
+function renderDeptActions(info: { option: TreeOption }): ReturnType<typeof h> {
+  const key = String(info.option.key)
+  const row = deptById.value.get(key)
+  const active = selectedKey.value === key
+  const actions = []
+  if (permission.hasPerm('system:dept:create')) {
+    actions.push(
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          quaternary: true,
+          title: row ? '新增下级' : '新增顶级部门',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            openCreateDept(row?.id ?? null)
+          },
+        },
+        { icon: () => h(NIcon, { component: AddOutline }) },
+      ),
+    )
+  }
+  if (row && permission.hasPerm('system:dept:update')) {
+    actions.push(
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          quaternary: true,
+          title: '编辑',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            openEditDept(row)
+          },
+        },
+        { icon: () => h(NIcon, { component: CreateOutline }) },
+      ),
+    )
+  }
+  if (row && permission.hasPerm('system:dept:delete')) {
+    actions.push(
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          quaternary: true,
+          title: '删除',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            confirmDeleteDept(row)
+          },
+        },
+        { icon: () => h(NIcon, { component: TrashOutline }) },
+      ),
+    )
+  }
+  return h('span', { class: ['dept-actions', { 'dept-actions--active': active }] }, actions)
+}
+
+function toTreeOption(node: DeptTreeNode): TreeOption {
+  return {
+    key: node.id,
+    label: node.deptName,
+    children: node.children?.length ? node.children.map(toTreeOption) : undefined,
+  }
+}
+
+function toTreeSelectOptions(nodes: DeptTreeNode[]): TreeSelectOption[] {
+  return nodes.map((node) => ({
+    key: node.id,
+    label: node.deptName,
+    children: node.children?.length ? toTreeSelectOptions(node.children) : undefined,
+  }))
+}
+
+async function loadDepts(): Promise<void> {
+  deptLoading.value = true
+  try {
+    const tree = await deptTree()
+    depts.value = tree
+    const map = new Map<string, DeptTreeNode>()
+    const walk = (nodes: DeptTreeNode[]): void => {
+      for (const node of nodes) {
+        map.set(String(node.id), node)
+        if (node.children?.length) {
+          walk(node.children)
+        }
+      }
+    }
+    walk(tree)
+    deptById.value = map
+    deptOptions.value = toTreeSelectOptions(tree)
+    parentOptions.value = [{ key: ROOT_KEY, label: '根部门' }, ...toTreeSelectOptions(tree)]
+    expandedKeys.value = [ALL_KEY, ...Array.from(map.keys())]
+    if (selectedKey.value !== ALL_KEY && !map.has(selectedKey.value)) {
+      selectedKey.value = ALL_KEY
+      query.deptId = null
+    }
+  } finally {
+    deptLoading.value = false
+  }
+}
+
+function onSelectDept(keys: Array<string | number>): void {
+  const key = keys.length ? String(keys[0]) : ALL_KEY
+  selectedKey.value = key
+  query.deptId = key === ALL_KEY ? null : key
+  void load(1)
+}
+
+function clearDept(): void {
+  onSelectDept([ALL_KEY])
+}
+
+function onExpand(keys: Array<string | number>): void {
+  expandedKeys.value = keys.map(String)
+}
+
+// ——— 部门增删改 ———
+
+const deptFormVisible = ref(false)
+const editingDept = ref<Id | null>(null)
+const deptFormRef = ref<FormInst | null>(null)
+const deptForm = reactive<DeptSaveRequest>({
+  parentId: ROOT_KEY,
+  deptName: '',
+  sortOrder: 1,
+  status: 1,
+})
+
+const deptRules: FormRules = {
+  deptName: { required: true, message: '请输入部门名称', trigger: ['blur', 'input'] },
+}
+
+function openCreateDept(parentId: Id | null): void {
+  editingDept.value = null
+  Object.assign(deptForm, { parentId: parentId ?? ROOT_KEY, deptName: '', sortOrder: 1, status: 1 })
+  deptFormVisible.value = true
+}
+
+function openEditDept(row: DeptTreeNode): void {
+  editingDept.value = row.id
+  Object.assign(deptForm, {
+    parentId: row.parentId === '0' ? ROOT_KEY : row.parentId,
+    deptName: row.deptName,
+    sortOrder: row.sortOrder,
+    status: row.status,
+  })
+  deptFormVisible.value = true
+}
+
+async function onSubmitDept(): Promise<void> {
+  try {
+    await deptFormRef.value?.validate()
+  } catch {
+    return
+  }
+  submitting.value = true
+  try {
+    const payload: DeptSaveRequest = {
+      parentId: String(deptForm.parentId) === ROOT_KEY ? ROOT_KEY : String(deptForm.parentId),
+      deptName: deptForm.deptName,
+      sortOrder: deptForm.sortOrder,
+      status: deptForm.status,
+    }
+    if (editingDept.value == null) {
+      await createDept(payload)
+    } else {
+      await updateDept(editingDept.value, payload)
+    }
+    message.success('已保存')
+    deptFormVisible.value = false
+    await loadDepts()
+  } finally {
+    submitting.value = false
+  }
+}
+
+function confirmDeleteDept(row: DeptTreeNode): void {
+  dialog.warning({
+    title: '确认删除',
+    content: `确定删除部门「${row.deptName}」吗?有下级部门或部门下还有用户时后端会拒绝。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await deleteDept(row.id)
+      message.success('已删除')
+      await loadDepts()
+      await load()
+    },
+  })
+}
+
+// ——— 用户列表 ———
+
 const loading = ref(false)
 const submitting = ref(false)
 const rows = ref<UserView[]>([])
-const total = ref(0)
 const deptOptions = ref<TreeSelectOption[]>([])
 const roleOptions = ref<SelectOption[]>([])
 
-const query = reactive<{ username: string; deptId: Id | null; status: number | null; pageNo: number; pageSize: number }>({
-  username: '',
-  deptId: null,
-  status: null,
-  pageNo: 1,
-  pageSize: 10,
-})
+const query = reactive<{
+  username: string
+  deptId: Id | null
+  status: number | null
+  pageNo: number
+  pageSize: number
+}>({ username: '', deptId: null, status: null, pageNo: 1, pageSize: 10 })
 
 const statusOptions: SelectOption[] = [
   { label: '启用', value: 1 },
@@ -139,18 +459,8 @@ const pagination = reactive({
   pageSize: 10,
   itemCount: 0,
   showSizePicker: false,
-  // Naive UI 的 RenderPrefix 参数里 itemCount 是可选的(未分页时为空),
-  // 直接写成 { itemCount: number } 会因参数类型不兼容而编译失败
   prefix: (info: { itemCount?: number }) => `共 ${info.itemCount ?? 0} 条`,
 })
-
-function toDeptOptions(nodes: DeptTreeNode[]): TreeSelectOption[] {
-  return nodes.map((node) => ({
-    key: node.id,
-    label: node.deptName,
-    children: node.children?.length ? toDeptOptions(node.children) : undefined,
-  }))
-}
 
 async function load(page = query.pageNo): Promise<void> {
   loading.value = true
@@ -164,7 +474,6 @@ async function load(page = query.pageNo): Promise<void> {
       pageSize: query.pageSize,
     })
     rows.value = result.list
-    total.value = result.total
     pagination.page = query.pageNo
     pagination.itemCount = result.total
   } finally {
@@ -174,12 +483,12 @@ async function load(page = query.pageNo): Promise<void> {
 
 function onResetQuery(): void {
   query.username = ''
-  query.deptId = null
   query.status = null
+  // 重置回到全部部门,树与列表一起回
+  selectedKey.value = ALL_KEY
+  query.deptId = null
   void load(1)
 }
-
-// ——— 表格列 ———
 
 const columns: DataTableColumns<UserView> = [
   { title: '用户名', key: 'username', width: 160 },
@@ -193,7 +502,11 @@ const columns: DataTableColumns<UserView> = [
     render: (row) =>
       h(
         NTag,
-        { size: 'small', type: row.lockTime ? 'error' : row.status === 1 ? 'success' : 'default', bordered: false },
+        {
+          size: 'small',
+          type: row.lockTime ? 'error' : row.status === 1 ? 'success' : 'default',
+          bordered: false,
+        },
         { default: () => (row.lockTime ? '已锁定' : row.status === 1 ? '启用' : '禁用') },
       ),
   },
@@ -204,7 +517,7 @@ const columns: DataTableColumns<UserView> = [
     render: (row) =>
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
         permission.hasPerm('system:user:update')
-          ? h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' })
+          ? h(NButton, { size: 'tiny', onClick: () => openEditUser(row) }, { default: () => '编辑' })
           : null,
         permission.hasPerm('system:user:status')
           ? h(
@@ -230,7 +543,7 @@ const columns: DataTableColumns<UserView> = [
   },
 ]
 
-// ——— 新增 / 编辑 ———
+// ——— 用户增改 ———
 
 const formVisible = ref(false)
 const editing = ref(false)
@@ -257,14 +570,23 @@ const formRules: FormRules = {
   ],
 }
 
-function openCreate(): void {
+function openCreateUser(): void {
   editing.value = false
   editingId.value = null
-  Object.assign(form, { username: '', password: '', nickname: '', phone: '', deptId: null, roleIds: [], status: 1 })
+  // 新增用户默认落在左侧选中的部门下
+  Object.assign(form, {
+    username: '',
+    password: '',
+    nickname: '',
+    phone: '',
+    deptId: selectedDept.value?.id ?? null,
+    roleIds: [],
+    status: 1,
+  })
   formVisible.value = true
 }
 
-function openEdit(row: UserView): void {
+function openEditUser(row: UserView): void {
   editing.value = true
   editingId.value = row.id
   Object.assign(form, {
@@ -277,12 +599,11 @@ function openEdit(row: UserView): void {
     status: row.status,
   })
   formVisible.value = true
-  // 列表不返回 roleIds(后端不暴露),编辑时角色以"不改动"为准:留空即提交空数组会让后端清空角色,
-  // 所以这里显式提示使用者重新选择,避免静默清空权限
+  // 列表不返回 roleIds,留空提交会清空角色,所以提示重新选择
   message.info('如需调整角色,请重新选择;不改动角色时请保持为空并保存其它字段')
 }
 
-async function onSubmit(): Promise<void> {
+async function onSubmitUser(): Promise<void> {
   try {
     await formRef.value?.validate()
   } catch {
@@ -316,8 +637,6 @@ async function onSubmit(): Promise<void> {
   }
 }
 
-// ——— 一次性密码 ———
-
 const secretVisible = ref(false)
 const secret = ref('')
 
@@ -330,8 +649,6 @@ async function copySecret(): Promise<void> {
   await navigator.clipboard.writeText(secret.value)
   message.success('已复制')
 }
-
-// ——— 行内操作 ———
 
 async function onToggleStatus(row: UserView): Promise<void> {
   const next = row.status === 1 ? 0 : 1
@@ -382,9 +699,52 @@ function onDelete(row: UserView): void {
 }
 
 onMounted(async () => {
-  const [depts, roles] = await Promise.all([deptTree(), pageRoles({ pageNo: 1, pageSize: 100 })])
-  deptOptions.value = toDeptOptions(depts)
+  const roles = await pageRoles({ pageNo: 1, pageSize: 100 })
   roleOptions.value = roles.list.map((role: RoleView) => ({ label: role.roleName, value: role.id }))
+  await loadDepts()
   await load(1)
 })
 </script>
+
+<style scoped>
+.user-page {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.user-page__side :deep(.n-card__content) {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.user-page__side-head,
+.user-page__main-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 节点后缀的操作按钮:默认隐藏,悬停或选中时显示 */
+.dept-actions {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.dept-actions--active {
+  opacity: 1;
+}
+
+.user-page :deep(.n-tree-node:hover) .dept-actions {
+  opacity: 1;
+}
+
+@media (max-width: 1100px) {
+  .user-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>

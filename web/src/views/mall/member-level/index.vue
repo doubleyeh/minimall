@@ -15,7 +15,8 @@
         本期只维护等级定义:成长值晋升与等级折扣的计算规则尚未确定,因此这里的折扣率只保存、不参与结算。
       </n-alert>
 
-      <n-data-table :columns="columns" :data="rows" :loading="loading" :row-key="(row: MemberLevelView) => row.id" />
+      <n-data-table
+        max-height="var(--mm-table-max-h)" :columns="columns" :data="rows" :loading="loading" :row-key="(row: MemberLevelView) => row.id" />
     </n-card>
 
     <n-modal v-model:show="formVisible" preset="card" :title="editingId ? '编辑等级' : '新增等级'" style="width: 480px">

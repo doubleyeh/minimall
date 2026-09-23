@@ -4,6 +4,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { vPerm } from './directives/perm'
 import { router } from './router'
+import './styles/global.css'
 
 /**
  * 应用入口。

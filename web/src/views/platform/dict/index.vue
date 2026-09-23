@@ -32,6 +32,7 @@
           </n-form>
 
           <n-data-table
+        max-height="var(--mm-table-max-h)"
             :columns="typeColumns"
             :data="typeRows"
             :loading="typeLoading"
@@ -71,6 +72,7 @@
           <template v-else>
             <n-text depth="3" class="dict-tip">类型编码:{{ selectedType.dictType }}</n-text>
             <n-data-table
+        max-height="var(--mm-table-max-h)"
               :columns="dataColumns"
               :data="dataRows"
               :loading="dataLoading"

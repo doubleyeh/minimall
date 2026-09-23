@@ -14,15 +14,23 @@
     </n-card>
 
     <n-card title="权限概览">
-      <n-space vertical :size="12">
+      <n-space vertical :size="16">
+        <div class="dash__stats">
+          <div class="dash__stat">
+            <span class="dash__stat-value">{{ permission.menus.length }}</span>
+            <span class="dash__stat-label">可见菜单</span>
+          </div>
+          <div class="dash__stat">
+            <span class="dash__stat-value">{{ permission.permCodes.length }}</span>
+            <span class="dash__stat-label">权限码</span>
+          </div>
+        </div>
+
         <n-text depth="3">
           权限是登录那一刻的快照。后台改了角色授权后,前端要重新登录或刷新页面才会更新;
           收到 403 时会自动重建一次(限频 10 秒)。
         </n-text>
-        <n-space :size="8">
-          <n-tag size="small" :bordered="false">可见菜单 {{ permission.menus.length }} 项</n-tag>
-          <n-tag size="small" :bordered="false">权限码 {{ permission.permCodes.length }} 个</n-tag>
-        </n-space>
+
         <n-space :size="8" style="flex-wrap: wrap">
           <n-tag
             v-for="code in permission.permCodes"
@@ -30,6 +38,7 @@
             size="small"
             type="info"
             :bordered="false"
+            class="mm-code"
           >
             {{ code }}
           </n-tag>
@@ -46,3 +55,31 @@ import { useUserStore } from '@/stores/user'
 const user = useUserStore()
 const permission = usePermissionStore()
 </script>
+
+<style scoped>
+/* 权限数量用等宽数字 + 大字号 */
+.dash__stats {
+  display: flex;
+  gap: 36px;
+}
+
+.dash__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash__stat-value {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.dash__stat-label {
+  font-size: 12px;
+  color: var(--mm-text-3);
+  letter-spacing: 0.02em;
+}
+</style>

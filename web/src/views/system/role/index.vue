@@ -26,6 +26,7 @@
       </template>
 
       <n-data-table
+        max-height="var(--mm-table-max-h)"
         :columns="columns"
         :data="rows"
         :loading="loading"
