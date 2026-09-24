@@ -29,6 +29,7 @@ import {
   ShieldCheckmarkOutline,
   StarOutline,
   StorefrontOutline,
+  WalletOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { computed, h, type Component } from 'vue'
@@ -61,6 +62,7 @@ const icons: Record<string, Component> = {
   gift: GiftOutline,
   list: ListOutline,
   book: BookOutline,
+  wallet: WalletOutline,
   // 商城管理
   shopping: CartOutline,
   shop: PricetagsOutline,

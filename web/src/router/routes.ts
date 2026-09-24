@@ -113,6 +113,8 @@ export const businessMenus: BusinessMenuNode[] = [
        * 它是平台专用菜单,不在任何套餐里,所以租户账号的权限快照中不会有 'dict' —— 菜单自然不显示。
        */
       { path: '/platform/dict', title: '字典管理', icon: 'book', menuKeys: ['/platform', 'dict'] },
+      // 微信支付配置与后端 V5 迁移里的 sys_menu(id = 10,parent_id = 5,is_platform = 1)一致
+      { path: '/platform/wx-pay', title: '微信支付配置', icon: 'wallet', menuKeys: ['/platform', 'wx-pay'] },
     ],
   },
   /**
