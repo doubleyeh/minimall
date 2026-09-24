@@ -81,6 +81,7 @@ import { usePermissionStore } from '@/stores/permission'
 import type { Id, PageResult } from '@/types/api'
 import type { CouponSaveRequest, CouponView } from '@/types/mall'
 import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
+import { toLocalDateTime } from '@/utils/datetime'
 
 const message = useMessage()
 const permission = usePermissionStore()
@@ -215,13 +216,6 @@ const form = reactive<CouponSaveRequest>({
 
 const formRules: FormRules = {
   couponName: { required: true, message: '请输入券名称', trigger: ['blur', 'input'] },
-}
-
-/** 后端要 LocalDateTime 字符串,这里把时间戳转成 yyyy-MM-ddTHH:mm:ss */
-function toLocalDateTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function openCreate(): void {

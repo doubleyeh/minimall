@@ -86,6 +86,7 @@ import { usePermissionStore } from '@/stores/permission'
 import type { Id, PageResult } from '@/types/api'
 import type { PromotionSaveRequest, PromotionView } from '@/types/mall'
 import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
+import { toLocalDateTime } from '@/utils/datetime'
 
 const message = useMessage()
 const permission = usePermissionStore()
@@ -214,12 +215,6 @@ function splitIds(value: string): Id[] {
     .split(/[,，\s]+/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
-}
-
-function toLocalDateTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function openCreate(): void {

@@ -208,3 +208,22 @@ export interface DictItemView {
   label: string
   value: string
 }
+
+// ——— 操作日志 ———
+
+/** 操作日志视图(后端 OperLogView)。只读:日志不允许改与删。 */
+export interface OperLogView {
+  id: Id
+  tenantId: Id | null
+  userId: Id | null
+  module: string
+  permCode: string | null
+  method: string
+  requestParams: string | null
+  /** 0-失败 1-成功 */
+  status: number
+  errorMsg: string | null
+  ip: string | null
+  traceId: string | null
+  createTime: string
+}
