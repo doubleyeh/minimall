@@ -13,6 +13,9 @@ public enum ErrorCode {
     LOGIN_FAILED(40001, "用户名或密码错误"),
     ACCOUNT_LOCKED(40002, "账号已锁定,请稍后重试"),
     PARAM_INVALID(40003, "参数校验失败"),
+    /** 失败次数到阈值后必须带验证码,但请求里没有(前端据此把验证码输入框亮出来) */
+    CAPTCHA_REQUIRED(40004, "请先完成验证码"),
+    CAPTCHA_INVALID(40005, "验证码不正确或已失效"),
 
     UNAUTHORIZED(40100, "未登录或登录已过期"),
     TENANT_ABNORMAL(40101, "租户状态异常,请联系管理员"),

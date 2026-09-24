@@ -12,17 +12,23 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                       不区分租户和用户名
  */
 @ConfigurationProperties(prefix = "minimall.login")
-public record LoginProperties(Integer maxFailCount, Integer lockMinutes, Integer ipLimitPerMinute) {
+public record LoginProperties(Integer maxFailCount, Integer lockMinutes, Integer ipLimitPerMinute,
+                              Integer captchaAfterFailures, Integer captchaTtlSeconds) {
 
     private static final int DEFAULT_MAX_FAIL_COUNT = 5;
     private static final int DEFAULT_LOCK_MINUTES = 15;
     private static final int DEFAULT_IP_LIMIT_PER_MINUTE = 10;
+    private static final int DEFAULT_CAPTCHA_AFTER_FAILURES = 3;
+    private static final int DEFAULT_CAPTCHA_TTL_SECONDS = 120;
 
     public LoginProperties {
         maxFailCount = maxFailCount == null ? DEFAULT_MAX_FAIL_COUNT : maxFailCount;
         lockMinutes = lockMinutes == null ? DEFAULT_LOCK_MINUTES : lockMinutes;
         ipLimitPerMinute = ipLimitPerMinute == null ? DEFAULT_IP_LIMIT_PER_MINUTE : ipLimitPerMinute;
-        if (maxFailCount <= 0 || lockMinutes <= 0 || ipLimitPerMinute <= 0) {
+        captchaAfterFailures = captchaAfterFailures == null ? DEFAULT_CAPTCHA_AFTER_FAILURES : captchaAfterFailures;
+        captchaTtlSeconds = captchaTtlSeconds == null ? DEFAULT_CAPTCHA_TTL_SECONDS : captchaTtlSeconds;
+        if (maxFailCount <= 0 || lockMinutes <= 0 || ipLimitPerMinute <= 0
+                || captchaAfterFailures <= 0 || captchaTtlSeconds <= 0) {
             throw new IllegalArgumentException("minimall.login.* 必须为正数");
         }
     }

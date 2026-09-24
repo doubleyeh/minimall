@@ -1,4 +1,4 @@
-import type { LoginResult, PermissionSnapshot, TokenPair } from '@/types/auth'
+import type { CaptchaView, LoginResult, PermissionSnapshot, TokenPair } from '@/types/auth'
 import { request } from '@/utils/request'
 
 /**
@@ -12,6 +12,14 @@ export interface LoginPayload {
   /** 明文提交:禁止前端做 md5 或任何加密(4.4) */
   password: string
   deviceId?: string
+  /** 图形验证码:登录页始终带上;失败次数到阈值后不带会被后端拒绝(错误码 40004) */
+  captchaId?: string
+  captchaCode?: string
+}
+
+/** 取一张图形验证码。答案在服务端,校验过一次即失效,所以每次提交失败后都要重新取。 */
+export function fetchCaptcha(): Promise<CaptchaView> {
+  return request.get<CaptchaView>('/auth/captcha')
 }
 
 export function login(payload: LoginPayload): Promise<LoginResult> {

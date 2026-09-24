@@ -1,5 +1,6 @@
 package com.minimall.sys.api;
 
+import com.minimall.sys.api.dto.CaptchaView;
 import com.minimall.sys.api.dto.ChangePasswordRequest;
 import com.minimall.sys.api.dto.LoginRequest;
 import com.minimall.sys.api.dto.LoginResponse;
@@ -8,6 +9,7 @@ import com.minimall.sys.api.dto.RefreshTokenRequest;
 import com.minimall.sys.api.dto.RefreshTokenResponse;
 import com.minimall.common.ApiResponse;
 import com.minimall.infra.audit.AuditLog;
+import com.minimall.infra.security.CaptchaService;
 import com.minimall.sys.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +31,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final CaptchaService captchaService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, CaptchaService captchaService) {
         this.authService = authService;
+        this.captchaService = captchaService;
     }
 
     /**
@@ -45,6 +49,16 @@ public class AuthController {
     @AuditLog(module = "认证", permCode = "auth:login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok(authService.login(request));
+    }
+
+    /**
+     * 取一张图形验证码(白名单接口,不需要登录态)。
+     *
+     * <p>答案在服务端(Redis)而不是图里,校验过一次即失效 —— 所以前端每次提交失败后都要重新取一张。
+     */
+    @GetMapping("/captcha")
+    public ApiResponse<CaptchaView> captcha() {
+        return ApiResponse.ok(captchaService.generate());
     }
 
     /**

@@ -1,6 +1,12 @@
 import type { Id } from './api'
 import type { MenuTreeNode } from './system'
 
+/** 图形验证码:`image` 是可直接放进 <img src> 的 data URL。 */
+export interface CaptchaView {
+  captchaId: string
+  image: string
+}
+
 /** 令牌对。刷新成功时必须同一时刻覆盖写入这一对(前端文档 4.1)。 */
 export interface TokenPair {
   token: string

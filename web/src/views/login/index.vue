@@ -47,6 +47,23 @@
                 placeholder="请输入密码"
               />
             </n-form-item>
+            <n-form-item label="验证码">
+              <div class="login__captcha">
+                <n-input
+                  v-model:value="form.captchaCode"
+                  placeholder="请输入图中的字符"
+                  @keyup.enter="onSubmit"
+                />
+                <img
+                  v-if="captchaImage"
+                  :src="captchaImage"
+                  class="login__captcha-img"
+                  alt="验证码"
+                  title="看不清?点击换一张"
+                  @click="loadCaptcha"
+                />
+              </div>
+            </n-form-item>
           </n-form>
 
           <n-button type="primary" block size="large" :loading="loading" @click="onSubmit">
@@ -63,9 +80,10 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { fetchCaptcha } from '@/api/auth'
 import ThemeSwitcher from '@/layout/ThemeSwitcher.vue'
 import { useUserStore } from '@/stores/user'
 import type { FormInst, FormRules } from '@/types/naive'
@@ -84,7 +102,29 @@ const form = reactive({
   tenantCode: getRememberedTenantCode() || import.meta.env.VITE_TENANT_CODE || '',
   username: '',
   password: '',
+  captchaCode: '',
 })
+
+const captchaId = ref('')
+const captchaImage = ref('')
+
+/**
+ * 取一张验证码。
+ *
+ * 取不到(比如网络抖动)时不清空已有内容、也不拦着登录:后端只在失败次数到阈值后才强制要求它,
+ * 前端这里没必要把"验证码服务不可用"升级成"谁都登不进来"。
+ */
+async function loadCaptcha(): Promise<void> {
+  try {
+    const captcha = await fetchCaptcha()
+    captchaId.value = captcha.captchaId
+    captchaImage.value = captcha.image
+    form.captchaCode = ''
+  } catch {
+    captchaId.value = ''
+    captchaImage.value = ''
+  }
+}
 
 const rules: FormRules = {
   tenantCode: [{ required: true, message: '请输入租户编码', trigger: ['input', 'blur'] }],
@@ -102,7 +142,13 @@ async function onSubmit(): Promise<void> {
 
   loading.value = true
   try {
-    await user.login({ ...form })
+    await user.login({
+      tenantCode: form.tenantCode,
+      username: form.username,
+      password: form.password,
+      captchaId: captchaId.value || undefined,
+      captchaCode: form.captchaCode || undefined,
+    })
     rememberTenantCode(form.tenantCode)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
     // 强制改密的跳转由守卫处理(4.5),这里只管走"登录成功后该去哪"
@@ -110,10 +156,16 @@ async function onSubmit(): Promise<void> {
   } catch (error) {
     // 文案由后端统一返回,前端原样展示,不解读"租户不存在/用户不存在/密码错误"(4.4)
     errorMessage.value = error instanceof Error ? error.message : '登录失败,请稍后重试'
+    // 验证码是一次性的:这次请求已经把它消费掉了,换一张再让用户重试
+    await loadCaptcha()
   } finally {
     loading.value = false
   }
 }
+
+onMounted(() => {
+  void loadCaptcha()
+})
 </script>
 
 <style scoped>
@@ -247,6 +299,21 @@ async function onSubmit(): Promise<void> {
 .login__tip {
   font-size: 12px;
   line-height: 1.6;
+}
+
+.login__captcha {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.login__captcha-img {
+  flex: none;
+  width: 120px;
+  height: 34px;
+  cursor: pointer;
+  border: 1px solid var(--mm-border);
+  border-radius: 6px;
 }
 
 /* 窄屏收起品牌区 */

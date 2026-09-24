@@ -30,6 +30,15 @@ public record LoginRequest(
          * 不传则由服务端生成一个并随响应返回,便于前端持久化后用于问题定位。
          */
         @Size(max = 64, message = "设备标识长度不能超过64")
-        String deviceId
+        String deviceId,
+
+        /**
+         * 图形验证码。前端登录页始终带上;不带也行 —— 除非该账号的失败次数已到阈值(见 LoginProperties)。
+         */
+        @Size(max = 64, message = "验证码标识长度不合法")
+        String captchaId,
+
+        @Size(max = 16, message = "验证码长度不合法")
+        String captchaCode
 ) {
 }

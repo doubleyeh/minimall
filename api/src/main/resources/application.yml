@@ -61,6 +61,8 @@ minimall:
     # 白名单:允许没有 tenantId 就执行的路径,必须显式维护,不做模糊匹配
     public-paths:
       - /auth/login
+      # 取验证码必然发生在登录之前,没有登录态
+      - /auth/captcha
       # 刷新接口必须在白名单里:调用它时访问令牌通常已经过期,登录态校验必然失败(7.1.3)
       - /auth/refresh
       - /pay/callback/**
@@ -83,6 +85,11 @@ minimall:
     max-fail-count: 5
     lock-minutes: 15
     ip-limit-per-minute: 10
+    # 登录失败到这个次数之后,未带验证码的登录一律拒绝(带了就必须是对的)。
+    # 不设成"每次登录都要验证码":那会让正常用户每次都被拦一下,而机器人照样能绕。
+    captcha-after-failures: 3
+    # 验证码有效期(秒)。验证成功后立即删除,同一个验证码不能用两次
+    captcha-ttl-seconds: 120
   # 小程序客户端登录态(商城设计文档 3.1)
   mall:
     auth:

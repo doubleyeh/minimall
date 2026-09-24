@@ -18,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -299,19 +301,39 @@ class AuthHttpFlowIntegrationTest {
     @DisplayName("失败计数与锁定:达阈值即锁定,锁定期内密码正确也拒绝,解锁后计数归零")
     void loginFailureCountingAndLockout() throws Exception {
         int maxFail = loginProperties.maxFailCount();
+        int captchaAfter = loginProperties.captchaAfterFailures();
+        assumeTrue(captchaAfter < maxFail,
+                "本用例假设验证码阈值落在锁定阈值之前,实际是 " + captchaAfter + " / " + maxFail);
 
-        // 前 maxFail-1 次:只累计,不锁定
-        for (int i = 1; i < maxFail; i++) {
+        // 阈值之内:不带验证码也能提交,只累计失败,不锁定
+        for (int i = 1; i <= captchaAfter; i++) {
             Response failed = post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, "wrong-" + i), null);
             assertThat(failed.code()).isEqualTo("40001");
         }
         assertThat(seedUser().getLoginFailCount())
                 .as("失败次数必须真的落库:被业务异常回滚掉就会变成\"错多少次都不锁\"")
-                .isEqualTo(maxFail - 1);
+                .isEqualTo(captchaAfter);
         assertThat(seedUser().getLockTime()).isNull();
 
+        // 到阈值后,不带验证码的尝试被拦在验证码那道门,**且不计入失败次数** ——
+        // 否则任何人都能靠狂发不带验证码的请求把别人的账号刷到锁定(拿账号当靶子)
+        assertThat(post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, "wrong-gated"), null).code())
+                .as("到阈值后必须带验证码").isEqualTo("40004");
+        assertThat(seedUser().getLoginFailCount())
+                .as("被验证码拦下的尝试不该累计失败次数")
+                .isEqualTo(captchaAfter);
+
+        // 带上正确验证码继续错密码:这时才继续累计
+        for (int i = captchaAfter + 1; i < maxFail; i++) {
+            Response failed = post("/auth/login",
+                    loginBodyWithCaptcha(SEED_TENANT_CODE, SEED_USERNAME, "wrong-" + i), null);
+            assertThat(failed.code()).isEqualTo("40001");
+        }
+        assertThat(seedUser().getLoginFailCount()).isEqualTo(maxFail - 1);
+
         // 第 maxFail 次:达到阈值 → 写锁定时间,并把计数归零重新计
-        assertThat(post("/auth/login", loginBody(SEED_TENANT_CODE, SEED_USERNAME, "wrong-final"), null).code())
+        assertThat(post("/auth/login",
+                loginBodyWithCaptcha(SEED_TENANT_CODE, SEED_USERNAME, "wrong-final"), null).code())
                 .isEqualTo("40001");
         assertThat(seedUser().getLockTime()).as("达到阈值必须写锁定时间").isNotNull();
         assertThat(seedUser().getLoginFailCount())
@@ -522,6 +544,22 @@ class AuthHttpFlowIntegrationTest {
     private String loginBody(String tenantCode, String username, String password) {
         return "{\"tenantCode\":\"" + tenantCode + "\",\"username\":\"" + username
                 + "\",\"password\":\"" + password + "\",\"deviceId\":\"it-http-tenant\"}";
+    }
+
+    /**
+     * 带验证码的登录体。
+     *
+     * <p>答案只在服务端(Redis),真实用户是从图里读的;测试没这个能力,只能白盒取出来。
+     */
+    private String loginBodyWithCaptcha(String tenantCode, String username, String password) throws Exception {
+        Matcher matcher = Pattern.compile("\"captchaId\":\"([^\"]+)\"").matcher(get("/auth/captcha", null).body());
+        assertThat(matcher.find()).as("取验证码失败").isTrue();
+        String captchaId = matcher.group(1);
+        String answer = redis.opsForValue().get("captcha:" + captchaId);
+        assertThat(answer).as("验证码答案必须在服务端").isNotNull();
+        return "{\"tenantCode\":\"" + tenantCode + "\",\"username\":\"" + username
+                + "\",\"password\":\"" + password + "\",\"deviceId\":\"it-http-tenant\""
+                + ",\"captchaId\":\"" + captchaId + "\",\"captchaCode\":\"" + answer + "\"}";
     }
 
     private String refreshBody(String refreshToken) {

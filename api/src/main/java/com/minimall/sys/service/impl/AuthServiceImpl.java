@@ -16,6 +16,7 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.security.LoginProperties;
+import com.minimall.infra.security.CaptchaService;
 import com.minimall.infra.security.LoginRateLimiter;
 import com.minimall.infra.security.PermissionProvider;
 import com.minimall.infra.security.RefreshTokenPayload;
@@ -59,6 +60,7 @@ public class AuthServiceImpl implements AuthService {
     private final PermissionProvider permissionProvider;
     private final LoginRateLimiter loginRateLimiter;
     private final LoginProperties loginProperties;
+    private final CaptchaService captchaService;
     private final TenantFilterService tenantFilterService;
 
     @PersistenceContext
@@ -71,6 +73,7 @@ public class AuthServiceImpl implements AuthService {
                            PermissionProvider permissionProvider,
                            LoginRateLimiter loginRateLimiter,
                            LoginProperties loginProperties,
+                           CaptchaService captchaService,
                            TenantFilterService tenantFilterService) {
         this.tenantLookup = tenantLookup;
         this.userRepository = userRepository;
@@ -79,6 +82,7 @@ public class AuthServiceImpl implements AuthService {
         this.permissionProvider = permissionProvider;
         this.loginRateLimiter = loginRateLimiter;
         this.loginProperties = loginProperties;
+        this.captchaService = captchaService;
         this.tenantFilterService = tenantFilterService;
     }
 
@@ -120,6 +124,17 @@ public class AuthServiceImpl implements AuthService {
             }
             if (!user.isEnabled()) {
                 throw new BusinessException(ErrorCode.LOGIN_FAILED);
+            }
+
+            // 第 3.5 步:图形验证码。**带了就必须是对的**;没带则只在失败次数到阈值后才拒绝。
+            // 放在比密码之前:验证码是"证明你是人"的前置条件,先花一次 BCrypt 去比对密码等于是
+            // 把最贵的计算交给没通过前置检查的请求。刻意不在这里 registerFailure ——
+            // 否则攻击者一直发不带验证码的请求就能把别人的账号刷到锁定(拿账号当靶子)。
+            if (captchaProvided(request)) {
+                captchaService.verify(request.captchaId(), request.captchaCode());
+            } else if (user.getLoginFailCount() != null
+                    && user.getLoginFailCount() >= loginProperties.captchaAfterFailures()) {
+                throw new BusinessException(ErrorCode.CAPTCHA_REQUIRED);
             }
 
             // 第 4 步:BCrypt 比对
@@ -290,6 +305,12 @@ public class AuthServiceImpl implements AuthService {
     private void registerSuccess(SysUser user) {
         user.setLoginFailCount(0);
         user.setLockTime(null);
+    }
+
+    /** 请求里带没带验证码:带了一半(只有 id 没码)也算带了,让 CaptchaService 去报错。 */
+    private boolean captchaProvided(LoginRequest request) {
+        return (request.captchaId() != null && !request.captchaId().isBlank())
+                || (request.captchaCode() != null && !request.captchaCode().isBlank());
     }
 
     private boolean isLocked(SysUser user) {
