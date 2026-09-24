@@ -17,7 +17,7 @@
       <n-space vertical :size="16">
         <div class="dash__stats">
           <div class="dash__stat">
-            <span class="dash__stat-value">{{ permission.menus.length }}</span>
+            <span class="dash__stat-value">{{ permission.menuPageCount }}</span>
             <span class="dash__stat-label">可见菜单</span>
           </div>
           <div class="dash__stat">

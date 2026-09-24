@@ -46,7 +46,7 @@ router.beforeEach(async (to) => {
 
   if (!permission.routesReady) {
     // 刷新页面场景:令牌在,但权限快照是内存态(5.2 第 4 条)
-    if (permission.menus.length === 0) {
+    if (permission.menuTree.length === 0) {
       try {
         await permission.reload()
       } catch {
@@ -55,7 +55,7 @@ router.beforeEach(async (to) => {
         return { path: '/login', query: { redirect: to.fullPath } }
       }
     }
-    addBusinessRoutes(router, (keys) => permission.hasAllMenuKeys(keys))
+    addBusinessRoutes(router, permission.menuTree)
     permission.markRoutesReady()
     return { ...to, replace: true }
   }
@@ -82,7 +82,7 @@ setForbiddenHandler(() => {
     .reload()
     .then(() => {
       resetBusinessRoutes()
-      addBusinessRoutes(router, (keys) => permission.hasAllMenuKeys(keys))
+      addBusinessRoutes(router, permission.menuTree)
       permission.markRoutesReady()
     })
     .catch(() => {

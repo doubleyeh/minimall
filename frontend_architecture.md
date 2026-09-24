@@ -160,7 +160,7 @@ src/
 
 1. 存两个令牌
 2. `userId / tenantId / isSuperUser / nickname` 写入 user store
-3. `menus / permCodes` 写入 permission store,生成动态路由(5.2)
+3. `menuTree / permCodes` 写入 permission store,生成动态路由(5.2)
 4. 判断 `mustChangePassword`(4.5),决定跳改密页或首页
 
 ### 4.5 强制改密
@@ -186,7 +186,9 @@ src/
 
 ### 5.1 权限数据
 
-`menus` / `permCodes` 来自登录响应,为当时的快照。需要更新时调 `GET /auth/permissions` 重新拉取。不做轮询、不做推送。
+`menuTree`(导航菜单树) / `permCodes`(按钮权限码) 来自登录响应,为当时的快照。需要更新时调 `GET /auth/permissions` 重新拉取。不做轮询、不做推送。
+
+菜单树由后端算好(只含当前用户可见的目录与页面,父目录未授权时其下页面不会出现),前端**不再自己判断菜单可见性** —— 树里有的就是能看的。
 
 ### 5.2 动态路由
 
@@ -194,7 +196,7 @@ src/
 
 | menu_type | 处理 |
 |---|---|
-| 1 目录 | 生成含 children 的父级路由,组件为 Layout 或空壳 |
+| 1 目录 | **不单独注册路由**:它只用于侧边栏分组与拼子页面的完整路径 |
 | 2 页面 | 生成真实路由,`route_path` 为路径,按约定映射组件 |
 | 3 按钮 | **不生成路由**,`perm_code` 收入权限集合供 `v-perm` 使用 |
 
@@ -230,7 +232,7 @@ src/
 
 ### 6.1 角色授权(菜单树)
 
-1. **候选菜单树从后端授权接口取**,禁止用登录响应的 `menus` 渲染(两者集合不同)。
+1. **候选菜单树从后端授权接口取**,禁止用登录响应的 `menuTree` 渲染(两者集合不同)。
 2. **提交内容必须包含全部祖先节点**,后端校验不通过即失败,且不做静默过滤。`n-tree` 为受控组件,**无 `getCheckedKeys()` / `getHalfCheckedKeys()` 方法**,不得套用 Element Plus 写法:
    - 通过 `v-model:checked-keys` 绑定选中项,半选节点由 `v-model:indeterminate-keys` 取得,提交前合并两者;
    - 或设 `check-strategy="all"` 使选中项自带父节点。
@@ -289,6 +291,6 @@ dev 跨域由 Vite proxy 解决,不要求后端开 CORS。生产若确定跨域�
 
 1. 多标签页同一瞬间并发刷新仍可能触发重放登出,未做跨页协调。
 2. 生产跨域部署的 CORS 未确认,需与后端确认。
-3. `route_path` 与组件目录的映射为隐式约定,无自动校验,填错表现为白屏。
+3. `route_path` 与组件目录的映射为隐式约定,无构建期校验:运行时找不到视图会打一条 error 并回退 404 页面(不再是白屏,但也不会拦住错误)。
 4. i18n、暗色模式、移动端适配未实现。
 5. `GET /auth/permissions` 限频由前端自律,后端未做专门限流。

@@ -15,6 +15,7 @@ public record MenuTreeNode(
         String menuName,
         Integer menuType,
         String routePath,
+        String icon,
         String permCode,
         Integer sortOrder,
         Integer status,

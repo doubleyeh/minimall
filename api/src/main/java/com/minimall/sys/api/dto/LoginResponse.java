@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 登录成功响应(架构文档 7.1.1)。
  *
- * <p>{@code menus}/{@code permCodes} 是"登录那一刻"的快照,前端用来渲染动态路由与按钮;
+ * <p>{@code menuTree}/{@code permCodes} 是"登录那一刻"的快照,前端用来渲染动态路由与按钮;
  * 权限变更后靠重新登录或调 {@code GET /auth/permissions} 刷新(架构文档 5.5)。
  * 服务端不认识这份快照,校验始终以服务端为准。
  *
@@ -26,7 +26,7 @@ public record LoginResponse(
         boolean isSuperUser,
         boolean mustChangePassword,
         String nickname,
-        List<String> menus,
+        List<MenuTreeNode> menuTree,
         List<String> permCodes
 ) {
 }

@@ -1,11 +1,15 @@
 package com.minimall.infra.security;
 
+import com.minimall.sys.api.dto.MenuTreeNode;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -26,11 +30,12 @@ public class PermissionCacheService {
     private static final String VERSION_KEY_PREFIX = "perm:version:";
     private static final String CACHE_KEY_PREFIX = "perm:v";
     private static final String FIELD_PERMS = "perms";
-    private static final String FIELD_MENUS = "menus";
+    private static final String FIELD_TREE = "menuTree";
     private static final String DELIMITER = ",";
 
     private final StringRedisTemplate redis;
     private final PermissionProperties properties;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PermissionCacheService(StringRedisTemplate redis, PermissionProperties properties) {
         this.redis = redis;
@@ -64,22 +69,36 @@ public class PermissionCacheService {
         redis.opsForValue().increment(VERSION_KEY_PREFIX + tenantId);
     }
 
+    /**
+     * 读缓存。读不到菜单树字段(比如升级前写入的老条目)一律当作**未命中**,让调用方重算并覆盖写 ——
+     * 这样换缓存格式不需要人工清 Redis;解析失败也只退化为未命中,不把认证接口打成 500。
+     */
     public Optional<CachedPermission> get(Long tenantId, Long userId) {
         long version = currentVersion(tenantId);
         Map<Object, Object> entries = redis.opsForHash().entries(cacheKey(tenantId, version, userId));
         if (entries == null || entries.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new CachedPermission(
-                split(String.valueOf(entries.getOrDefault(FIELD_PERMS, ""))),
-                split(String.valueOf(entries.getOrDefault(FIELD_MENUS, "")))));
+        Object rawTree = entries.get(FIELD_TREE);
+        if (rawTree == null) {
+            return Optional.empty();
+        }
+        try {
+            MenuTreeNode[] tree = objectMapper.readValue(String.valueOf(rawTree), MenuTreeNode[].class);
+            return Optional.of(new CachedPermission(
+                    split(String.valueOf(entries.getOrDefault(FIELD_PERMS, ""))),
+                    new ArrayList<>(Arrays.asList(tree))));
+        } catch (RuntimeException ex) {
+            return Optional.empty();
+        }
     }
 
     public void put(Long tenantId, Long userId, CachedPermission permission) {
         long version = currentVersion(tenantId);
         String key = cacheKey(tenantId, version, userId);
         redis.opsForHash().put(key, FIELD_PERMS, join(permission.permCodes()));
-        redis.opsForHash().put(key, FIELD_MENUS, join(permission.menus()));
+        // 菜单树是结构化数据,序列化成 JSON 存一个字段;permCodes 仍是逗号串(它只是字符串集合)
+        redis.opsForHash().put(key, FIELD_TREE, objectMapper.writeValueAsString(permission.menuTree()));
         redis.expire(key, Duration.ofSeconds(properties.cacheTtlSeconds()));
     }
 
@@ -98,7 +117,7 @@ public class PermissionCacheService {
         return new LinkedHashSet<>(Arrays.asList(value.split(DELIMITER)));
     }
 
-    /** 缓存内容:权限码与可见菜单(前端渲染动态路由用,见 7.1.1 的响应字段)。 */
-    public record CachedPermission(Set<String> permCodes, Set<String> menus) {
+    /** 缓存内容:权限码与可见菜单树(前端生成动态路由用,见 7.4)。 */
+    public record CachedPermission(Set<String> permCodes, List<MenuTreeNode> menuTree) {
     }
 }

@@ -3,6 +3,7 @@ package com.minimall.infra.security;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class StpInterfaceImplTest {
 
     private static final PermissionProvider PROVIDER = userId ->
-            new PermissionProvider.PermissionData(Set.of("system:user:list", "mall:order:ship"), Set.of());
+            new PermissionProvider.PermissionData(Set.of("system:user:list", "mall:order:ship"), List.of());
 
     private final StpInterfaceImpl adapter = new StpInterfaceImpl(PROVIDER);
 

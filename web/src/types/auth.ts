@@ -1,4 +1,5 @@
 import type { Id } from './api'
+import type { MenuTreeNode } from './system'
 
 /** 令牌对。刷新成功时必须同一时刻覆盖写入这一对(前端文档 4.1)。 */
 export interface TokenPair {
@@ -15,14 +16,14 @@ export interface LoginResult extends TokenPair {
   isSuperUser: boolean
   mustChangePassword: boolean
   nickname: string
-  /** 菜单标识,用于生成动态路由(5.2) */
-  menus: string[]
+  /** 导航菜单树(只有目录与页面),用于生成动态路由与侧边栏(5.2、7.4) */
+  menuTree: MenuTreeNode[]
   /** 权限码,供 v-perm 使用(5.3) */
   permCodes: string[]
 }
 
 /** `GET /auth/permissions` 的返回,以及 store 里保存的权限快照(5.1) */
 export interface PermissionSnapshot {
-  menus: string[]
+  menuTree: MenuTreeNode[]
   permCodes: string[]
 }

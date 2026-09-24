@@ -392,7 +392,7 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 **存储与读取**:
 
 - **登录态**(`tenantId`、`isSuperUser`、`userId`)放在 Sa-Token 会话扩展数据里,由 4.2 的 `TenantWebFilter` 每请求读一次。数据极小,不做额外缓存
-- **权限集合**(`menus` + `permCodes`)不放进 Sa-Token 会话,单独放 Redis:`perm:v{version}:{tenantId}:{userId}`。`StpInterface.getPermissionList()`/`getRoleList()` 从这里读,miss 时查库回填并设 TTL
+- **权限快照**(`menuTree` + `permCodes`)不放进 Sa-Token 会话,单独放 Redis:`perm:v{version}:{tenantId}:{userId}`。`StpInterface.getPermissionList()`/`getRoleList()` 从这里读,miss 时查库回填并设 TTL
 - **超管短路**:`is_super = 1` 直接返回全量 `perm_code`,不查缓存也不查角色(见 4.10)
 
 **失效方式:租户级版本号,不做按 key 批量删除。**
@@ -414,7 +414,7 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 
 **生效时机**:版本号一变,该租户**下一个请求**就是新权限,**不需要踢人下线**。这是"缓存 key 带版本号"而不是"权限放进会话"的主要收益:权限收紧立即生效,而会话本身(登录态)不动,用户体验不受影响。
 
-**前端快照**:登录响应里的 `menus`/`permCodes` 是那一刻的快照(7.1.1)。权限变更后前端要拿到新菜单,靠两种方式:重新登录,或调用 `GET /auth/permissions` 拉一次最新权限(服务端同一套逻辑;前端在收到 403 时调用一次即可)。**不做主动推送**,现阶段没必要。
+**前端快照**:登录响应里的 `menuTree`/`permCodes` 是那一刻的快照(7.1.1)。权限变更后前端要拿到新菜单,靠两种方式:重新登录,或调用 `GET /auth/permissions` 拉一次最新权限(服务端同一套逻辑;前端在收到 403 时调用一次即可)。**不做主动推送**,现阶段没必要。
 
 **TTL 取值**:权限缓存 TTL 与 Sa-Token 会话超时对齐(见 9.3),避免出现"会话还在但权限缓存已过期"的抖动;版本号 key 不设 TTL。
 
@@ -524,12 +524,26 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
     "isSuperUser": false,
     "mustChangePassword": false,
     "nickname": "...",
-    "menus": [ "..." ],
+    "menuTree": [
+      {
+        "id": "1", "parentId": "0", "menuName": "系统管理", "menuType": 1,
+        "routePath": "/system", "icon": "settings", "permCode": null, "sortOrder": 1, "status": 1,
+        "children": [
+          {
+            "id": "2", "parentId": "1", "menuName": "用户管理", "menuType": 2,
+            "routePath": "user", "icon": "people", "permCode": null, "sortOrder": 1, "status": 1,
+            "children": []
+          }
+        ]
+      }
+    ],
     "permCodes": [ "order:delete", "..." ]
   }
 }
 ```
-`menus`/`permCodes` 是按 5.2 节的菜单权限过滤后的结果,前端直接用来渲染动态路由(7.4节)和控制按钮显示,不需要登录后再调一次接口。**注意这是登录那一刻的快照**:权限变更后要靠重新登录或调用 `GET /auth/permissions` 刷新(见 5.5),服务端不认识前端缓存的这份快照,校验始终以服务端为准。
+`menuTree` 是按 5.2 节的菜单权限过滤后的**导航菜单树**:只含目录(1)与页面(2),按钮(3)不进树但照旧贡献 `permCodes`。目录的 `route_path` 给全路径(`/system`),页面给父级下的片段(`user`),前端按这两条拼出完整路由(7.4 节)。`permCodes` 供 `v-perm` 控制按钮显示。父目录没授权时其下页面不会出现在树里(丢弃而不是提升为顶层)。
+
+**注意这是登录那一刻的快照**:权限变更后要靠重新登录或调用 `GET /auth/permissions` 刷新(见 5.5),服务端不认识前端缓存的这份快照,校验始终以服务端为准。
 
 **登出**:`POST /auth/logout` → `StpUtil.logout()` 清理 Sa-Token 会话,**并撤销本次登录对应的刷新令牌**(见 7.1.3);不涉及业务表数据变更。
 
@@ -681,7 +695,7 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 ### 7.4 前端配套
 - 菜单表驱动动态路由,不是前端写死
 - 按钮权限指令对应后端 `perm_code`
-- **权限快照的刷新**:登录时拿到 `menus`/`permCodes` 后缓存,收到 403 时调用 `GET /auth/permissions` 刷新一次(见 5.5);仍失败再引导重新登录,避免"权限已变更但页面按钮还在"的误导
+- **权限快照的刷新**:登录时拿到 `menuTree`/`permCodes` 后缓存,收到 403 时调用 `GET /auth/permissions` 刷新一次(见 5.5);仍失败再引导重新登录,避免"权限已变更但页面按钮还在"的误导
 - **公开接口要带租户标识**:调用 4.9 白名单之外的公开接口时,请求头统一带 `X-Tenant-Code`(取自当前站点配置),否则会被兜底规则拒绝
 
 ---

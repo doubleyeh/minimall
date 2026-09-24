@@ -223,7 +223,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public PermissionSnapshot currentPermissions() {
         PermissionProvider.PermissionData data = permissionProvider.load(currentUserId());
-        return new PermissionSnapshot(List.copyOf(data.menus()), List.copyOf(data.permCodes()));
+        return new PermissionSnapshot(List.copyOf(data.menuTree()), List.copyOf(data.permCodes()));
     }
 
     private Long currentUserId() {
@@ -252,7 +252,7 @@ public class AuthServiceImpl implements AuthService {
                 user.isSuperUser(),
                 user.isMustChangePassword(),
                 user.getNickname(),
-                List.copyOf(permissions.menus()),
+                List.copyOf(permissions.menuTree()),
                 List.copyOf(permissions.permCodes()));
     }
 

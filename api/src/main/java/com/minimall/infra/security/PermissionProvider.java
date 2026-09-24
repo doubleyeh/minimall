@@ -1,5 +1,8 @@
 package com.minimall.infra.security;
 
+import com.minimall.sys.api.dto.MenuTreeNode;
+
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -24,12 +27,12 @@ public interface PermissionProvider {
 
     /**
      * @param permCodes 该用户的权限码集合
-     * @param menus     该用户可见的菜单标识(前端渲染动态路由用,见 7.1.1)
+     * @param menuTree  该用户可见的导航菜单树(只有目录与页面;前端按它生成路由与侧边栏,见 7.4)
      */
-    record PermissionData(Set<String> permCodes, Set<String> menus) {
+    record PermissionData(Set<String> permCodes, List<MenuTreeNode> menuTree) {
 
         public static PermissionData empty() {
-            return new PermissionData(Set.of(), Set.of());
+            return new PermissionData(Set.of(), List.of());
         }
     }
 }

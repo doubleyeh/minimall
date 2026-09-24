@@ -1,5 +1,6 @@
 package com.minimall.sys.service.support;
 
+import com.minimall.sys.api.dto.MenuTreeNode;
 import com.minimall.sys.domain.SysMenu;
 import com.minimall.sys.domain.SysRole;
 import com.minimall.sys.domain.SysUser;
@@ -11,10 +12,13 @@ import com.minimall.infra.security.PermissionProvider;
 import com.minimall.infra.tenant.TenantContext;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -63,12 +67,12 @@ public class PermissionProviderImpl implements PermissionProvider {
 
         Optional<PermissionCacheService.CachedPermission> cached = permissionCacheService.get(tenantId, userId);
         if (cached.isPresent()) {
-            return new PermissionData(cached.get().permCodes(), cached.get().menus());
+            return new PermissionData(cached.get().permCodes(), cached.get().menuTree());
         }
 
         PermissionData computed = compute(userId);
         permissionCacheService.put(tenantId, userId,
-                new PermissionCacheService.CachedPermission(computed.permCodes(), computed.menus()));
+                new PermissionCacheService.CachedPermission(computed.permCodes(), computed.menuTree()));
         return computed;
     }
 
@@ -88,6 +92,9 @@ public class PermissionProviderImpl implements PermissionProvider {
         }
         List<SysMenu> menus = menuRepository.findByIdIn(menuIds).stream()
                 .filter(menu -> menu.getStatus() != null && menu.getStatus() == 1)
+                // 平台专用菜单只属于平台租户(4.10)。这条防线原本只在授权候选集与套餐写入层,
+                // 菜单改成后端驱动后必须在这里也兜一层 —— 否则被直接写库塞进来的平台菜单会显示给租户
+                .filter(menu -> !menu.isPlatformOnly())
                 .toList();
         return toPermissionData(menus);
     }
@@ -109,19 +116,68 @@ public class PermissionProviderImpl implements PermissionProvider {
 
     /**
      * @param menus 菜单集合
-     * @return permCodes = 全部非空 perm_code;menus = 非按钮菜单的 route_path(前端渲染动态路由用)
+     * @return permCodes = 全部非空 perm_code(按钮的也要,与是否进导航无关);menuTree = 导航菜单树
      */
     private PermissionData toPermissionData(List<SysMenu> menus) {
         Set<String> permCodes = new LinkedHashSet<>();
-        Set<String> routes = new LinkedHashSet<>();
         for (SysMenu menu : menus) {
             if (menu.getPermCode() != null && !menu.getPermCode().isBlank()) {
                 permCodes.add(menu.getPermCode());
             }
-            if (!menu.isButton() && menu.getRoutePath() != null && !menu.getRoutePath().isBlank()) {
-                routes.add(menu.getRoutePath());
-            }
         }
-        return new PermissionData(permCodes, routes);
+        List<MenuTreeNode> tree = pruneEmptyDirectories(MenuTreeBuilder.build(navigationMenus(menus)));
+        return new PermissionData(permCodes, tree);
+    }
+
+    /**
+     * 导航候选:非按钮、启用、有 route_path、且父链完整。
+     *
+     * <p>这里刻意不用 {@link MenuTreeBuilder} 的"孤儿提升为根"行为:那是给菜单管理/套餐/角色三棵树用的
+     * (让管理员发现父级缺失),导航侧要的相反 —— 父目录没授权就不该冒出一个孤零零的顶层页面。
+     */
+    private List<SysMenu> navigationMenus(List<SysMenu> menus) {
+        Map<Long, SysMenu> byId = new HashMap<>();
+        for (SysMenu menu : menus) {
+            byId.put(menu.getId(), menu);
+        }
+        return menus.stream()
+                .filter(menu -> !menu.isButton())
+                .filter(menu -> menu.getStatus() != null && menu.getStatus() == 1)
+                .filter(menu -> menu.getRoutePath() != null && !menu.getRoutePath().isBlank())
+                .filter(menu -> ancestorsPresent(menu, byId))
+                .toList();
+    }
+
+    /** 父链上每一级都必须也在候选集合里,否则这个节点不该进导航。 */
+    private boolean ancestorsPresent(SysMenu menu, Map<Long, SysMenu> byId) {
+        Set<Long> seen = new HashSet<>();
+        Long parentId = menu.getParentId();
+        while (parentId != null && parentId != 0L) {
+            if (!seen.add(parentId)) {
+                return false;
+            }
+            SysMenu parent = byId.get(parentId);
+            if (parent == null || parent.isButton()
+                    || parent.getStatus() == null || parent.getStatus() != 1
+                    || parent.getRoutePath() == null || parent.getRoutePath().isBlank()) {
+                return false;
+            }
+            parentId = parent.getParentId();
+        }
+        return true;
+    }
+
+    /** 目录下没有任何页面子孙时一并去掉,避免前端出现点不开的空目录。 */
+    private List<MenuTreeNode> pruneEmptyDirectories(List<MenuTreeNode> nodes) {
+        List<MenuTreeNode> kept = new ArrayList<>();
+        for (MenuTreeNode node : nodes) {
+            List<MenuTreeNode> children = pruneEmptyDirectories(node.children());
+            if (node.menuType() != null && node.menuType() == 1 && children.isEmpty()) {
+                continue;
+            }
+            kept.add(new MenuTreeNode(node.id(), node.parentId(), node.menuName(), node.menuType(),
+                    node.routePath(), node.icon(), node.permCode(), node.sortOrder(), node.status(), children));
+        }
+        return kept;
     }
 }

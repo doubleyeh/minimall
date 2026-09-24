@@ -35,18 +35,18 @@ import { NIcon } from 'naive-ui'
 import { computed, h, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { businessMenus } from '@/router/routes'
+import { resolveMenuPath } from '@/router/routes'
 import { useAppStore } from '@/stores/app'
 import { usePermissionStore } from '@/stores/permission'
 import type { MenuOption } from '@/types/naive'
+import type { MenuTreeNode } from '@/types/system'
 
 /**
  * 图标只从 @vicons/ionicons5 一套里取(前端文档 1:禁止混用多套图标库)。
  *
- * **这张表必须覆盖 businessMenus 里用到的每个 icon 名**:renderIcon 查不到就返回 undefined,
- * 菜单照常渲染、只是没有图标 —— 静默降级,不报错也不警告。商城那一整块菜单
- * (shopping/shop/appstore/profile/tool/thunderbolt/car/crown/star)此前就是这样一直没有图标的,
- * 而后端 sys_menu.icon 其实都配了。新增菜单时请连同这张表一起加。
+ * **图标名以后端 `sys_menu.icon` 为准,这张表是它的取值清单**:菜单里的名字查不到时
+ * 会打一条 warn 并回退通用图标,而不是静默没有图标 —— 后者只表现为"这个菜单就是没图标",
+ * 没人会去查。新增菜单时请把名字补进这张表,或改用后端已有的名字。
  *
  * 另外两个名字在 ionicons5 里并不存在(ShoppingOutline、CrownOutline),
  * 所以商城目录用 CartOutline、会员等级用 RibbonOutline。
@@ -75,9 +75,16 @@ const icons: Record<string, Component> = {
   star: StarOutline,
 }
 
-function renderIcon(name: string) {
+function renderIcon(name: string | null) {
+  if (!name) {
+    return undefined
+  }
   const icon = icons[name]
-  return icon ? () => h(NIcon, null, { default: () => h(icon) }) : undefined
+  if (!icon) {
+    console.warn(`[SideMenu] 图标名未登记:${name}(请在 icons 表补上,或改后端 sys_menu.icon)`)
+    return () => h(NIcon, null, { default: () => h(icons.appstore!) })
+  }
+  return () => h(NIcon, null, { default: () => h(icon) })
 }
 
 const route = useRoute()
@@ -88,30 +95,25 @@ const permission = usePermissionStore()
 const activeKey = computed(() => route.path)
 
 /**
- * 菜单项来自 `businessMenus`(与业务路由同一份定义),
- * 但只保留当前用户权限快照里存在的节点 —— 目录下没有任何可见子项时整块隐藏。
+ * 把后端菜单树转成 n-menu 的 options。
+ *
+ * 路径拼法直接复用路由侧的函数 —— 菜单项的 key 必须与路由 path 完全一致,两处各写一遍迟早会长歪。
  */
-const options = computed<MenuOption[]>(() => {
-  const result: MenuOption[] = []
-  for (const menu of businessMenus) {
-    const children = (menu.children ?? []).filter((child) => permission.hasAllMenuKeys(child.menuKeys))
-    // 目录下没有任何可见子项时整块隐藏,避免出现点不开的空目录
-    if (children.length === 0 || !permission.hasAllMenuKeys(menu.menuKeys)) {
-      continue
+function toOptions(nodes: MenuTreeNode[], parentPath: string): MenuOption[] {
+  return nodes.map((node) => {
+    const fullPath = resolveMenuPath(node, parentPath)
+    const children = toOptions(node.children ?? [], fullPath)
+    return {
+      key: fullPath,
+      label: node.menuName,
+      icon: renderIcon(node.icon),
+      ...(children.length > 0 ? { children } : {}),
     }
-    result.push({
-      key: menu.path,
-      label: menu.title,
-      icon: renderIcon(menu.icon),
-      children: children.map((child) => ({
-        key: child.path,
-        label: child.title,
-        icon: renderIcon(child.icon),
-      })),
-    })
-  }
-  return result
-})
+  })
+}
+
+/** 菜单项直接来自后端算好的导航树:树里有的就是当前用户能看到的,前端不再过滤。 */
+const options = computed<MenuOption[]>(() => toOptions(permission.menuTree, ''))
 
 function onSelect(key: string): void {
   if (key !== route.path) {

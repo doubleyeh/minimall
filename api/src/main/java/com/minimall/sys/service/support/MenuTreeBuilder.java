@@ -62,6 +62,7 @@ public final class MenuTreeBuilder {
                     menu.getMenuName(),
                     menu.getMenuType(),
                     menu.getRoutePath(),
+                    menu.getIcon(),
                     menu.getPermCode(),
                     menu.getSortOrder(),
                     menu.getStatus(),

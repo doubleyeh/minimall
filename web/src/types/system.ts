@@ -97,6 +97,8 @@ export interface MenuTreeNode {
   /** 1-目录 2-页面 3-按钮 */
   menuType: number
   routePath: string | null
+  /** 图标名,取值必须在 SideMenu 的 icons 表里登记过 */
+  icon: string | null
   permCode: string | null
   sortOrder: number
   status: number

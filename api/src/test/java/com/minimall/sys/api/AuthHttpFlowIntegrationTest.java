@@ -475,7 +475,7 @@ class AuthHttpFlowIntegrationTest {
         assertThat(permissions.status()).isEqualTo(200);
         assertThat(permissions.body())
                 .as("空快照与\"没有权限\"在前端表现一样,会让人以为账号配错了")
-                .contains("\"menus\":[")
+                .contains("\"menuTree\":[")
                 .contains("\"permCodes\":[");
     }
 

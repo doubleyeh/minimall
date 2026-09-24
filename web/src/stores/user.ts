@@ -58,7 +58,7 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem(PROFILE_KEY, JSON.stringify(profile.value))
 
     // 权限快照只在此刻写一次:登录响应的 menus/permCodes 是"登录那一刻"的(5.1)
-    usePermissionStore().setFromLogin(result.menus, result.permCodes)
+    usePermissionStore().setFromLogin(result.menuTree, result.permCodes)
   }
 
   /**

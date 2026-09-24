@@ -2,6 +2,7 @@ package com.minimall.sys.service;
 
 import cn.dev33.satoken.SaManager;
 import cn.dev33.satoken.dao.SaTokenDaoForRedisTemplate;
+import com.minimall.sys.api.dto.MenuTreeNode;
 import com.minimall.sys.api.dto.RoleCreateRequest;
 import com.minimall.sys.api.dto.RoleMenuGrantRequest;
 import com.minimall.sys.api.dto.TenantCreateRequest;
@@ -12,6 +13,7 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysMenuRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.infra.audit.AuditContext;
+import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.infra.security.PermissionProvider;
 import com.minimall.infra.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
@@ -21,10 +23,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -42,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li><b>没有租户上下文时默认拒绝</b>:不去猜一个租户(猜错就是把别人的权限给了当前调用者)</li>
  * </ol>
  *
- * <p>菜单 ID 取自 V2 种子数据(2=用户管理、11=用户列表 system:user:list、3=角色管理、21=角色列表
+ * <p>菜单 ID 取自 V1 种子数据(2=用户管理、11=用户列表 system:user:list、3=角色管理、21=角色列表
  * system:role:list),改种子数据时要同步改这里。
  *
  * <p>注意一个运维细节:{@code is_super} 不在任何接口里(4.10),它只由种子数据/运维脚本改。
@@ -72,6 +76,10 @@ class PermissionMatrixIntegrationTest {
     private UserService userService;
     @Autowired
     private PermissionProvider permissionProvider;
+    @Autowired
+    private PermissionCacheService permissionCacheService;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     @Autowired
     private SysMenuRepository menuRepository;
     @Autowired
@@ -142,7 +150,7 @@ class PermissionMatrixIntegrationTest {
     }
 
     @Test
-    @DisplayName("8.2:导航菜单只贡献 route_path、不产生权限码(前端路由与后端鉴权是两回事)")
+    @DisplayName("8.2:导航菜单只贡献菜单树、不产生权限码(前端路由与后端鉴权是两回事)")
     void navMenusContributeRoutesNotPermissions() {
         // 1=系统管理、3=角色管理:都是导航菜单,没有 perm_code
         long navOnlyRole = createRole(List.of(1L, 3L));
@@ -152,7 +160,12 @@ class PermissionMatrixIntegrationTest {
 
         assertThat(data.permCodes()).as("导航菜单不该产生权限码,否则前端路由会变相变成授权手段")
                 .isEmpty();
-        assertThat(data.menus()).contains("role");
+        assertThat(data.menuTree()).as("系统管理目录下应当有角色管理")
+                .singleElement()
+                .satisfies(system -> {
+                    assertThat(system.routePath()).isEqualTo("/system");
+                    assertThat(system.children()).extracting(MenuTreeNode::routePath).contains("role");
+                });
     }
 
     @Test
@@ -212,7 +225,87 @@ class PermissionMatrixIntegrationTest {
         PermissionProvider.PermissionData data = permissionProvider.load(userId);
 
         assertThat(data.permCodes()).isEmpty();
-        assertThat(data.menus()).isEmpty();
+        assertThat(data.menuTree()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("8.2:导航树按 sort_order 排序,按钮不进树但权限码照收")
+    void menuTreeIsSortedAndButtonsStayOut() {
+        // 1=目录、2=用户管理(sort 1)、3=角色管理(sort 2)、11=用户列表按钮
+        long roleId = createRole(List.of(1L, 3L, 2L, 11L));
+        long userId = createUser(List.of(roleId));
+
+        PermissionProvider.PermissionData data = permissionDataOf(userId);
+
+        assertThat(data.menuTree()).singleElement().satisfies(system -> {
+            assertThat(system.routePath()).isEqualTo("/system");
+            assertThat(system.children()).extracting(MenuTreeNode::routePath)
+                    .as("同层按 sort_order 升序")
+                    .containsExactly("user", "role");
+            assertThat(system.children().get(0).children()).as("按钮不进导航树").isEmpty();
+        });
+        assertThat(data.permCodes()).as("按钮不进树,但它的权限码要照收").contains(USER_LIST_PERM);
+    }
+
+    @Test
+    @DisplayName("8.2:只授权页面、没授权目录时不生成导航节点(不做孤儿提升)")
+    void pageWithoutItsDirectoryIsDropped() {
+        // 3=角色管理页面,但父目录 1=系统管理没授权
+        long roleId = createRole(List.of(3L));
+        long userId = createUser(List.of(roleId));
+
+        assertThat(permissionDataOf(userId).menuTree())
+                .as("父目录没授权就不该冒出一个孤零零的顶层页面")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("8.2:目录下没有页面子孙时不出现在导航里(避免点不开的空目录)")
+    void directoryWithoutPagesIsPruned() {
+        // 只给目录 1=系统管理,不给任何页面
+        long roleId = createRole(List.of(1L));
+        long userId = createUser(List.of(roleId));
+
+        assertThat(permissionDataOf(userId).menuTree()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("8.2:平台专用菜单不会进入租户权限——菜单层也兜一道,不只靠授权候选集")
+    void platformMenusNeverReachTenantRoles() {
+        long roleId = createRole(USER_MENUS);
+        long userId = createUser(List.of(roleId));
+
+        // 接口层(grantMenus)会拒绝平台菜单,这里刻意绕过接口直接写库,验证权限计算自己也能兜住
+        List<Long> platformMenus = List.of(5L, 7L, 51L);
+        for (Long menuId : platformMenus) {
+            jdbcTemplate.update("INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (?, ?)",
+                    roleId, menuId);
+        }
+        permissionCacheService.invalidateTenant(tenantId);
+
+        PermissionProvider.PermissionData data = permissionDataOf(userId);
+
+        assertThat(data.menuTree()).extracting(MenuTreeNode::routePath).doesNotContain("/platform", "package");
+        assertThat(data.permCodes()).as("平台菜单的权限码同样不能给租户")
+                .doesNotContain("system:package:list");
+    }
+
+    @Test
+    @DisplayName("8.2:菜单树能过 Redis 缓存往返(JSON 序列化),两次读内容一致")
+    void menuTreeSurvivesCacheRoundTrip() {
+        long roleId = createRole(List.of(1L, 2L));
+        long userId = createUser(List.of(roleId));
+
+        PermissionProvider.PermissionData first = permissionDataOf(userId);
+        // 第二次直接 load:此时缓存已写入,走的是 Redis 读回的那份
+        PermissionProvider.PermissionData second = asTenant(() -> permissionProvider.load(userId));
+        Optional<PermissionCacheService.CachedPermission> cached = permissionCacheService.get(tenantId, userId);
+
+        assertThat(first.menuTree()).as("第一次读会算出来并写缓存").isNotEmpty();
+        assertThat(second.menuTree()).usingRecursiveComparison().isEqualTo(first.menuTree());
+        assertThat(cached).as("缓存里应当有菜单树").isPresent();
+        assertThat(cached.orElseThrow().menuTree()).usingRecursiveComparison()
+                .isEqualTo(first.menuTree());
     }
 
     // ——— 辅助方法 ———
