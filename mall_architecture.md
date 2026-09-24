@@ -1,12 +1,12 @@
 # 微信小商城 - 业务架构设计
 
-依赖 `architecture.md`(RBAC+多租户基础设施)与 `rbac_tenant_schema.sql`。本模块所有表继承租户过滤机制,建表脚本 `mall_schema.sql` 已落地为 **`V4__mall_init.sql`**。
+依赖 `architecture.md`(RBAC+多租户基础设施)与脚手架脚本 `V1__init_schema.sql`。本模块所有表继承租户过滤机制,建表脚本是 **`V2__mall_init.sql`**(与脚手架脚本相邻,依赖它、单跑会失败)。
 
-> 关于版本号:设计稿原写"作为 V2 接在 V1 之后",但 `V2` 已被种子数据(`V2__seed_platform_data.sql`)占用,
-> 后续又新增了字典菜单的 `V3`。按 `architecture.md` 9.5"已发布脚本不可变",商城建表只能新开版本,
-> 所以实际版本是 **V4**。
+> 关于版本号:脚本已重整为"一个脚手架 + 一个商城"两个基线脚本(`architecture.md` 9.5),
+> 商城回到设计稿原本的 `V2` 位置。此前它曾落在 `V4`——那是因为中间几版把种子数据与字典菜单
+> 拆成了独立的 `V2`/`V3`,属于过渡状态,不作为约定。
 >
-> 相比设计稿有三处落地调整(不改业务语义,只是补齐基础设施硬约束),详见 `V4__mall_init.sql` 头部注释:
+> 相比最早那版设计稿有三处落地调整(不改业务语义,只是补齐基础设施硬约束),详见 `V2__mall_init.sql` 头部注释:
 > ①所有表统一带 `id/tenant_id/create_time/update_time/create_by/update_by`(租户级实体统一继承 `BaseTenantEntity`,缺列无法落库);
 > ②`mall_sku_spec_value` 补 `tenant_id`(否则它是租户隔离链上唯一的缺口);
 > ③单列索引改 `(tenant_id, xxx)` 复合索引(租户过滤条件会挂在每一个查询上)。

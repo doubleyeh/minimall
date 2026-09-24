@@ -1,6 +1,6 @@
 # 单体应用脚手架完整方案:RBAC + 多租户
 
-本文档是唯一交付物,配合 `rbac_tenant_schema.sql`(建表脚本),足够任何模型/开发者据此独立完成开发和测试,不依赖其他上下文。全文只描述职责、契约、数据流、取舍理由,不含可直接编译的实现代码——具体代码由实现方自行编写。
+本文档是唯一交付物,配合两个建表脚本(`api/src/main/resources/db/migration/V1__init_schema.sql` 脚手架、`V2__mall_init.sql` 商城),足够任何模型/开发者据此独立完成开发和测试,不依赖其他上下文。全文只描述职责、契约、数据流、取舍理由,不含可直接编译的实现代码——具体代码由实现方自行编写。
 
 ---
 
@@ -60,7 +60,7 @@
 
 ## 3. 工程结构 ✅
 
-**仓库布局**:`mini_mall` 是**项目根**,只放设计产物(`architecture.md`、`rbac_tenant_schema.sql`)与各服务目录;`mini_mall/api` 是 **java_api 服务的服务根**——它有自己的 `pom.xml` 与 `src/main/...`,构建、启动、CI 都以它为工作目录(`cd mini_mall/api && mvn ...`)。以后再有 `job`/`web` 之类的新服务,在项目根下平级新增目录,互不干扰;项目根**不放聚合 pom**,避免"根 pom 决定所有服务构建方式"这种隐式耦合。
+**仓库布局**:`mini_mall` 是**项目根**,只放设计产物(`architecture.md`、`mall_architecture.md` 等文档)与各服务目录;`mini_mall/api` 是 **java_api 服务的服务根**——它有自己的 `pom.xml` 与 `src/main/...`,构建、启动、CI 都以它为工作目录(`cd mini_mall/api && mvn ...`)。以后再有 `job`/`web` 之类的新服务,在项目根下平级新增目录,互不干扰;项目根**不放聚合 pom**,避免"根 pom 决定所有服务构建方式"这种隐式耦合。
 
 **决策:单 Maven 工程(单 jar),不拆多模块**。理由:本方案是单体应用,现阶段各业务域与 `infra`/`common` 之间没有"独立部署/独立复用"的需求,拆多模块只增加构建复杂度(pom 互相依赖、IDE 索引、发布链路),收益为零。依赖方向与分包边界用 ArchUnit 测试固化(见 9.1),效果等价而成本更低。**将来某个域确实需要独立发布时再拆,且按域拆而不是按层拆**。
 
@@ -165,7 +165,7 @@ common/    统一响应、全局异常、工具类、常量
 | 基类 | 适用对象 | 特征 |
 |---|---|---|
 | `BaseTenantEntity` | `sys_user`、`sys_dept`、`sys_role`、`sys_oper_log`,以及以后的所有业务表 | 带租户过滤 + 审计字段,tenant_id 非空,自动回填 |
-| `BaseAuditEntity` | `tenant`、`sys_menu`、`sys_package`、`sys_package_menu`、`sys_tenant_package_change`、`sys_dict_type`、`sys_dict_data`、`sys_pay_account` | 只有审计字段,不带租户过滤,平台级数据 |
+| `BaseAuditEntity` | `tenant`、`sys_menu`、`sys_package`、`sys_package_menu`、`sys_tenant_package_change`、`sys_dict_type`、`sys_dict_data`、`sys_wx_pay_config` | 只有审计字段,不带租户过滤,平台级数据 |
 
 `sys_role.tenant_id` 现在**始终非空**——不再有"可空表示平台模板"的例外(见 4.7 套餐机制,新租户的初始角色由套餐生成,不再依赖可复用的平台角色模板)。`sys_role` 因此可以直接用标准的 `BaseTenantEntity`,不需要特殊查询逻辑。
 
@@ -182,7 +182,7 @@ common/    统一响应、全局异常、工具类、常量
 | `sys_menu` | `BaseAuditEntity` | 否 | 否 | 全平台统一;谁能看到哪些菜单由 `sys_role_menu` 决定;`is_platform = 1` 表示平台专用菜单(见 4.10) |
 | `sys_user_role` / `sys_role_menu` / `sys_role_dept` | 无(纯关联表) | 否 | 否 | **没有 `tenant_id` 列,不受任何自动过滤**。隔离依赖两条:①只允许用"当前租户内的 `user_id`/`role_id`"构造查询,这些 ID 来自已被过滤的查询结果;②任何直接按 ID 操作的接口都要先做一次带过滤的存在性校验(见 7.3) |
 | `sys_oper_log` | `BaseTenantEntity` | 是 | 否 | 超管查全平台日志时靠 `isSuperUser` 豁免 |
-| `sys_package` / `sys_package_menu` / `sys_tenant_package_change` / `sys_dict_type` / `sys_dict_data` / `sys_pay_account` | `BaseAuditEntity` | 否 | 否 | 平台级配置/字典/审计,只有超管可管理;访问控制靠"这些接口的菜单权限只授给平台租户的角色"(见 4.10) |
+| `sys_package` / `sys_package_menu` / `sys_tenant_package_change` / `sys_dict_type` / `sys_dict_data` / `sys_wx_pay_config` | `BaseAuditEntity` | 否 | 否 | 平台级配置/字典/审计,只有超管可管理;访问控制靠"这些接口的菜单权限只授给平台租户的角色"(见 4.10) |
 
 这张表的作用是免去逐处推理:**新增表时必须先在这里加一行,再写实体**。凡是"这张表要不要加过滤、为什么"的问题,答案都在上面。
 
@@ -308,7 +308,7 @@ common/    统一响应、全局异常、工具类、常量
 
 ### 5.1 数据表 ✅
 
-见 `rbac_tenant_schema.sql`:`tenant`、`sys_dept`、`sys_user`、`sys_role`、`sys_menu`、`sys_role_menu`、`sys_role_dept`、`sys_user_role`、`sys_package`、`sys_package_menu`、`sys_tenant_package_change`、`sys_oper_log`、`sys_dict_type`、`sys_dict_data`、`sys_pay_account`。
+见 `V1__init_schema.sql`:`tenant`、`sys_dept`、`sys_user`、`sys_role`、`sys_menu`、`sys_role_menu`、`sys_role_dept`、`sys_user_role`、`sys_package`、`sys_package_menu`、`sys_tenant_package_change`、`sys_oper_log`、`sys_dict_type`、`sys_dict_data`、`sys_wx_pay_config`。
 
 要点:
 - `sys_menu` 全平台统一,不分租户,租户角色只是勾选授权,不能自建菜单;`is_platform = 1` 的菜单是平台专用,只给平台租户,不允许进入任何套餐(见 4.10、5.2.1)
@@ -444,10 +444,12 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 
 `TenantWebFilter` 依赖 Sa-Token 会话,以下场景没有会话,必须显式确定并设置租户上下文(用 `TenantContext.runAsTenant`),**不允许用超管身份(`isSuperUser = true`)跳过过滤图省事**——那等于给这些入口开了能看到全租户数据的后门。
 
-### 6.1 支付回调(本版只保留设计,不实现)
+### 6.1 支付回调 ✅
+
+> 本节原写"本版只保留设计,不实现"——商城模块落地时已实现,下面保留设计取舍,实际口径见 `PayCallbackController` 与 `mall_architecture.md`。
 回调本身没有登录态,租户识别方式:
 - **推荐**:把 `tenant_id` 编码进商户订单号。**格式必须定死**:`{tenantIdBase36}-{渠道编码}-{渠道流水号}`,总长不超过 32 字符(如 `1a2b3c-wx-202609181234567890`)。用 Base36 而不是十进制,是为了在同样长度里塞下雪花 ID,且不像自增 ID 那样容易被猜出数据量(与 4.3 的取向一致)。**解析失败(格式不对/长度超限)的回调直接拒绝并记告警日志**,不做"容错猜测"
-- **备选**(订单号格式被渠道定死、改不了时):查询 `sys_pay_account`——一张平台级表,存"支付账号 → 租户"的映射(`pay_account_id`、`channel`、`tenant_id`)。它不是租户表,本来就该有租户维度,查它不算绕过隔离。**建表脚本已包含这张表**(前一版只在正文提到、脚本里没有,属于文档与脚本不一致,已修正)
+- **实际采用的做法**(见 `PayCallbackController` 与 `mall_architecture.md`):**把租户编码放进回调地址**——`/pay/callback/wx/{tenantCode}` 与 `/pay/callback/wx/{tenantCode}/refund`。原因是微信 V3 的回调体是密文,**不知道租户就不知道用哪把 APIv3 密钥解密**,所以租户只能来自 URL,不能来自报文内容。回调地址前缀由配置项 `minimall.mall.pay.notify-base-url` 提供,租户级只拼上面这段路径。原设计的两个备选(把 `tenant_id` 编码进商户订单号 / 查"支付账号 → 租户"映射表)都已废弃,后者那张 `sys_pay_account` 表已随脚本重整删除
 - **两者的共同前提是验签**:租户识别解决"这笔回调属于谁",不解决"这条回调是不是渠道发来的"。渠道签名校验失败 → 直接拒绝(401/403),**且必须发生在解析 `tenant_id` 之前**
 - **解析出的 `tenant_id` 只是"定位线索",不是可信事实**。正确顺序:验签通过 → 用解析结果 `runAsTenant` 进入上下文 → 按订单号查本地订单表(受租户过滤)→ **查不到就丢弃并告警**。因为订单表受租户过滤,构造一个不存在的租户前缀只会得到"查不到",读不到任何数据;订单归属一律以本地订单记录里的 `tenant_id` 为准,不用订单号里的值去写数据
 - 拿到可信的租户上下文后处理业务,**不要用超管模式处理回调**(那是给"能看到全租户数据"开后门,回调不需要这个能力)
@@ -827,12 +829,14 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 
 ### 9.5 Flyway 迁移脚本组织约定 ✅
 
-- 脚本放在 `src/main/resources/db/migration/`,按 Flyway 默认约定命名:`V{版本号}__{描述}.sql`,如 `V1__init_schema.sql`、`V2__add_audit_columns.sql`,版本号递增,已发布的脚本不能修改,后续变更一律追加新版本文件
-- `rbac_tenant_schema.sql`(本方案附带的建表脚本)对应 `V1__init_schema.sql`,是这套脚本的起点
+- 脚本放在 `src/main/resources/db/migration/`,按 Flyway 默认约定命名:`V{版本号}__{描述}.sql`,如 `V1__init_schema.sql`、`V3__add_audit_columns.sql`,版本号递增,已发布的脚本不能修改,后续变更一律追加新版本文件
+- **基线是"一个脚手架 + 一个商城"两个脚本**,边界按依赖划分:
+  - `V1__init_schema.sql` —— 脚手架:RBAC + 多租户 + 平台管理(`tenant`/`sys_*` 共 15 张表)+ 平台种子
+  - `V2__mall_init.sql` —— 商城:28 张 `mall_*` 表 + 商城菜单/字典种子。**依赖 V1**(菜单要挂进 V1 建的套餐与角色),单跑会失败
+- **基线脚本把建表与种子放在一起**:空库一次到位,不需要"先建表、再补种子"两步。理由是种子(`sys_menu` 完整菜单树、平台租户、全量套餐、超管账号)不是可选的业务数据,缺了它超管登录后连菜单都没有。**后续增量变更仍建议 DDL 与 DML 分开**(见 9.6 checklist 第 2 条)
 - 应用启动时 Flyway 自动检测并执行未应用的迁移脚本,三环境(dev/test/prod)都走这个流程,不手动跑 SQL
-- **种子数据单独一个脚本:`V2__seed_platform_data.sql`**(补充,前一版只说 V1 对应建表脚本,没说"系统起不来"需要的初始数据放哪)。内容:平台租户(`tenant_code = 'platform'`)、平台超管账号(`sys_user.is_super = 1`,密码为固定 BCrypt hash,明文写在脚本注释里并在首次登录后强制修改)、`sys_menu` 完整菜单树(平台专用菜单标 `is_platform = 1`)、一个"全量"套餐(包含全部 `is_platform = 0` 的菜单)、基础字典。理由:`sys_menu` 是平台统一数据,没有它超管登录后连菜单都没有,`V1` 只负责结构
 - **种子数据必须幂等**:使用固定的**小整数 ID**(1、2、3…)而不是雪花 ID,配合 `INSERT ... ON DUPLICATE KEY UPDATE` 或 `WHERE NOT EXISTS`,保证重复执行不产生重复数据。这是**全方案唯一使用非雪花 ID 的地方**,理由是种子数据要能被后续脚本稳定引用(如后续版本的 `sys_package_menu` 要引用某个菜单 ID),雪花 ID 每次生成都不同、引用不了;业务数据一律雪花 ID,不能混用
-- 后续版本新增菜单/字典,一律追加新的 `Vn__...sql`,**不要改 `V2`**(9.5 开头与 9.6 的"已发布脚本不可变"约定同样适用)
+- 后续版本新增菜单/字典/表,一律追加新的 `Vn__...sql`,**不要改 `V1`/`V2`**(9.5 开头与 9.6 的"已发布脚本不可变"约定同样适用)
 
 ### 9.6 迁移脚本评审与回滚流程 ✅
 
@@ -840,7 +844,7 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 
 **Review checklist**(写进 PR 模板,靠人工核对,不是自动化能完全覆盖的):
 1. 脚本是否包含破坏性 DDL(`DROP COLUMN`/`DROP TABLE`/字段改名或不兼容的类型变更)——有则必须走下面的"多步兼容"模式,不能在一个脚本里直接做
-2. 结构变更(DDL)和数据迁移/补数据(DML)是否混在同一个脚本里——建议拆成两个版本号相邻的脚本,方便定位问题、方便 DML 部分单独重试
+2. 结构变更(DDL)和数据迁移/补数据(DML)是否混在同一个脚本里——建议拆成两个版本号相邻的脚本,方便定位问题、方便 DML 部分单独重试(基线脚本 `V1`/`V2` 是刻意的例外,见 9.5;已上线环境里的变更仍按本条拆开)
 3. 大表(结合当前数据量评估)上的 DDL 是否有锁表/耗时风险,MySQL 8 的 Online DDL(`ALGORITHM=INPLACE`)覆盖不了的场景,要不要走停机窗口或第三方在线变更工具——这类工具的选型和操作手册本方案不展开,列入第10节遗留
 4. 已发布的脚本(版本号已存在于任何环境)是否被修改——按 9.5 的约定,已发布脚本内容不可变,只能追加新版本文件
 

@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
  * 平台级实体基类(架构文档 4.6):只有审计字段,不带租户过滤。
  *
  * <p>适用:{@code tenant}、{@code sys_menu}、{@code sys_package}、{@code sys_package_menu}、
- * {@code sys_tenant_package_change}、{@code sys_dict_type}、{@code sys_dict_data}、{@code sys_pay_account}。
+ * {@code sys_tenant_package_change}、{@code sys_dict_type}、{@code sys_dict_data}、{@code sys_wx_pay_config}。
  *
  * <p>审计字段的填充(4.4):时间字段用 Spring Data JPA Auditing 注解读值,
  * 操作人字段由 {@code AuditorAware} 从 {@link com.minimall.infra.audit.AuditContext} 取(不是直接读 Sa-Token 会话,
