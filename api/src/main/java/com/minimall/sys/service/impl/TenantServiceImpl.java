@@ -36,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -267,8 +268,7 @@ public class TenantServiceImpl implements TenantService {
         tenant.setStatus(status);
 
         // 4.11:先让缓存失效,该租户所有用户的下一个请求就会重新查库并拿到新状态(立即生效)
-        tenantLookup.evict(new TenantSnapshot(tenant.getId(), tenant.getTenantCode(), tenant.getStatus(),
-                tenant.getExpireTime(), tenant.getPackageId()));
+        tenantLookup.evict(toSnapshot(tenant));
 
         if (status == 0) {
             // 7.1.3 的撤销时机表:禁用租户时主动撤销该租户所有用户的刷新令牌。
@@ -287,8 +287,7 @@ public class TenantServiceImpl implements TenantService {
         tenant.setExpireTime(expireTime);
 
         // 4.11:先让缓存失效,该租户所有用户的下一个请求就会重新查库并按新有效期校验
-        tenantLookup.evict(new TenantSnapshot(tenant.getId(), tenant.getTenantCode(), tenant.getStatus(),
-                tenant.getExpireTime(), tenant.getPackageId()));
+        tenantLookup.evict(toSnapshot(tenant));
 
         // 改成已过去的时间等价于"立刻禁用":同样撤销刷新令牌,不让凭据留着(与 changeStatus 同一套)
         if (expireTime != null && !expireTime.isAfter(LocalDateTime.now())) {
@@ -300,6 +299,51 @@ public class TenantServiceImpl implements TenantService {
             return;
         }
         log.info("租户有效期已修改 tenantId={} expireTime={}", tenantId, expireTime);
+    }
+
+    @Override
+    public List<TenantSnapshot> listExpiringBetween(LocalDateTime from, LocalDateTime to) {
+        QTenant qTenant = QTenant.tenant;
+        BooleanBuilder where = new BooleanBuilder();
+        where.and(qTenant.status.eq(1));
+        where.and(qTenant.expireTime.isNotNull());
+        where.and(qTenant.expireTime.gt(from));
+        where.and(qTenant.expireTime.loe(to));
+        return tenantRepository.findAll(where, Pageable.unpaged()).stream()
+                .map(this::toSnapshot)
+                .toList();
+    }
+
+    @Override
+    public int disableExpiredTenants() {
+        // 平台级跨租户操作,按 DataScopeBypass 的说明用**超管上下文**表达(不是用那个开关)。
+        // 不能按租户逐个切普通上下文:数据权限的输入是"当前身份",而系统任务没有属于该租户的身份,
+        // DataScopeProvider 会按"算不出来就拒绝"返回 denyAll —— 撤销刷新令牌时要查该租户的用户,
+        // 会被拦成空集,表现为"状态禁用了、令牌一条没撤"。查询本身都按 tenantId 显式收窄,不靠过滤兜底。
+        return TenantContext.callAsTenant(null, true, () -> {
+            // 上下文是进来之后才切的,而过滤器在事务开启那一刻就按旧上下文启用过了,必须重新 apply
+            tenantFilterService.apply(entityManager);
+
+            QTenant qTenant = QTenant.tenant;
+            BooleanBuilder where = new BooleanBuilder();
+            where.and(qTenant.status.eq(1));
+            where.and(qTenant.expireTime.isNotNull());
+            where.and(qTenant.expireTime.loe(LocalDateTime.now()));
+            List<Long> expiredIds = tenantRepository.findAll(where, Pageable.unpaged()).stream()
+                    .map(Tenant::getId)
+                    .toList();
+
+            // 逐个走 changeStatus:清租户缓存与撤销刷新令牌的逻辑都在那边,不重复实现。
+            // 整批共用一个事务,失败会整批回滚 —— 本方法是幂等的(只挑 status=1),重跑即可。
+            expiredIds.forEach(tenantId -> changeStatus(tenantId, 0));
+            return expiredIds.size();
+        });
+    }
+
+    /** 租户状态快照:租户缓存(4.11)与到期任务共用同一份字段映射。 */
+    private TenantSnapshot toSnapshot(Tenant tenant) {
+        return new TenantSnapshot(tenant.getId(), tenant.getTenantCode(), tenant.getStatus(),
+                tenant.getExpireTime(), tenant.getPackageId());
     }
 
     /** 套餐对应的菜单集合;{@code packageId} 为空表示"不限",按全部非平台菜单处理(4.8 步骤 1)。 */

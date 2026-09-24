@@ -5,8 +5,10 @@ import com.minimall.sys.api.dto.TenantCreateResponse;
 import com.minimall.sys.api.dto.TenantPackageChangeRequest;
 import com.minimall.sys.api.dto.TenantView;
 import com.minimall.common.PageResult;
+import com.minimall.infra.tenant.TenantSnapshot;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 租户管理(平台级能力,只有平台超管可用,见架构文档 4.10)。
@@ -47,4 +49,17 @@ public interface TenantService {
      * 改成已过去的时间等价于立刻禁用,会一并撤销全部刷新令牌。
      */
     void changeExpireTime(Long tenantId, LocalDateTime expireTime);
+
+    /**
+     * 列出在 {@code (from, to]} 区间内到期的启用中租户,供到期提醒用。
+     */
+    List<TenantSnapshot> listExpiringBetween(LocalDateTime from, LocalDateTime to);
+
+    /**
+     * 把已过有效期的启用中租户置为禁用,返回处理条数。
+     *
+     * <p>仅供定时任务调用:有效期此前只是"用户请求时被动校验",没人主动处理,
+     * 表现是租户过期后库里状态还一直是"正常"。幂等(只挑 status=1 的),任务重跑安全。
+     */
+    int disableExpiredTenants();
 }
