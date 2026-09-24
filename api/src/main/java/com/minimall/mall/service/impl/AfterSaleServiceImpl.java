@@ -26,7 +26,7 @@ import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.infra.OrderNumberGenerator;
 import com.minimall.mall.infra.auth.ClientContext;
-import com.minimall.mall.infra.pay.WxPayClient;
+import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.mall.service.AfterSaleService;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
@@ -74,7 +74,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final MallStockLogRepository stockLogRepository;
     private final MallWxRefundRepository refundRepository;
     private final OrderNumberGenerator numberGenerator;
-    private final WxPayClient wxPayClient;
+    private final WxPayRefundSubmitter refundSubmitter;
 
     public AfterSaleServiceImpl(MallAfterSaleRepository afterSaleRepository,
                                MallAfterSaleLogRepository logRepository,
@@ -86,7 +86,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                                MallStockLogRepository stockLogRepository,
                                MallWxRefundRepository refundRepository,
                                OrderNumberGenerator numberGenerator,
-                               WxPayClient wxPayClient) {
+                               WxPayRefundSubmitter refundSubmitter) {
         this.afterSaleRepository = afterSaleRepository;
         this.logRepository = logRepository;
         this.imageRepository = imageRepository;
@@ -97,7 +97,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         this.stockLogRepository = stockLogRepository;
         this.refundRepository = refundRepository;
         this.numberGenerator = numberGenerator;
-        this.wxPayClient = wxPayClient;
+        this.refundSubmitter = refundSubmitter;
     }
 
     // ---------------------------------------------------------------- 小程序端
@@ -473,12 +473,9 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         refund.setRefundAmount(afterSale.getRefundAmount());
         refund.setRefundStatus(MallWxRefund.REFUND_STATUS_APPLYING);
         MallWxRefund saved = refundRepository.save(refund);
-        wxPayClient.refund(null, saved.getOutRefundNo(), saved.getRefundAmount())
-                .ifPresent(refundId -> {
-                    saved.setWxRefundId(refundId);
-                    saved.setRefundStatus(MallWxRefund.REFUND_STATUS_SUCCESS);
-                    saved.setCallbackTime(LocalDateTime.now());
-                });
+        // 微信退款是异步的:这里只提交申请,成败由退款回调落定,所以状态一直是"申请中"
+        refundSubmitter.submitAfterCommit(afterSale.getTenantId(), saved.getOrderId(), saved.getId(),
+                saved.getRefundAmount(), "售后退款");
     }
 
     /** 退货回补库存 + 写流水。 */

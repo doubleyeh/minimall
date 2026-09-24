@@ -5,12 +5,18 @@ import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.infra.tenant.TenantFilterService;
+import com.minimall.infra.tenant.TenantLookup;
+import com.minimall.infra.tenant.TenantSnapshot;
+import com.minimall.mall.domain.MallCustomer;
 import com.minimall.mall.domain.MallGoods;
 import com.minimall.mall.domain.MallOrder;
 import com.minimall.mall.domain.MallOrderItem;
 import com.minimall.mall.domain.MallOrderStatusLog;
 import com.minimall.mall.domain.MallStockLog;
 import com.minimall.mall.domain.MallWxPayment;
+import com.minimall.mall.domain.MallWxRefund;
+import com.minimall.mall.domain.repository.MallCustomerRepository;
+import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.domain.repository.MallGoodsRepository;
 import com.minimall.mall.domain.repository.MallOrderItemRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
@@ -20,13 +26,17 @@ import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxPaymentRepository;
 import com.minimall.mall.infra.auth.ClientContext;
 import com.minimall.mall.infra.pay.WxPayClient;
+import com.minimall.mall.infra.pay.WxPayNotify;
+import com.minimall.mall.infra.pay.WxPayOrderCommand;
 import com.minimall.mall.service.PayService;
+import com.minimall.mall.service.support.OrderAmountCalculator;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -53,6 +63,11 @@ public class PayServiceImpl implements PayService {
 
     private static final int STOCK_DEDUCT = 3;
 
+    private static final String EVENT_TRANSACTION_SUCCESS = "TRANSACTION.SUCCESS";
+    private static final String EVENT_REFUND_SUCCESS = "REFUND.SUCCESS";
+    private static final String EVENT_REFUND_ABNORMAL = "REFUND.ABNORMAL";
+    private static final String EVENT_REFUND_CLOSED = "REFUND.CLOSED";
+
     private final MallOrderRepository orderRepository;
     private final MallOrderItemRepository orderItemRepository;
     private final MallOrderStatusLogRepository statusLogRepository;
@@ -63,6 +78,10 @@ public class PayServiceImpl implements PayService {
     private final WxPayClient wxPayClient;
     private final TenantFilterService tenantFilterService;
     private final EntityManager entityManager;
+    private final MallCustomerRepository customerRepository;
+    private final TenantLookup tenantLookup;
+    private final MallWxRefundRepository refundRepository;
+    private final OrderAmountCalculator calculator;
 
     public PayServiceImpl(MallOrderRepository orderRepository,
                           MallOrderItemRepository orderItemRepository,
@@ -73,7 +92,11 @@ public class PayServiceImpl implements PayService {
                           MallStockLogRepository stockLogRepository,
                           WxPayClient wxPayClient,
                           TenantFilterService tenantFilterService,
-                          EntityManager entityManager) {
+                          EntityManager entityManager,
+                          MallCustomerRepository customerRepository,
+                          TenantLookup tenantLookup,
+                          MallWxRefundRepository refundRepository,
+                          OrderAmountCalculator calculator) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
@@ -84,6 +107,10 @@ public class PayServiceImpl implements PayService {
         this.wxPayClient = wxPayClient;
         this.tenantFilterService = tenantFilterService;
         this.entityManager = entityManager;
+        this.customerRepository = customerRepository;
+        this.tenantLookup = tenantLookup;
+        this.refundRepository = refundRepository;
+        this.calculator = calculator;
     }
 
     @Override
@@ -117,10 +144,17 @@ public class PayServiceImpl implements PayService {
             log.info("订单已有预支付单,直接复用 orderNo={}", order.getOrderNo());
         }
 
-        // 2) 事务外调用统一下单(网络调用)
+        // 2) 事务外调用统一下单(网络调用)。JSAPI 必须有 openid,所以这里要把客户取出来
+        String openid = customerRepository.findById(customerId)
+                .map(MallCustomer::getOpenid)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAY_CHANNEL_NOT_CONFIGURED, "缺少付款人 openid"));
+        String tenantCode = tenantLookup.byId(tenantId)
+                .map(TenantSnapshot::tenantCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.TENANT_ABNORMAL, "租户状态异常"));
         WxPayClient.PrepayResult result = wxPayClient
-                .unifiedOrder(order.getOrderNo(), order.getPayAmount(), null, "商城订单 " + order.getOrderNo())
-                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "拉起支付失败,请稍后重试"));
+                .unifiedOrder(new WxPayOrderCommand(tenantId, tenantCode, order.getOrderNo(),
+                        order.getPayAmount(), openid, "商城订单 " + order.getOrderNo()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAY_CHANNEL_ERROR, "拉起支付失败,请稍后重试"));
 
         // 3) 回写预支付 ID
         payment.setPrepayId(result.prepayId());
@@ -132,43 +166,90 @@ public class PayServiceImpl implements PayService {
     }
 
     @Override
-    public void handlePayCallback(String outTradeNo, String wxTransactionId, BigDecimal amount, boolean success,
-                                  String rawBody) {
-        // 回调没有租户上下文:先切到超管上下文(两个过滤器都不启用)按商户订单号定位支付流水。
-        // 订单号全局唯一(见 OrderNumberGenerator),所以这次定位不会跨租户串单
-        MallWxPayment located = TenantContext.callAsTenant(null, true, () -> {
-            tenantFilterService.apply(entityManager);
-            return paymentRepository.findByOutTradeNo(outTradeNo).orElse(null);
-        });
-        if (located == null) {
-            log.warn("支付回调找不到对应的支付流水,已忽略 outTradeNo={}", outTradeNo);
+    public void handlePayCallback(String tenantCode, String timestamp, String nonce, String serial,
+                                  String signature, String rawBody) {
+        WxPayNotify notify = wxPayClient.verifyAndDecrypt(tenantCode, timestamp, nonce, serial, signature, rawBody);
+        if (!EVENT_TRANSACTION_SUCCESS.equals(notify.eventType())) {
+            log.info("忽略非支付成功事件 tenantCode={} eventType={}", tenantCode, notify.eventType());
             return;
         }
-        Long tenantId = located.getTenantId();
-        if (tenantId == null) {
-            log.warn("支付流水缺少租户信息,已忽略 outTradeNo={}", outTradeNo);
-            return;
-        }
-        // 切回该租户继续处理:后续所有读写都在正确租户下执行
+        String outTradeNo = text(notify.resource(), "out_trade_no");
+        String transactionId = text(notify.resource(), "transaction_id");
+        JsonNode amount = notify.resource().get("amount");
+        BigDecimal paidAmount = calculator.toYuan(amount == null ? 0 : amount.get("total").asInt());
+
+        // 按租户定位:流水已带租户,不需要再用超管上下文跨租户找
+        Long tenantId = notify.tenantId();
         TenantContext.callAsTenant(tenantId, false, () -> {
             tenantFilterService.apply(entityManager);
-            applyCallback(located, outTradeNo, wxTransactionId, amount, success, rawBody);
+            MallWxPayment payment = paymentRepository
+                    .findByTenantIdAndOutTradeNo(tenantId, outTradeNo).orElse(null);
+            if (payment == null) {
+                log.warn("支付回调找不到对应的支付流水,已忽略 outTradeNo={}", outTradeNo);
+                return null;
+            }
+            applyCallback(payment, outTradeNo, transactionId, paidAmount, rawBody);
             return null;
         });
     }
 
+    @Override
+    public void handleRefundCallback(String tenantCode, String timestamp, String nonce, String serial,
+                                     String signature, String rawBody) {
+        WxPayNotify notify = wxPayClient.verifyAndDecrypt(tenantCode, timestamp, nonce, serial, signature, rawBody);
+        boolean success = EVENT_REFUND_SUCCESS.equals(notify.eventType());
+        if (!success && !EVENT_REFUND_ABNORMAL.equals(notify.eventType())
+                && !EVENT_REFUND_CLOSED.equals(notify.eventType())) {
+            log.info("忽略非退款事件 tenantCode={} eventType={}", tenantCode, notify.eventType());
+            return;
+        }
+        String outRefundNo = text(notify.resource(), "out_refund_no");
+        String wxRefundId = text(notify.resource(), "refund_id");
+        Long tenantId = notify.tenantId();
+
+        TenantContext.callAsTenant(tenantId, false, () -> {
+            tenantFilterService.apply(entityManager);
+            MallWxRefund refund = refundRepository
+                    .findByTenantIdAndOutRefundNo(tenantId, outRefundNo).orElse(null);
+            if (refund == null) {
+                log.warn("退款回调找不到对应的退款流水,已忽略 outRefundNo={}", outRefundNo);
+                return null;
+            }
+            applyRefundCallback(refund, success, wxRefundId, rawBody, notify.eventType());
+            return null;
+        });
+    }
+
+    private void applyRefundCallback(MallWxRefund refund, boolean success, String wxRefundId,
+                                     String rawBody, String eventType) {
+        if (refund.getRefundStatus() != null && refund.getRefundStatus() == MallWxRefund.REFUND_STATUS_SUCCESS) {
+            log.info("重复的退款回调,已忽略 refundId={}", refund.getId());
+            return;
+        }
+        refund.setRefundStatus(success ? MallWxRefund.REFUND_STATUS_SUCCESS : MallWxRefund.REFUND_STATUS_FAILED);
+        refund.setCallbackTime(LocalDateTime.now());
+        refund.setRawCallback(rawBody);
+        if (success && !wxRefundId.isEmpty()) {
+            refund.setWxRefundId(wxRefundId);
+        }
+        if (!success) {
+            // 退款失败只记录:售后单此时已经是终态,反转状态机属于另一件事,交给人工/重试处理
+            log.error("退款失败,需人工处理 refundId={} outRefundNo={} eventType={}",
+                    refund.getId(), refund.getOutRefundNo(), eventType);
+        }
+        refundRepository.save(refund);
+    }
+
+    private static String text(tools.jackson.databind.JsonNode node, String field) {
+        tools.jackson.databind.JsonNode value = node == null ? null : node.get(field);
+        return value == null || value.isNull() ? "" : value.asText();
+    }
+
     private void applyCallback(MallWxPayment payment, String outTradeNo, String wxTransactionId,
-                               BigDecimal amount, boolean success, String rawBody) {
+                               BigDecimal amount, String rawBody) {
         // 幂等(3.8):已成功处理过的回调直接返回,不重复触发后续动作
         if (payment.getPayStatus() != null && payment.getPayStatus() == MallWxPayment.PAY_STATUS_SUCCESS) {
             log.info("重复的支付回调,已忽略 outTradeNo={} wxTransactionId={}", outTradeNo, wxTransactionId);
-            return;
-        }
-        if (!success) {
-            // 支付失败/关闭:只改支付流水状态,不动订单 —— 订单由超时任务或用户取消驱动(3.8)
-            payment.setPayStatus(MallWxPayment.PAY_STATUS_FAILED);
-            payment.setCallbackTime(LocalDateTime.now());
-            payment.setRawCallback(rawBody);
             return;
         }
         // 金额校验:回调金额与流水金额不一致说明被篡改或串单,绝不能按"已支付"处理
@@ -176,7 +257,7 @@ public class PayServiceImpl implements PayService {
                 && payment.getPayAmount().compareTo(amount) != 0) {
             log.error("支付回调金额与订单金额不一致,已拒绝 outTradeNo={} 期望={} 实际={}",
                     outTradeNo, payment.getPayAmount(), amount);
-            throw new BusinessException(ErrorCode.DATA_CONFLICT, "支付金额不一致");
+            throw new BusinessException(ErrorCode.PAY_AMOUNT_INVALID, "支付金额不一致");
         }
 
         payment.setPayStatus(MallWxPayment.PAY_STATUS_SUCCESS);

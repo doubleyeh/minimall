@@ -46,6 +46,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
 
 /**
  * 商城管理端与营销模块的服务层集成测试。
@@ -60,6 +61,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class MallAdminServiceIntegrationTest {
 
     private static final long TENANT_ID = 1L;
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private GoodsCategoryService categoryService;
@@ -420,8 +424,7 @@ class MallAdminServiceIntegrationTest {
                     List.of(new com.minimall.mall.api.dto.CreateOrderRequest.Item(
                             skuRepository.findByGoodsIdOrderByIdAsc(goodsForOrder).get(0).getId(), 1)),
                     addressId, null, null));
-            payService.handlePayCallback(created.orderNo(), "admin-it-" + System.nanoTime(),
-                    created.payAmount(), true, "{}");
+            payCallback.paySuccess(created.orderNo(), created.payAmount());
             return created.orderId();
         });
 

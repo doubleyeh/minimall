@@ -4,6 +4,7 @@ import com.minimall.mall.domain.MallOrder;
 import com.minimall.mall.domain.QMallOrder;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.querydsl.QuerydslPredicateExecutor;
 import org.springframework.data.repository.query.Param;
@@ -47,4 +48,19 @@ public interface MallOrderRepository extends JpaRepository<MallOrder, Long>,
                                           Pageable pageable);
 
     long countByCustomerIdAndStatus(Long customerId, Integer status);
+
+    /**
+     * 关闭/取消订单时把状态落库。
+     *
+     * <p>为什么要显式 UPDATE 而不是"改实体等脏检查":超时关闭是**批处理**,
+     * 而同一批里的库存/优惠券更新是 {@code @Modifying(clearAutomatically = true)},
+     * 会清空持久化上下文 —— 第 2 个及之后的订单随即变成游离对象,此时 setStatus 只改内存,
+     * 提交时不会落库(表现为库存退了、日志写了"系统关闭",订单却还是待支付)。
+     */
+    @Modifying
+    @Query("update MallOrder o set o.status = :status, o.cancelTime = :cancelTime, "
+            + "o.closeReason = :closeReason where o.id = :orderId and o.tenantId = :tenantId")
+    int updateStatusOnClose(@Param("orderId") Long orderId, @Param("tenantId") Long tenantId,
+                            @Param("status") int status, @Param("closeReason") Integer closeReason,
+                            @Param("cancelTime") LocalDateTime cancelTime);
 }

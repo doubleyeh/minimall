@@ -1,24 +1,28 @@
 package com.minimall.mall.api;
 
-import com.minimall.common.ApiResponse;
+import com.minimall.common.BusinessException;
+import com.minimall.common.ErrorCode;
+import com.minimall.mall.api.dto.WxPayCallbackResponse;
 import com.minimall.mall.service.PayService;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
-
 /**
- * 微信支付回调(商城设计文档 3.8)。
+ * 微信支付回调(商城设计文档 3.8):支付回调与退款回调都在这里。
  *
  * <p>几个必须清楚的点:
  * <ul>
  *   <li>路径 {@code /pay/callback/**} 在 4.9 的白名单里 —— 微信服务器当然没有登录态。
  *       "在白名单里"只表示允许没有租户上下文执行,**不代表免校验**:真正的校验是验签 + 金额比对</li>
- *   <li>回调可能**重复推送**,幂等由 {@code handlePayCallback} 内部保证(按支付流水状态短路)</li>
- *   <li>请求体格式与真实微信不同(真实回调是密文,需要平台证书解密)。这里定义的是内部 DTO,
- *       接入真实渠道时把解析与验签换成官方 SDK 的实现即可,业务处理不用动</li>
+ *   <li>租户编码在路径上而不是靠报文推断:微信回调体是密文,不知道租户就不知道用哪把密钥解密</li>
+ *   <li>应答必须用微信定义的 {@code code=SUCCESS/FAIL},不能用项目自己的 {@code {code:0}},
+ *       否则微信会一直重推。失败时返回非 2xx,让微信按失败处理</li>
  * </ul>
  */
 @RestController
@@ -31,26 +35,49 @@ public class PayCallbackController {
         this.payService = payService;
     }
 
-    @PostMapping("/wx")
-    public ApiResponse<Void> wxPayCallback(@RequestBody WxPayCallbackRequest request) {
-        payService.handlePayCallback(request.outTradeNo(), request.transactionId(),
-                request.amount(), request.success(), request.rawBody());
-        // 无论业务侧如何处理都要返回成功:返回失败会让微信持续重推,
-        // 而"找不到订单"这类问题重推一百次也不会自己好,只会掩盖真正的原因(日志里有记录)
-        return ApiResponse.ok();
+    @PostMapping("/wx/{tenantCode}")
+    public ResponseEntity<WxPayCallbackResponse> payment(@PathVariable String tenantCode,
+                                                         @RequestHeader("Wechatpay-Timestamp") String timestamp,
+                                                         @RequestHeader("Wechatpay-Nonce") String nonce,
+                                                         @RequestHeader("Wechatpay-Signature") String signature,
+                                                         @RequestHeader("Wechatpay-Serial") String serial,
+                                                         @RequestBody String rawBody) {
+        try {
+            payService.handlePayCallback(tenantCode, timestamp, nonce, serial, signature, rawBody);
+            return ResponseEntity.ok(WxPayCallbackResponse.success());
+        } catch (BusinessException ex) {
+            return fail(ex);
+        }
+    }
+
+    @PostMapping("/wx/{tenantCode}/refund")
+    public ResponseEntity<WxPayCallbackResponse> refund(@PathVariable String tenantCode,
+                                                        @RequestHeader("Wechatpay-Timestamp") String timestamp,
+                                                        @RequestHeader("Wechatpay-Nonce") String nonce,
+                                                        @RequestHeader("Wechatpay-Signature") String signature,
+                                                        @RequestHeader("Wechatpay-Serial") String serial,
+                                                        @RequestBody String rawBody) {
+        try {
+            payService.handleRefundCallback(tenantCode, timestamp, nonce, serial, signature, rawBody);
+            return ResponseEntity.ok(WxPayCallbackResponse.success());
+        } catch (BusinessException ex) {
+            return fail(ex);
+        }
     }
 
     /**
-     * 支付回调请求体(内部结构,非微信原始格式)。
+     * 业务异常映射成微信要求的失败应答。
      *
-     * @param amount  回调金额(元);与支付流水金额不一致时整笔拒绝,防止被篡改
-     * @param success 是否支付成功;false 表示支付失败/关闭
+     * <p>这里必须自己 catch:走全局处理器的话会被翻译成 HTTP 200 + 业务码,微信看到的就成了"成功"。
      */
-    public record WxPayCallbackRequest(
-            String outTradeNo,
-            String transactionId,
-            BigDecimal amount,
-            boolean success,
-            String rawBody) {
+    private ResponseEntity<WxPayCallbackResponse> fail(BusinessException ex) {
+        ErrorCode code = ex.getErrorCode() == null ? ErrorCode.BUSINESS_ERROR : ex.getErrorCode();
+        HttpStatus status = switch (code) {
+            case NOT_FOUND, TENANT_ABNORMAL -> HttpStatus.NOT_FOUND;
+            case PAY_SIGNATURE_INVALID -> HttpStatus.UNAUTHORIZED;
+            case WX_PAY_NOTIFY_INVALID, PAY_AMOUNT_INVALID, PAY_CHANNEL_NOT_CONFIGURED -> HttpStatus.BAD_REQUEST;
+            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        };
+        return ResponseEntity.status(status).body(WxPayCallbackResponse.fail(ex.getMessage()));
     }
 }

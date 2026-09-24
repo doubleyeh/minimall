@@ -27,7 +27,18 @@ public enum ErrorCode {
 
     BUSINESS_ERROR(50000, "业务处理失败"),
     DATA_CONFLICT(50002, "数据已存在或存在引用关系"),
-    SYSTEM_ERROR(50001, "系统异常,请稍后重试");
+    SYSTEM_ERROR(50001, "系统异常,请稍后重试"),
+
+    /** 该租户没配微信支付,或全局的回调地址前缀没配 */
+    PAY_CHANNEL_NOT_CONFIGURED(50003, "支付渠道未配置"),
+    /** 调微信下单/退款失败:网络异常或微信返回业务错误 */
+    PAY_CHANNEL_ERROR(50004, "支付渠道调用失败"),
+    /** 回调验签不过、序列号不匹配或时间戳超窗 */
+    PAY_SIGNATURE_INVALID(50005, "回调签名校验失败"),
+    /** 金额非正数,或元转分时溢出 */
+    PAY_AMOUNT_INVALID(50006, "支付金额不合法"),
+    /** 回调报文结构不对或解密失败 */
+    WX_PAY_NOTIFY_INVALID(50007, "支付回调报文不合法");
 
     private final int code;
     private final String message;

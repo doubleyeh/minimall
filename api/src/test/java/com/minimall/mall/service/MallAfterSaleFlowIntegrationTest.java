@@ -40,6 +40,7 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
 
 /**
  * 售后链路集成测试(商城设计文档 3.9)。
@@ -57,6 +58,9 @@ class MallAfterSaleFlowIntegrationTest {
     private static final long TENANT_ID = 1L;
     /** 商家/超管操作人(审计快照里的 userId)。 */
     private static final long STAFF_ID = 1L;
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private OrderService orderService;
@@ -310,7 +314,7 @@ class MallAfterSaleFlowIntegrationTest {
     private OrderCreateResponse paidOrder(int quantity) {
         OrderCreateResponse order = orderService.create(
                 new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, quantity)), addressId, null, null));
-        payService.handlePayCallback(order.orderNo(), "wx-as-" + System.nanoTime(), order.payAmount(), true, "{}");
+        payCallback.paySuccess(order.orderNo(), order.payAmount());
         return order;
     }
 

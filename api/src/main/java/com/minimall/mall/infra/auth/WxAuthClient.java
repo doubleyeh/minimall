@@ -1,5 +1,7 @@
 package com.minimall.mall.infra.auth;
 
+import com.minimall.mall.infra.pay.WxPayConfigProvider;
+import com.minimall.mall.infra.pay.WxPayCredentials;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -10,6 +12,9 @@ import java.util.Optional;
 
 /**
  * 微信登录凭证换取 openid(商城设计文档 3.1 第 1 步:code2Session)。
+ *
+ * <p>appId / appSecret **按租户取**:每个租户可以是自己的小程序,openid 也只在该小程序下有效。
+ * 凭据来自 {@code sys_wx_pay_config}(登录与支付共用同一份小程序配置)。
  *
  * <p>{@code mall.auth.wx-mock = true} 时走模拟实现:直接把 {@code code} 当作 openid 的一部分
  * (形如 {@code mock-openid-<code>})。**这是给本地开发与自动化测试用的** ——
@@ -24,6 +29,7 @@ public class WxAuthClient {
     private static final String CODE2SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session";
 
     private final ClientTokenProperties properties;
+    private final WxPayConfigProvider configProvider;
     /**
      * 直接 {@code create()} 而不是注入 {@code RestClient.Builder}:Boot 4 把 RestClient 的自动配置
      * 拆到了独立模块,项目没有引入时容器里根本没有那个 Builder —— 注入式写法会在启动时直接失败。
@@ -31,27 +37,33 @@ public class WxAuthClient {
      */
     private final RestClient restClient = RestClient.create();
 
-    public WxAuthClient(ClientTokenProperties properties) {
+    public WxAuthClient(ClientTokenProperties properties, WxPayConfigProvider configProvider) {
         this.properties = properties;
+        this.configProvider = configProvider;
     }
 
     /**
      * 用小程序 {@code wx.login()} 返回的 code 换取会话信息。
      *
-     * <p>换不到(微信返回 errcode)时返回空,由调用方统一按"登录失败"处理 ——
+     * <p>换不到(微信返回 errcode、租户没配小程序凭据)时返回空,由调用方统一按"登录失败"处理 ——
      * 不要把微信的错误文案透给端上,那些信息对用户没有意义,对排查也无用(真正的排查要看服务端日志)。
      */
-    public Optional<WxSession> code2Session(String code) {
+    public Optional<WxSession> code2Session(Long tenantId, String code) {
         if (properties.wxMockEnabled()) {
             log.info("微信 mock 模式已开启,code={} 直接映射为模拟 openid(mall.auth.wx-mock=true)", code);
             return Optional.of(new WxSession("mock-openid-" + code, null));
+        }
+        WxPayCredentials credentials = configProvider.byTenantId(tenantId).orElse(null);
+        if (credentials == null || credentials.loginAppId() == null || credentials.loginAppSecret() == null) {
+            log.warn("该租户未配置小程序凭据,无法换取 openid tenantId={}", tenantId);
+            return Optional.empty();
         }
         try {
             Map<?, ?> response = restClient.get()
                     .uri(uriBuilder -> uriBuilder.scheme("https").host("api.weixin.qq.com")
                             .path("/sns/jscode2session")
-                            .queryParam("appid", properties.wxAppId())
-                            .queryParam("secret", properties.wxAppSecret())
+                            .queryParam("appid", credentials.loginAppId())
+                            .queryParam("secret", credentials.loginAppSecret())
                             .queryParam("js_code", code)
                             .queryParam("grant_type", "authorization_code")
                             .build())

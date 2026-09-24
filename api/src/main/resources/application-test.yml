@@ -24,6 +24,10 @@ minimall:
       # 默认给 true 而不是像基础层那样默认 false:这个 profile 的用途就是自动化。
       # 仍保留环境变量覆盖,CI 上要验真实 code2Session 时可以 WX_MOCK=false 关掉。
       wx-mock: ${WX_MOCK:true}
+    # 自动化里不出网:出网请求由测试的桩 HTTP 客户端接管(见 StubWxPayHttpClient),
+    # 这里只需要一个合法的 HTTPS 前缀,让统一下单能拼出 notify_url
+    pay:
+      notify-base-url: https://pay.test
 
 logging:
   level:

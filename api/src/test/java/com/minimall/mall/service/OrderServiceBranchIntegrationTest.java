@@ -28,6 +28,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
+import java.time.LocalDateTime;
 
 /**
  * 订单服务的分支与边界(商城设计文档 3.3、3.4)。
@@ -42,6 +44,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 属于测试覆盖不到的残余风险,已记在文档的遗留项里。
  */
 class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private PayService payService;
@@ -60,8 +65,7 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
     private OrderCreateResponse deliverableOrder() {
         OrderCreateResponse order = asClient(customerId, () -> orderService.create(requestOf(skuId, 1)));
         inTenant(() -> {
-            payService.handlePayCallback(order.orderNo(), "wx-txn-" + System.nanoTime(),
-                    order.payAmount(), true, "{\"mock\":true}");
+            payCallback.paySuccess(order.orderNo(), order.payAmount());
             return null;
         });
         inTenant(() -> {
@@ -388,15 +392,16 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
         OrderCreateResponse paid = deliverableOrder();
         inTenant(() -> {
             jdbcTemplate.update("UPDATE mall_order SET create_time = ? WHERE id IN (?, ?)",
-                    java.time.LocalDateTime.now().minusMinutes(30), pending.orderId(), paid.orderId());
+                    LocalDateTime.now().minusMinutes(30), pending.orderId(), paid.orderId());
             return null;
         });
 
-        int closed = inTenant(() -> orderService.closeTimeoutOrders(java.time.LocalDateTime.now()));
+        int closed = inTenant(() -> orderService.closeTimeoutOrders(LocalDateTime.now()));
 
-        assertThat(closed).isGreaterThanOrEqualTo(1);
+        assertThat(closed).as("本次关闭了 %s 单", closed).isGreaterThanOrEqualTo(1);
         inTenant(() -> {
             assertThat(orderRepository.findById(pending.orderId()).orElseThrow().getStatus())
+                    .as("关闭了 %s 单,本单应当在内", closed)
                     .isEqualTo(MallOrder.STATUS_CANCELLED);
             assertThat(orderRepository.findById(paid.orderId()).orElseThrow().getStatus())
                     .as("已支付的订单不能被超时任务碰")

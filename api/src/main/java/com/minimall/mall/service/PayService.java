@@ -2,8 +2,6 @@ package com.minimall.mall.service;
 
 import com.minimall.mall.api.dto.OrderCreateResponse;
 
-import java.math.BigDecimal;
-
 /**
  * 支付(商城设计文档 3.3、3.8)。
  */
@@ -19,11 +17,16 @@ public interface PayService {
     /**
      * 支付结果回调(3.8)。
      *
-     * <p>回调来自微信服务器,**没有租户上下文**:实现里先用超管上下文按商户订单号定位支付流水,
-     * 拿到 tenantId 后再切回该租户继续处理。
+     * <p>回调来自微信服务器,没有租户上下文,所以租户编码直接由回调路径给出:
+     * 微信的回调体是密文,不先知道租户就不知道用哪把 APIv3 密钥解密。
      *
-     * @param amount 回调金额(分转元后与支付流水比对,不一致直接拒绝)
+     * <p>实现里先验签再解密,然后按租户定位支付流水;金额不符、验签失败都抛
+     * {@code BusinessException},由 controller 映射成微信要求的失败应答。
      */
-    void handlePayCallback(String outTradeNo, String wxTransactionId, BigDecimal amount, boolean success,
-                           String rawBody);
+    void handlePayCallback(String tenantCode, String timestamp, String nonce, String serial,
+                           String signature, String rawBody);
+
+    /** 退款结果回调(3.8):定位退款流水并落最终状态。 */
+    void handleRefundCallback(String tenantCode, String timestamp, String nonce, String serial,
+                              String signature, String rawBody);
 }

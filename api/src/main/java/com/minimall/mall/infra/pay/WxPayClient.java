@@ -1,111 +1,272 @@
 package com.minimall.mall.infra.pay;
 
-import com.minimall.mall.infra.auth.ClientTokenProperties;
+import com.minimall.common.BusinessException;
+import com.minimall.common.ErrorCode;
+import com.minimall.infra.tenant.TenantLookup;
+import com.minimall.infra.tenant.TenantSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
-import java.math.BigDecimal;
 import java.security.SecureRandom;
-import java.util.HexFormat;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * 微信支付网关封装(商城设计文档 3.3、3.8)。
+ * 微信支付 V3 网关封装(商城设计文档 3.3、3.8)。
  *
- * <p><b>当前是"接口已定、渠道未接"的状态</b>:本地与自动化测试用模拟实现,
- * 真实接入时替换 {@link #unifiedOrder} 与 {@link #verifyCallback} 的内部实现即可,
- * 上层的下单流程(落订单 → 锁库存 → 拉起支付 → 回调置为已支付)完全不用改。
+ * <p>两个出网方法都在数据库事务之外(3.3);失败一律返回空,由上层翻译成业务错误 ——
+ * 微信的报错文案不直接外抛。
  *
- * <p>这是刻意的:微信支付需要商户号、证书、APIv3 密钥,这些在开发环境里都没有,
- * 如果让它们成为整条链路的前置条件,那"下单 → 支付 → 发货"这条主流程就永远无法被测试覆盖。
- * 用 {@code minimall.mall.auth.wx-mock} 切换实现,生产环境保持 false。
- *
- * <p><b>真实接入时必须补的三件事</b>(现在的实现里标注为 TODO):
- * <ol>
- *   <li>统一下单改为调用 {@code /v3/pay/transactions/jsapi},用商户私钥签名</li>
- *   <li>回调必须验签并解密 {@code resource}(微信的回调是密文),不能被这里的明文 DTO 误导</li>
- *   <li>退款同理(见售后流程)</li>
- * </ol>
+ * <p>签名用的是**实际发送的那份 JSON 原文**:字段顺序或空格一变签名就对不上,
+ * 所以先拼好字符串再签名,而不是序列化一遍再签。
  */
 @Component
 public class WxPayClient {
 
     private static final Logger log = LoggerFactory.getLogger(WxPayClient.class);
 
-    private final ClientTokenProperties properties;
+    private static final String BASE_URL = "https://api.mch.weixin.qq.com";
+    private static final String JSAPI_PATH = "/v3/pay/transactions/jsapi";
+    private static final String REFUND_PATH = "/v3/refund/domestic/refunds";
+
+    private final WxPayConfigProvider configProvider;
+    private final WxPayHttpClient httpClient;
+    private final WxPayProperties properties;
+    private final TenantLookup tenantLookup;
+    private final ObjectMapper mapper = new ObjectMapper();
     private final SecureRandom random = new SecureRandom();
 
-    public WxPayClient(ClientTokenProperties properties) {
+    public WxPayClient(WxPayConfigProvider configProvider, WxPayHttpClient httpClient,
+                       WxPayProperties properties, TenantLookup tenantLookup) {
+        this.configProvider = configProvider;
+        this.httpClient = httpClient;
         this.properties = properties;
+        this.tenantLookup = tenantLookup;
     }
 
     /**
-     * 统一下单,返回预支付 ID 与小程序拉起支付所需的参数。
+     * 回调的验签与解密。
      *
-     * <p><b>这是外部网络调用,必须在数据库事务之外执行</b>(3.3 的括注):
-     * 放进事务会让数据库连接被网络超时一起拖住,高峰期会迅速耗尽连接池。
+     * <p>顺序固定为**先验签后解密**:反过来的话等于拿 APIv3 密钥去解一份来源未证实的数据。
      */
-    public Optional<PrepayResult> unifiedOrder(String outTradeNo, BigDecimal amount, String openid,
-                                               String description) {
-        if (properties.wxMockEnabled()) {
-            String prepayId = "mock-prepay-" + outTradeNo;
-            log.info("微信支付 mock 模式:统一下单 outTradeNo={} amount={} description={}",
-                    outTradeNo, amount, description);
-            return Optional.of(new PrepayResult(prepayId, mockPayParams(prepayId)));
+    public WxPayNotify verifyAndDecrypt(String tenantCode, String timestamp, String nonce, String serial,
+                                        String signature, String rawBody) {
+        TenantSnapshot tenant = tenantLookup.byCode(tenantCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "租户不存在"));
+        WxPayCredentials credentials = configProvider.byTenantId(tenant.id())
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAY_CHANNEL_NOT_CONFIGURED, "该商户未配置微信支付"));
+
+        if (Math.abs(Instant.now().getEpochSecond() - parseTimestamp(timestamp))
+                > WxPayCrypto.TIMESTAMP_TOLERANCE_SECONDS) {
+            log.warn("回调时间戳超出窗口 tenantCode={} timestamp={}", tenantCode, timestamp);
+            throw new BusinessException(ErrorCode.PAY_SIGNATURE_INVALID, "回调时间戳超窗");
         }
-        // TODO 真实接入:POST /v3/pay/transactions/jsapi,使用商户私钥签名并校验响应签名
-        log.warn("未配置真实微信支付渠道,统一下单失败 outTradeNo={}", outTradeNo);
-        return Optional.empty();
+        if (!hasText(credentials.platformSerialNo()) || !credentials.platformSerialNo().equals(serial)) {
+            throw new BusinessException(ErrorCode.PAY_SIGNATURE_INVALID, "平台证书序列号不匹配");
+        }
+        if (!WxPayCrypto.verify(WxPayCrypto.callbackSignString(timestamp, nonce, rawBody), signature,
+                credentials.platformPublicKey())) {
+            throw new BusinessException(ErrorCode.PAY_SIGNATURE_INVALID, "回调签名校验失败");
+        }
+
+        JsonNode root = readTree(rawBody);
+        JsonNode resource = root == null ? null : root.get("resource");
+        if (resource == null) {
+            throw new BusinessException(ErrorCode.WX_PAY_NOTIFY_INVALID, "回调缺少 resource");
+        }
+        String plain = WxPayCrypto.decryptResource(credentials.apiV3Key(),
+                text(resource, "ciphertext"), text(resource, "nonce"), text(resource, "associated_data"));
+        JsonNode decrypted = readTree(plain);
+        if (decrypted == null) {
+            throw new BusinessException(ErrorCode.WX_PAY_NOTIFY_INVALID, "回调 resource 解密失败");
+        }
+        return new WxPayNotify(tenant.id(), text(root, "event_type"), decrypted);
+    }
+
+    /** JSAPI 统一下单,返回预支付 ID 与小程序拉起支付的参数。 */
+    public Optional<PrepayResult> unifiedOrder(WxPayOrderCommand command) {
+        WxPayCredentials credentials = credentialsOf(command.tenantId());
+        String body = writeJson(jsapiBody(command, credentials));
+        String timestamp = nowSeconds();
+        String nonce = randomHex(16);
+
+        WxPayHttpClient.WxPayHttpResult result = httpClient.post(BASE_URL + JSAPI_PATH,
+                signedHeaders("POST", JSAPI_PATH, body, credentials, timestamp, nonce), body);
+        if (result.status() != 200) {
+            log.warn("微信统一下单失败 outTradeNo={} status={} body={}",
+                    command.outTradeNo(), result.status(), result.body());
+            return Optional.empty();
+        }
+        String prepayId = textOf(result.body(), "prepay_id");
+        if (prepayId == null) {
+            log.warn("微信统一下单未返回 prepay_id outTradeNo={}", command.outTradeNo());
+            return Optional.empty();
+        }
+        return Optional.of(new PrepayResult(prepayId, payParams(prepayId, credentials)));
     }
 
     /**
-     * 校验回调来源。
+     * 提交退款申请,返回微信退款单号。
      *
-     * <p>真实实现要做两件事:验签(确认是微信发的)与解密({@code resource} 是密文)。
-     * 这里在 mock 模式下直接放行,生产环境下**必须**替换 —— 不验签的回调接口等于
-     * 任何人都能"通知"你把订单置为已支付。
+     * <p>微信退款是异步的:这里只负责提交,最终成败由退款回调更新。
      */
-    public boolean verifyCallback(String signature, String body) {
-        if (properties.wxMockEnabled()) {
-            return true;
+    public Optional<String> refund(WxPayRefundCommand command) {
+        WxPayCredentials credentials = credentialsOf(command.tenantId());
+        String body = writeJson(refundBody(command, credentials));
+        String timestamp = nowSeconds();
+        String nonce = randomHex(16);
+
+        WxPayHttpClient.WxPayHttpResult result = httpClient.post(BASE_URL + REFUND_PATH,
+                signedHeaders("POST", REFUND_PATH, body, credentials, timestamp, nonce), body);
+        if (result.status() != 200) {
+            log.warn("微信退款申请失败 outRefundNo={} status={} body={}",
+                    command.outRefundNo(), result.status(), result.body());
+            return Optional.empty();
         }
-        // TODO 真实接入:校验 Wechatpay-Signature 头 + 平台证书,并解密 resource
-        return false;
+        String refundId = textOf(result.body(), "refund_id");
+        if (refundId == null) {
+            log.warn("微信退款未返回 refund_id outRefundNo={}", command.outRefundNo());
+            return Optional.empty();
+        }
+        return Optional.of(refundId);
     }
 
-    /**
-     * 发起退款。
-     *
-     * <p>与统一下单同理:真实微信退款是**异步**的,这里只负责提交申请并拿到退款单号,
-     * 最终结果由退款回调更新(见 {@code MallWxRefund} 的状态机)。
-     *
-     * @return 微信退款单号;申请提交失败时为空
-     */
-    public Optional<String> refund(String outTradeNo, String outRefundNo, BigDecimal amount) {
-        if (properties.wxMockEnabled()) {
-            log.info("微信退款 mock 模式:outTradeNo={} outRefundNo={} amount={}", outTradeNo, outRefundNo, amount);
-            return Optional.of("mock-refund-" + outRefundNo);
+    /** direct 用 appid/mchid,partner 用 sp_appid/sp_mchid/sub_appid/sub_mchid。 */
+    private Map<String, Object> jsapiBody(WxPayOrderCommand command, WxPayCredentials credentials) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (credentials.partner()) {
+            body.put("sp_appid", credentials.appId());
+            body.put("sp_mchid", credentials.mchId());
+            if (hasText(credentials.subAppId())) {
+                body.put("sub_appid", credentials.subAppId());
+            }
+            if (hasText(credentials.subMchId())) {
+                body.put("sub_mchid", credentials.subMchId());
+            }
+        } else {
+            body.put("appid", credentials.appId());
+            body.put("mchid", credentials.mchId());
         }
-        // TODO 真实接入:POST /v3/refund/domestic/refunds,使用商户私钥签名
-        log.warn("未配置真实微信退款渠道,退款申请失败 outRefundNo={}", outRefundNo);
-        return Optional.empty();
+        body.put("description", command.description());
+        body.put("out_trade_no", command.outTradeNo());
+        body.put("notify_url", properties.notifyUrl(command.tenantCode(), false));
+        body.put("amount", Map.of("total", WxPayAmounts.toCents(command.amount()), "currency", "CNY"));
+
+        // openid 属于哪个 appid 决定了用哪个字段:sub_appid 配了就取该小程序下的 openid
+        String payerKey = !credentials.partner() ? "openid"
+                : hasText(credentials.subAppId()) ? "sub_openid" : "sp_openid";
+        body.put("payer", Map.of(payerKey, command.openid()));
+        return body;
     }
 
-    /** 模拟拉起支付所需的参数(结构与 {@code wx.requestPayment} 一致)。 */
-    private PrepayResult.PayParams mockPayParams(String prepayId) {
-        return new PrepayResult.PayParams(
-                String.valueOf(System.currentTimeMillis() / 1000),
-                randomHex(16),
-                "prepay_id=" + prepayId,
-                "RSA",
-                "mock-signature");
+    /** 优先用 transaction_id;partner 模式要带 sub_mchid。 */
+    private Map<String, Object> refundBody(WxPayRefundCommand command, WxPayCredentials credentials) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (hasText(command.transactionId())) {
+            body.put("transaction_id", command.transactionId());
+        } else {
+            body.put("out_trade_no", command.outTradeNo());
+        }
+        body.put("out_refund_no", command.outRefundNo());
+        body.put("reason", command.reason() == null ? "退款" : command.reason());
+        body.put("notify_url", properties.notifyUrl(command.tenantCode(), true));
+        body.put("amount", Map.of(
+                "refund", WxPayAmounts.toCents(command.refundAmount()),
+                "total", WxPayAmounts.toCents(command.totalAmount()),
+                "currency", "CNY"));
+        if (credentials.partner() && hasText(credentials.subMchId())) {
+            body.put("sub_mchid", credentials.subMchId());
+        }
+        return body;
+    }
+
+    private Map<String, String> signedHeaders(String method, String path, String body,
+                                              WxPayCredentials credentials, String timestamp, String nonce) {
+        String signature = WxPayCrypto.sign(
+                WxPayCrypto.requestSignString(method, path, timestamp, nonce, body),
+                credentials.merchantPrivateKey());
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Authorization", WxPayCrypto.authorizationHeader(
+                credentials.mchId(), nonce, signature, timestamp, credentials.merchantSerialNo()));
+        headers.put("Content-Type", "application/json");
+        headers.put("Accept", "application/json");
+        headers.put("User-Agent", "mini-mall");
+        return headers;
+    }
+
+    /** 小程序 wx.requestPayment 的参数;paySign 的 appId 必须与 openid 同主体。 */
+    private PrepayResult.PayParams payParams(String prepayId, WxPayCredentials credentials) {
+        String timeStamp = nowSeconds();
+        String nonceStr = randomHex(16);
+        String packageValue = "prepay_id=" + prepayId;
+        String source = credentials.payerAppId() + "\n" + timeStamp + "\n" + nonceStr + "\n" + packageValue + "\n";
+        return new PrepayResult.PayParams(timeStamp, nonceStr, packageValue, "RSA",
+                WxPayCrypto.sign(source, credentials.merchantPrivateKey()));
+    }
+
+    private WxPayCredentials credentialsOf(Long tenantId) {
+        if (!properties.notifyBaseUrlConfigured()) {
+            throw new BusinessException(ErrorCode.PAY_CHANNEL_NOT_CONFIGURED, "未配置回调地址前缀");
+        }
+        return configProvider.byTenantId(tenantId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAY_CHANNEL_NOT_CONFIGURED, "该商户未配置微信支付"));
+    }
+
+    private String writeJson(Map<String, Object> body) {
+        try {
+            return mapper.writer().writeValueAsString(body);
+        } catch (Exception ex) {
+            throw new IllegalStateException("微信支付报文序列化失败", ex);
+        }
+    }
+
+    private long parseTimestamp(String timestamp) {
+        try {
+            return Long.parseLong(timestamp);
+        } catch (Exception ex) {
+            return 0L;
+        }
+    }
+
+    private String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value == null || value.isNull() ? "" : value.asText();
+    }
+
+    private JsonNode readTree(String json) {
+        try {
+            return mapper.readTree(json);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String textOf(String json, String field) {
+        try {
+            JsonNode node = mapper.readTree(json).get(field);
+            return node == null || node.isNull() ? null : node.asText();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String nowSeconds() {
+        return String.valueOf(Instant.now().getEpochSecond());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String randomHex(int bytes) {
         byte[] buffer = new byte[bytes];
         random.nextBytes(buffer);
-        return HexFormat.of().formatHex(buffer);
+        return java.util.HexFormat.of().formatHex(buffer);
     }
 
     /** 统一下单结果。 */

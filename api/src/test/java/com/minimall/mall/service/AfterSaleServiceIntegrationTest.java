@@ -29,6 +29,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
+import com.minimall.support.StubWxPayHttpClient;
 
 /**
  * 售后流程(商城设计文档 3.9)。
@@ -42,6 +44,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 这条区分是整段实现的核心,也是本类里断言最密的地方。
  */
 class AfterSaleServiceIntegrationTest extends MallClientServiceTestBase {
+
+    /** 出网请求被桩接管:用来确认退款申请真的发出去了,而不只是落了一行库。 */
+    @Autowired
+    private StubWxPayHttpClient wxPayHttp;
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private AfterSaleService afterSaleService;
@@ -94,8 +103,7 @@ class AfterSaleServiceIntegrationTest extends MallClientServiceTestBase {
     private Long paidItemId(int quantity) {
         OrderCreateResponse order = createOrder(customerId, addressId, quantity);
         inTenant(() -> {
-            payService.handlePayCallback(order.orderNo(), "wx-txn-" + System.nanoTime(),
-                    order.payAmount(), true, "{\"mock\":true}");
+            payCallback.paySuccess(order.orderNo(), order.payAmount());
             return null;
         });
         return inTenant(() -> orderItemRepository.findByOrderIdOrderByIdAsc(order.orderId()).get(0).getId());
@@ -290,8 +298,7 @@ class AfterSaleServiceIntegrationTest extends MallClientServiceTestBase {
         OrderCreateResponse othersOrder = createOrder(otherCustomerId, othersAddress, 1);
         // 仅退款要求订单处于待发货,所以另一个客户的订单也得先支付
         inTenant(() -> {
-            payService.handlePayCallback(othersOrder.orderNo(), "wx-txn-o-" + System.nanoTime(),
-                    othersOrder.payAmount(), true, "{\"mock\":true}");
+            payCallback.paySuccess(othersOrder.orderNo(), othersOrder.payAmount());
             return null;
         });
         Long othersItemId = inTenant(() ->
@@ -352,9 +359,16 @@ class AfterSaleServiceIntegrationTest extends MallClientServiceTestBase {
         assertThat(afterSale.getStatus()).isEqualTo(MallAfterSale.STATUS_DONE);
         assertThat(afterSale.getFinishTime()).isNotNull();
         assertThat(refundsOf(afterSaleId)).as("退款记录要落库").hasSize(1);
+        // 退款是异步的:提交后保持"申请中",真正成败由退款回调落定
         assertThat(refundsOf(afterSaleId).get(0).getRefundStatus())
-                .isEqualTo(MallWxRefund.REFUND_STATUS_SUCCESS);
+                .isEqualTo(MallWxRefund.REFUND_STATUS_APPLYING);
         assertThat(refundsOf(afterSaleId).get(0).getRefundAmount()).isEqualByComparingTo("1.00");
+        // 只有落库没有出网等于"记了一笔假退款",申请必须真的发给渠道
+        String outRefundNo = refundsOf(afterSaleId).get(0).getOutRefundNo();
+        assertThat(wxPayHttp.requests())
+                .as("退款申请应已提交到微信: %s", outRefundNo)
+                .anyMatch(request -> request.url().contains("/v3/refund/domestic/refunds")
+                        && request.body().contains(outRefundNo));
         assertThat(skuStock()).as("退货必须回补库存,否则越卖越少").isEqualTo(stockBefore + 2);
 
         inTenant(() -> {

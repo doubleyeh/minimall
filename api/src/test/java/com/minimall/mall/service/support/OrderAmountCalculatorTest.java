@@ -306,6 +306,53 @@ class OrderAmountCalculatorTest {
         return calculator.freight(group, List.of(rule), "广东省");
     }
 
+    // ---------------------------------------------------------------- 分/元换算
+
+    @Test
+    @DisplayName("元转分:保留两位后进位,单位是分")
+    void toCentsScalesAndRounds() {
+        assertThat(calculator.toCents(new BigDecimal("0.01"))).isEqualTo(1);
+        assertThat(calculator.toCents(new BigDecimal("1"))).isEqualTo(100);
+        assertThat(calculator.toCents(new BigDecimal("120.00"))).isEqualTo(12000);
+        // 微信只收整数分:多出的位数按四舍五入而不是截断,否则 0.005 会被算成 0 分
+        assertThat(calculator.toCents(new BigDecimal("0.005"))).isEqualTo(1);
+        assertThat(calculator.toCents(new BigDecimal("0.004"))).isZero();
+    }
+
+    @Test
+    @DisplayName("元转分:0、负数、空一律拒绝(微信不接受非正金额)")
+    void toCentsRejectsNonPositive() {
+        assertThatThrownBy(() -> calculator.toCents(BigDecimal.ZERO)).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> calculator.toCents(new BigDecimal("-0.01"))).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> calculator.toCents(null)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("元转分:超出 int 范围要报业务错而不是静默截断")
+    void toCentsRejectsOverflow() {
+        // int 上限约 21.47 亿元;截断会变成一个完全无关的小金额,比报错危险得多
+        assertThatThrownBy(() -> calculator.toCents(new BigDecimal("99999999999.99")))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("分转元:固定两位小数,与库里的金额口径一致")
+    void toYuanKeepsTwoDecimals() {
+        assertThat(calculator.toYuan(1)).isEqualByComparingTo("0.01");
+        assertThat(calculator.toYuan(12000)).isEqualByComparingTo("120.00");
+        assertThat(calculator.toYuan(0)).isEqualByComparingTo("0.00");
+        assertThat(calculator.toYuan(0).scale()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("分元往返不丢精度")
+    void centsRoundTripIsLossless() {
+        for (String yuan : List.of("0.01", "0.99", "60.00", "120.50", "99999.99")) {
+            assertThat(calculator.toYuan(calculator.toCents(new BigDecimal(yuan))))
+                    .isEqualByComparingTo(yuan);
+        }
+    }
+
     private MallCoupon coupon(int type, BigDecimal amount, BigDecimal rate, BigDecimal minAmount) {
         MallCoupon coupon = new MallCoupon();
         coupon.setCouponType(type);

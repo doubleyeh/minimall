@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
 
 /**
  * 商城下单与支付链路集成测试(商城设计文档 3.3、3.4、3.8)。
@@ -54,6 +55,9 @@ class MallOrderFlowIntegrationTest {
 
     /** 种子数据里的平台租户。 */
     private static final long TENANT_ID = 1L;
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private OrderService orderService;
@@ -200,8 +204,7 @@ class MallOrderFlowIntegrationTest {
         OrderCreateResponse response = orderService.create(
                 new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 3)), addressId, null, null));
 
-        payService.handlePayCallback(response.orderNo(), "wx-txn-" + System.nanoTime(),
-                response.payAmount(), true, "{\"mock\":true}");
+        payCallback.paySuccess(response.orderNo(), response.payAmount());
 
         inTenant(() -> {
             MallSku sku = skuRepository.findById(skuId).orElseThrow();
@@ -225,8 +228,8 @@ class MallOrderFlowIntegrationTest {
                 new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null));
         String transactionId = "wx-txn-dup-" + System.nanoTime();
 
-        payService.handlePayCallback(response.orderNo(), transactionId, response.payAmount(), true, "{}");
-        payService.handlePayCallback(response.orderNo(), transactionId, response.payAmount(), true, "{}");
+        payCallback.paySuccess(response.orderNo(), response.payAmount());
+        payCallback.paySuccess(response.orderNo(), response.payAmount());
 
         inTenant(() -> {
             MallSku sku = skuRepository.findById(skuId).orElseThrow();
@@ -242,8 +245,7 @@ class MallOrderFlowIntegrationTest {
         OrderCreateResponse response = orderService.create(
                 new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null));
 
-        assertThatThrownBy(() -> payService.handlePayCallback(response.orderNo(),
-                "wx-txn-bad-" + System.nanoTime(), new BigDecimal("0.01"), true, "{}"))
+        assertThatThrownBy(() -> payCallback.paySuccess(response.orderNo(), new BigDecimal("0.01")))
                 .hasMessageContaining("金额不一致");
 
         inTenant(() -> {

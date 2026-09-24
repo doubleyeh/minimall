@@ -91,11 +91,25 @@ minimall:
       jwt-secret: ${MALL_JWT_SECRET:mini-mall-client-token-secret-change-it-please}
       # 小程序场景要求"免登录 30 天",过期后前端静默重登,不做服务端登出
       ttl-days: 30
-      wx-app-id: ${WX_APP_ID:}
-      wx-app-secret: ${WX_APP_SECRET:}
+      # 小程序的 appId/appSecret 改为按租户配置(sys_wx_pay_config),不再放这里
       # 模拟 code2Session(仅本地/自动化测试)。**生产必须保持 false**,
       # 打开它等于任何人编一个 code 就能登录成任意客户
       wx-mock: ${WX_MOCK:false}
+    # 微信支付。每租户的商户号/密钥/证书在 sys_wx_pay_config 里,这里只放全局项
+    pay:
+      # 回调地址前缀,必须是公网 HTTPS;租户级只拼 /pay/callback/wx/{tenantCode}。
+      # 直接改这里;Docker 下可用 MINIMALL_MALL_PAY_NOTIFY_BASE_URL 覆盖
+      notify-base-url:
+      connect-timeout-seconds: 3
+      read-timeout-seconds: 10
+      # 租户支付配置的缓存 TTL;未配置时用更短的负缓存挡穿透
+      config-cache-seconds: 600
+      config-cache-miss-seconds: 60
+  # 敏感配置的信封加密主密钥(Base64 的 32 字节)。留空则明文存储,仅限本地开发;
+  # 上线前必须填,且它与已有密文绑定 —— 换了之后旧密文解不开。Docker 下可用
+  # MINIMALL_SECRET_MASTER_KEY 覆盖
+  secret:
+    master-key:
 
 server:
   port: 8080

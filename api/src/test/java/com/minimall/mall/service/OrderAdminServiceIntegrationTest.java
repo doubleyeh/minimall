@@ -19,6 +19,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
+import com.minimall.support.StubWxPayHttpClient;
 
 /**
  * 商家管理端订单(商城设计文档 3.4)。
@@ -28,6 +30,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 靠人工对账要很久才能发现。
  */
 class OrderAdminServiceIntegrationTest extends MallClientServiceTestBase {
+
+    /** 出网请求被桩接管:用来确认退款申请真的发出去了,而不只是落了一行库。 */
+    @Autowired
+    private StubWxPayHttpClient wxPayHttp;
+
+    @Autowired
+    private WxPayCallbackFixture payCallback;
 
     @Autowired
     private OrderAdminService orderAdminService;
@@ -42,8 +51,7 @@ class OrderAdminServiceIntegrationTest extends MallClientServiceTestBase {
     private OrderCreateResponse paidOrder(int quantity) {
         OrderCreateResponse order = createOrder(customerId, addressId, quantity);
         inTenant(() -> {
-            payService.handlePayCallback(order.orderNo(), "wx-txn-" + System.nanoTime(),
-                    order.payAmount(), true, "{\"mock\":true}");
+            payCallback.paySuccess(order.orderNo(), order.payAmount());
             return null;
         });
         assertThat(inTenant(() -> orderRepository.findById(order.orderId()).orElseThrow().getStatus()))
@@ -144,8 +152,14 @@ class OrderAdminServiceIntegrationTest extends MallClientServiceTestBase {
         assertThat(refunds.get(0).getRefundAmount()).isEqualByComparingTo(order.payAmount());
         assertThat(refunds.get(0).getOutRefundNo()).isNotBlank();
         assertThat(refunds.get(0).getRefundStatus())
-                .as("mock 渠道会同步返回退款单号,状态应直接置为成功")
-                .isEqualTo(MallWxRefund.REFUND_STATUS_SUCCESS);
+                .as("退款是异步的:提交后保持申请中,成败由退款回调落定")
+                .isEqualTo(MallWxRefund.REFUND_STATUS_APPLYING);
+        // 只有落库没有出网等于"记了一笔假退款",申请必须真的发给渠道
+        String outRefundNo = refunds.get(0).getOutRefundNo();
+        assertThat(wxPayHttp.requests())
+                .as("退款申请应已提交到微信: %s", outRefundNo)
+                .anyMatch(request -> request.url().contains("/v3/refund/domestic/refunds")
+                        && request.body().contains(outRefundNo));
 
         assertThat(logsOf(order.orderId())).isNotEmpty();
     }

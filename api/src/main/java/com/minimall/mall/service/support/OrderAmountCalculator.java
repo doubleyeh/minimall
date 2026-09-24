@@ -5,6 +5,7 @@ import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallCoupon;
 import com.minimall.mall.domain.MallFreightTemplate;
 import com.minimall.mall.domain.MallFreightTemplateRule;
+import com.minimall.mall.infra.pay.WxPayAmounts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -223,5 +224,20 @@ public class OrderAmountCalculator {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "优惠金额超过订单金额,请调整优惠券");
         }
         return money(payable);
+    }
+
+    /**
+     * 元转分(微信 V3 的金额单位是整数分)。
+     *
+     * <p>换算规则只有一份,在支付层({@link WxPayAmounts});这里只做转发,
+     * 避免两处各写一套舍入规则后慢慢漂移。
+     */
+    public int toCents(BigDecimal yuan) {
+        return WxPayAmounts.toCents(yuan);
+    }
+
+    /** 分转元,用于与库里的金额比对。 */
+    public BigDecimal toYuan(int cents) {
+        return WxPayAmounts.toYuan(cents);
     }
 }

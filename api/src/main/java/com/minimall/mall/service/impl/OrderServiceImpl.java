@@ -343,14 +343,14 @@ public class OrderServiceImpl implements OrderService {
                                        int operatorType, Long operatorId, String remark) {
         int from = order.getStatus();
 
-        // 顺序很关键:**先改实体的状态,再做批量更新**。
-        // 下面那些库存/优惠券更新用的是 @Modifying(clearAutomatically = true),
-        // 它们会 flush 之后**清空持久化上下文** —— 清空之后 order 就成了游离对象,
-        // 此时再 setStatus 只是改一个普通 Java 对象,事务提交时不会被持久化(表现为"取消了但状态没变")。
-        // 反过来先改实体,则会在下一次 flush 时一并写库,顺序天然正确。
+        // 状态必须用显式 UPDATE 落库。下面的库存/优惠券更新是 @Modifying(clearAutomatically = true),
+        // 会清空持久化上下文:超时关闭是批处理,同批第 2 个及之后的 order 随即成为游离对象,
+        // 只改实体的话提交时不会落库 —— 表现为"库存退了、日志写了系统关闭,订单还是待支付"
+        LocalDateTime now = LocalDateTime.now();
         order.setStatus(toStatus);
         order.setCloseReason(closeReason);
-        order.setCancelTime(LocalDateTime.now());
+        order.setCancelTime(now);
+        orderRepository.updateStatusOnClose(order.getId(), tenantId, toStatus, closeReason, now);
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
             int affected = skuRepository.releaseLockedStock(item.getSkuId(), tenantId, item.getQuantity());

@@ -17,6 +17,7 @@ import com.minimall.mall.domain.repository.MallSkuRepository;
 import com.minimall.mall.service.AfterSaleService;
 import com.minimall.mall.service.CouponService;
 import com.minimall.mall.service.OrderAdminService;
+import com.minimall.mall.service.support.WxPayCallbackFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +35,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -54,7 +57,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ul>
  *
  * <p>用例依赖 dev profile 的 {@code wx-mock=true}:任意 code 都会被映射成模拟 openid,
- * 所以不需要真实微信环境就能跑完整条"登录 → 下单 → 支付 → 售后"。
+ * 所以不需要真实微信环境就能跑完整条"登录 → 下单 → 支付 → 售后"。出网的支付请求由
+ * {@code StubWxPayHttpClient} 接管,支付回调则是夹具造的真签名 + 真密文。
  */
 @Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -83,6 +87,9 @@ class MallHttpFlowIntegrationTest {
     private AfterSaleService afterSaleService;
     @Autowired
     private CouponService couponService;
+    /** 造真签名 + 真密文的支付回调;回调入参是密文,明文 DTO 那条路已经不通了。 */
+    @Autowired
+    private WxPayCallbackFixture wxPay;
 
     private String token;
     private Long goodsId;
@@ -239,14 +246,12 @@ class MallHttpFlowIntegrationTest {
         // 60 × 2,无运费无优惠
         assertThat(order.text("payAmount")).isEqualTo("120.00");
 
-        // 4) 拉起支付(dev 下走模拟渠道,会返回 prepay_id 对应的参数)
+        // 4) 拉起支付(出网请求被桩接管,会返回 prepay_id 对应的参数)
         Response prepay = post("/mall/api/orders/" + orderId + "/prepay", null, token);
         assertThat(prepay.status()).isEqualTo(200);
 
-        // 5) 支付回调(真实环境由微信服务器发起,这里手动触发以走通后续流程)
-        Response callback = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-" + System.nanoTime()
-                        + "\",\"amount\":120.00,\"success\":true,\"rawBody\":\"{}\"}", null);
+        // 5) 支付回调(真实环境由微信服务器发起,这里手动投递一份真签名+真密文)
+        Response callback = wxPaySuccess(orderNo, new BigDecimal("120.00"));
         assertThat(callback.status()).isEqualTo(200);
 
         // 6) 订单进入待发货,库存从"锁定"变成"实扣"
@@ -274,8 +279,7 @@ class MallHttpFlowIntegrationTest {
                 "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":1}],\"addressId\":" + addressId + "}", token);
         long orderId = Long.parseLong(order.text("orderId"));
         String orderNo = order.text("orderNo");
-        post("/pay/callback/wx", "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-as-"
-                + System.nanoTime() + "\",\"amount\":60.00,\"success\":true,\"rawBody\":\"{}\"}", null);
+        wxPaySuccess(orderNo, new BigDecimal("60.00"));
 
         // 待发货(=已支付)时才能申请仅退款(3.9 的入口限制)
         String orderDetail = get("/mall/api/orders/" + orderId, token).body();
@@ -507,10 +511,8 @@ class MallHttpFlowIntegrationTest {
                         + ",\"quantity\":1}],\"addressId\":" + addressId + "}", token);
         assertThat(order.status()).as("双明细下单失败:%s", order.body()).isEqualTo(200);
         long orderId = Long.parseLong(order.text("orderId"));
-        assertThat(post("/pay/callback/wx", "{\"outTradeNo\":\"" + order.text("orderNo")
-                + "\",\"transactionId\":\"e2e-partial-" + System.nanoTime()
-                + "\",\"amount\":120.00,\"success\":true,\"rawBody\":\"{}\"}", null).code())
-                .as("支付回调").isZero();
+        assertThat(wxPaySuccess(order.text("orderNo"), new BigDecimal("120.00")).status())
+                .as("支付回调").isEqualTo(200);
         inTenant(() -> {
             orderAdminService.ship(orderId, "顺丰速运", "SF" + System.nanoTime());
             return null;
@@ -952,11 +954,9 @@ class MallHttpFlowIntegrationTest {
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("取消后不再是待付款").isNotEqualTo("1");
 
-        Response lateCallback = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-late\","
-                        + "\"amount\":60.00,\"success\":true,\"rawBody\":\"{}\"}", null);
-        assertThat(lateCallback.code())
-                .as("迟到的回调不能报错(报错会让微信一直重推),响应=%s", lateCallback.body()).isZero();
+        Response lateCallback = wxPaySuccess(orderNo, new BigDecimal("60.00"));
+        assertThat(lateCallback.status())
+                .as("迟到的回调不能报错(报错会让微信一直重推),响应=%s", lateCallback.body()).isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("已关闭的订单不能被回调复活").isNotEqualTo("2");
     }
@@ -981,44 +981,35 @@ class MallHttpFlowIntegrationTest {
         assertThat(post("/mall/api/orders/" + orderId + "/prepay", null, token).code())
                 .as("拉起支付").isZero();
 
-        // ① 金额不一致:改小金额也要整笔拒绝,否则买家付 1 分钱就能拿货
-        Response mismatched = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-x\","
-                        + "\"amount\":0.01,\"success\":true,\"rawBody\":\"{}\"}", null);
-        assertThat(mismatched.code())
+        // ① 金额不一致:改小金额也要整笔拒绝,否则买家付 1 分钱就能拿货。
+        // 拒绝必须体现在 HTTP 状态码上:微信只认非 2xx 为失败,返回 200 等于告诉它"已处理"
+        Response mismatched = wxPaySuccess(orderNo, new BigDecimal("0.01"));
+        assertThat(mismatched.status())
                 .as("金额不一致必须整笔拒绝,响应=%s", mismatched.body())
-                .isEqualTo(ErrorCode.DATA_CONFLICT.code());
+                .isEqualTo(400);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("拒绝后订单不能变成已支付").isNotEqualTo("2");
 
-        // ② 支付失败:只标记流水,订单仍然待付款(由超时任务或用户取消驱动)
-        Response failed = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-x\","
-                        + "\"amount\":60.00,\"success\":false,\"rawBody\":\"{}\"}", null);
-        assertThat(failed.code())
-                .as("失败回调本身要返回成功(否则微信会一直重推),响应=%s", failed.body()).isZero();
+        // ② 非支付成功事件:只记流水,订单仍然待付款(由超时任务或用户取消驱动)
+        Response failed = wxPayEvent("TRANSACTION.CLOSED", orderNo, null);
+        assertThat(failed.status())
+                .as("非成功事件本身要返回成功(否则微信会一直重推),响应=%s", failed.body()).isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
-                .as("失败回调不该动订单状态").isEqualTo("1");
+                .as("非成功事件不该动订单状态").isEqualTo("1");
 
         // ③ 正常支付 → 待发货;④ 再来一次同样的回调要幂等
-        assertThat(post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-ok\","
-                        + "\"amount\":60.00,\"success\":true,\"rawBody\":\"{}\"}", null).code())
-                .as("支付回调").isZero();
+        assertThat(wxPaySuccess(orderNo, new BigDecimal("60.00")).status())
+                .as("支付回调").isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status")).isEqualTo("2");
 
-        Response replay = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-ok\","
-                        + "\"amount\":60.00,\"success\":true,\"rawBody\":\"{}\"}", null);
-        assertThat(replay.code()).as("重复回调要幂等,响应=%s", replay.body()).isZero();
+        Response replay = wxPaySuccess(orderNo, new BigDecimal("60.00"));
+        assertThat(replay.status()).as("重复回调要幂等,响应=%s", replay.body()).isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("重复回调不该再扣一次库存或改状态").isEqualTo("2");
 
         // ⑤ 找不到支付流水的回调要忽略而不是报错:微信重推旧单,重推一百次也不会自己好
-        Response unknown = post("/pay/callback/wx",
-                "{\"outTradeNo\":\"绝不存在的商户单号\",\"transactionId\":\"e2e-x\","
-                        + "\"amount\":60.00,\"success\":true,\"rawBody\":\"{}\"}", null);
-        assertThat(unknown.code()).as("未知单号的回调要忽略,响应=%s", unknown.body()).isZero();
+        Response unknown = wxPaySuccess("绝不存在的商户单号", new BigDecimal("60.00"));
+        assertThat(unknown.status()).as("未知单号的回调要忽略,响应=%s", unknown.body()).isEqualTo(200);
     }
 
     /**
@@ -1351,8 +1342,7 @@ class MallHttpFlowIntegrationTest {
         assertThat(order.status()).as("下单失败:%s", order.body()).isEqualTo(200);
         long orderId = Long.parseLong(order.text("orderId"));
         String orderNo = order.text("orderNo");
-        Response callback = post("/pay/callback/wx", "{\"outTradeNo\":\"" + orderNo + "\",\"transactionId\":\"e2e-"
-                + System.nanoTime() + "\",\"amount\":" + (60 * quantity) + ".00,\"success\":true,\"rawBody\":\"{}\"}", null);
+        Response callback = wxPaySuccess(orderNo, new BigDecimal(60 * quantity + ".00"));
         assertThat(callback.status()).as("支付回调失败:%s", callback.body()).isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("支付回调后应当进入待发货").isEqualTo("2");
@@ -1403,6 +1393,50 @@ class MallHttpFlowIntegrationTest {
     }
 
     // ---------------------------------------------------------------- HTTP 辅助
+
+    /**
+     * 投递一次**支付成功**回调,返回响应。
+     *
+     * <p>走的是与线上完全相同的路径:真签名 + AES-GCM 密文 + 四个 {@code Wechatpay-*} 头。
+     * 明文 DTO 那条路在接入真实渠道后已经被移除。
+     */
+    private Response wxPaySuccess(String outTradeNo, BigDecimal amount) {
+        return postCallback(payPayload("TRANSACTION.SUCCESS", outTradeNo, amount));
+    }
+
+    /** 投递一次非支付成功事件(如 TRANSACTION.CLOSED);{@code amount} 为空表示不带金额。 */
+    private Response wxPayEvent(String eventType, String outTradeNo, BigDecimal amount) {
+        return postCallback(payPayload(eventType, outTradeNo, amount));
+    }
+
+    private WxPayCallbackFixture.Payload payPayload(String eventType, String outTradeNo, BigDecimal amount) {
+        // 回调要验签,租户必须有与夹具密钥对应的配置
+        wxPay.ensureConfig(TENANT_CODE);
+        Map<String, Object> resource = new LinkedHashMap<>();
+        resource.put("out_trade_no", outTradeNo);
+        resource.put("transaction_id", "e2e-" + System.nanoTime());
+        if (amount != null) {
+            resource.put("amount", Map.of("total", WxPayCallbackFixture.toCents(amount), "currency", "CNY"));
+        }
+        return wxPay.payload(eventType, resource, "transaction");
+    }
+
+    private Response postCallback(WxPayCallbackFixture.Payload payload) {
+        HttpRequest request = HttpRequest.newBuilder().uri(uri("/pay/callback/wx/" + TENANT_CODE))
+                .header("Content-Type", "application/json")
+                .header("Wechatpay-Timestamp", payload.timestamp())
+                .header("Wechatpay-Nonce", payload.nonce())
+                .header("Wechatpay-Signature", payload.signature())
+                .header("Wechatpay-Serial", payload.serial())
+                .POST(HttpRequest.BodyPublishers.ofString(payload.body(), StandardCharsets.UTF_8))
+                .build();
+        try {
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            return new Response(response.statusCode(), response.body());
+        } catch (Exception ex) {
+            throw new IllegalStateException("投递支付回调失败", ex);
+        }
+    }
 
     private void login() {
         Response login = post("/mall/api/auth/wx-login",

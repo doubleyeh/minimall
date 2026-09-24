@@ -19,7 +19,7 @@ import com.minimall.mall.domain.repository.MallSkuRepository;
 import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.infra.OrderNumberGenerator;
-import com.minimall.mall.infra.pay.WxPayClient;
+import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.mall.service.OrderAdminService;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
@@ -55,7 +55,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
     private final MallStockLogRepository stockLogRepository;
     private final MallWxRefundRepository refundRepository;
     private final OrderNumberGenerator numberGenerator;
-    private final WxPayClient wxPayClient;
+    private final WxPayRefundSubmitter refundSubmitter;
 
     public OrderAdminServiceImpl(MallOrderRepository orderRepository,
                                  MallOrderItemRepository orderItemRepository,
@@ -64,7 +64,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
                                  MallStockLogRepository stockLogRepository,
                                  MallWxRefundRepository refundRepository,
                                  OrderNumberGenerator numberGenerator,
-                                 WxPayClient wxPayClient) {
+                                 WxPayRefundSubmitter refundSubmitter) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
@@ -72,7 +72,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
         this.stockLogRepository = stockLogRepository;
         this.refundRepository = refundRepository;
         this.numberGenerator = numberGenerator;
-        this.wxPayClient = wxPayClient;
+        this.refundSubmitter = refundSubmitter;
     }
 
     @Override
@@ -130,10 +130,12 @@ public class OrderAdminServiceImpl implements OrderAdminService {
         int from = order.getStatus();
         Long tenantId = order.getTenantId();
 
-        // 先改实体,再做批量更新(理由见 OrderServiceImpl#releaseOrderResources 的注释)
+        // 状态用显式 UPDATE 落库,不依赖实体脏检查(下面的库存更新会 clearAutomatically 清空上下文)
+        LocalDateTime now = LocalDateTime.now();
         order.setStatus(MallOrder.STATUS_CANCELLED);
         order.setCloseReason(3);
-        order.setCancelTime(LocalDateTime.now());
+        order.setCancelTime(now);
+        orderRepository.updateStatusOnClose(orderId, tenantId, MallOrder.STATUS_CANCELLED, 3, now);
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(orderId)) {
             // 已支付订单的库存是"实扣"过的,取消要把货放回去(与未支付取消只解锁定的语义不同)
@@ -170,14 +172,9 @@ public class OrderAdminServiceImpl implements OrderAdminService {
         refund.setRefundStatus(MallWxRefund.REFUND_STATUS_APPLYING);
         MallWxRefund saved = refundRepository.save(refund);
 
-        // 用独立的 saved 变量而不是复用 refund:lambda 只能捕获 effectively final 的局部变量,
-        // 复用同一个变量会让它在 lambda 里不可见(编译期直接报错)
-        wxPayClient.refund(order.getOrderNo(), saved.getOutRefundNo(), amount)
-                .ifPresent(refundId -> {
-                    saved.setWxRefundId(refundId);
-                    saved.setRefundStatus(MallWxRefund.REFUND_STATUS_SUCCESS);
-                    saved.setCallbackTime(LocalDateTime.now());
-                });
+        // 与售后退款同一套:事务提交后才提交申请,成败由退款回调落定
+        refundSubmitter.submitAfterCommit(order.getTenantId(), order.getId(), saved.getId(),
+                amount, "商家取消订单退款");
         log.info("已发起退款 orderNo={} outRefundNo={} amount={}",
                 order.getOrderNo(), saved.getOutRefundNo(), amount);
         return saved;

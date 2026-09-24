@@ -57,7 +57,7 @@ public class ClientAuthServiceImpl implements ClientAuthService {
     @Override
     public ClientLoginResponse wxLogin(String tenantCode, WxLoginRequest request) {
         TenantSnapshot tenant = resolveTenant(tenantCode);
-        WxAuthClient.WxSession session = wxAuthClient.code2Session(request.code())
+        WxAuthClient.WxSession session = wxAuthClient.code2Session(tenant.id(), request.code())
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED, "微信登录失败,请重试"));
 
         return TenantContext.callAsTenant(tenant.id(), false, () -> {
