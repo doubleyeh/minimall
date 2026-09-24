@@ -21,3 +21,10 @@ export interface PageResult<T> {
   total: number
   list: T[]
 }
+
+/** 上传结果(后端 FileUploadView)。url 可直接存进业务表或放进 img 的 src。 */
+export interface FileUploadView {
+  key: string
+  url: string
+  size: number
+}

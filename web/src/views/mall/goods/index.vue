@@ -160,7 +160,12 @@
             />
           </n-form-item-gi>
           <n-form-item-gi label="主图地址" path="mainImage">
-            <n-input v-model:value="form.mainImage" placeholder="列表页展示的主图 URL" />
+            <n-input-group>
+              <n-input v-model:value="form.mainImage" placeholder="主图 URL,或点右侧上传" />
+              <n-upload :show-file-list="false" :custom-request="onUploadMainImage" accept="image/*">
+                <n-button>上传</n-button>
+              </n-upload>
+            </n-input-group>
           </n-form-item-gi>
           <n-form-item-gi label="排序">
             <n-input-number v-model:value="form.sortOrder" :min="0" />
@@ -168,12 +173,17 @@
         </n-grid>
 
         <n-form-item label="轮播图(每行一个 URL)">
-          <n-input
-            :value="imagesText"
-            type="textarea"
-            :rows="2"
-            @update:value="(value: string) => (imagesText = value)"
-          />
+          <n-space vertical style="width: 100%">
+            <n-input
+              :value="imagesText"
+              type="textarea"
+              :rows="2"
+              @update:value="(value: string) => (imagesText = value)"
+            />
+            <n-upload :show-file-list="false" :custom-request="onUploadGalleryImage" accept="image/*">
+              <n-button size="small">上传一张并追加</n-button>
+            </n-upload>
+          </n-space>
         </n-form-item>
         <n-form-item label="商品详情(HTML 片段)">
           <n-input
@@ -256,9 +266,10 @@
 
 <script setup lang="ts">
 import { AddOutline, CreateOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
-import { NButton, NIcon, NImage, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NIcon, NImage, NTag, NUpload, useDialog, useMessage } from 'naive-ui'
 import { computed, h, onMounted, reactive, ref } from 'vue'
 
+import { uploadFile } from '@/api/file'
 import {
   categoryTree,
   changeGoodsStatus,
@@ -289,6 +300,7 @@ import type {
   SelectOption,
   TreeOption,
   TreeSelectOption,
+  UploadCustomRequestOptions,
 } from 'naive-ui'
 
 /** 商品管理:左分类树(选中即筛选)+ 右商品列表。分类的增删改挂在树节点后缀上。 */
@@ -676,6 +688,31 @@ const editingId = ref<Id | null>(null)
 const goodsFormRef = ref<FormInst | null>(null)
 const specValueOptions = ref<SelectOption[]>([])
 const imagesText = ref('')
+
+/** 主图:传完直接回填地址(地址栏里也允许手动粘贴外部图片,不强制走上传)。 */
+async function onUploadMainImage(options: UploadCustomRequestOptions): Promise<void> {
+  try {
+    const uploaded = await uploadFile(options.file.file as File)
+    form.mainImage = uploaded.url
+    options.onFinish()
+  } catch {
+    // 具体原因由 request 层统一提示,这里只把这次上传标记为失败
+    options.onError()
+  }
+}
+
+/** 轮播图:追加一行,不去动已有的地址。 */
+async function onUploadGalleryImage(options: UploadCustomRequestOptions): Promise<void> {
+  try {
+    const uploaded = await uploadFile(options.file.file as File)
+    const current = imagesText.value.trim()
+    imagesText.value = current ? `${current}
+${uploaded.url}` : uploaded.url
+    options.onFinish()
+  } catch {
+    options.onError()
+  }
+}
 
 const form = reactive<GoodsSaveRequest>({
   categoryId: null,

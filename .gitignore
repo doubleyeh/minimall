@@ -19,6 +19,10 @@ target/
 hs_err_pid*.log
 replay_pid*.log
 
+# —— 本地上传的文件(minimall.file.root-dir,见 application.yml)——
+# 上传的是运行时数据,不进仓库;生产该目录要挂持久卷
+data/
+
 # —— 前端 ——
 node_modules/
 dist/

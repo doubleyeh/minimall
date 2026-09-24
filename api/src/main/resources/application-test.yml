@@ -17,6 +17,9 @@ sa-token:
   timeout: 1800
 
 minimall:
+  # 上传的文件往 target 下写:不污染工作目录,且 target 本来就被忽略
+  file:
+    root-dir: ./target/test-files
   mall:
     auth:
       # 自动化里没有真实的小程序 appId/appSecret,必须开 mock 才能走通登录链路
