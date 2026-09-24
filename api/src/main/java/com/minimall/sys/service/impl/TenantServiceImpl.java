@@ -41,6 +41,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -277,6 +278,28 @@ public class TenantServiceImpl implements TenantService {
             }
             log.info("租户已禁用并撤销全部刷新令牌 tenantId={}", tenantId);
         }
+    }
+
+    @Override
+    public void changeExpireTime(Long tenantId, LocalDateTime expireTime) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        tenant.setExpireTime(expireTime);
+
+        // 4.11:先让缓存失效,该租户所有用户的下一个请求就会重新查库并按新有效期校验
+        tenantLookup.evict(new TenantSnapshot(tenant.getId(), tenant.getTenantCode(), tenant.getStatus(),
+                tenant.getExpireTime(), tenant.getPackageId()));
+
+        // 改成已过去的时间等价于"立刻禁用":同样撤销刷新令牌,不让凭据留着(与 changeStatus 同一套)
+        if (expireTime != null && !expireTime.isAfter(LocalDateTime.now())) {
+            for (SysUser user : userRepository.findByTenantId(tenantId)) {
+                refreshTokenService.revokeAll(user.getId());
+            }
+            log.info("租户有效期已改为过去时间,按不可用处理并撤销全部刷新令牌 tenantId={} expireTime={}",
+                    tenantId, expireTime);
+            return;
+        }
+        log.info("租户有效期已修改 tenantId={} expireTime={}", tenantId, expireTime);
     }
 
     /** 套餐对应的菜单集合;{@code packageId} 为空表示"不限",按全部非平台菜单处理(4.8 步骤 1)。 */

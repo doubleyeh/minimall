@@ -86,6 +86,27 @@
       </template>
     </n-modal>
 
+    <!-- 改有效期 -->
+    <n-modal v-model:show="expireVisible" preset="card" title="修改有效期" style="width: 480px">
+      <n-alert type="info" class="mb-12">
+        留空表示不过期。改成已过去的时间等价于立刻禁用:该租户用户会在下一次请求时被挡下,
+        并非立刻断开。
+      </n-alert>
+      <n-date-picker
+        v-model:value="targetExpireTime"
+        type="datetime"
+        clearable
+        placeholder="留空表示不过期"
+        style="width: 100%"
+      />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="expireVisible = false">取消</n-button>
+          <n-button type="primary" :loading="submitting" @click="onChangeExpireTime">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <!-- 一次性初始密码 -->
     <n-modal v-model:show="secretVisible" preset="card" title="初始管理员密码" style="width: 480px">
       <n-alert type="warning" :show-icon="true">
@@ -104,11 +125,18 @@ import { NButton, NTag, useDialog, useMessage } from 'naive-ui'
 import { h, onMounted, reactive, ref } from 'vue'
 
 import { pagePackages } from '@/api/package'
-import { changeTenantPackage, changeTenantStatus, createTenant, pageTenants } from '@/api/tenant'
+import {
+  changeTenantExpireTime,
+  changeTenantPackage,
+  changeTenantStatus,
+  createTenant,
+  pageTenants,
+} from '@/api/tenant'
 import { usePermissionStore } from '@/stores/permission'
 import type { Id } from '@/types/api'
 import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
 import type { PackageView, TenantCreateRequest, TenantView } from '@/types/system'
+import { toLocalDateTime } from '@/utils/datetime'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -179,12 +207,15 @@ const columns: DataTableColumns<TenantView> = [
   {
     title: '操作',
     key: 'actions',
-    width: 240,
+    width: 320,
     render: (row) => {
       const isPlatformTenant = row.tenantCode === PLATFORM_TENANT_CODE
       return h('div', { style: 'display:flex;gap:8px' }, [
         permission.hasPerm('system:tenant:package')
           ? h(NButton, { size: 'tiny', onClick: () => openChangePackage(row) }, { default: () => '换套餐' })
+          : null,
+        permission.hasPerm('system:tenant:expire')
+          ? h(NButton, { size: 'tiny', onClick: () => openChangeExpireTime(row) }, { default: () => '改有效期' })
           : null,
         permission.hasPerm('system:tenant:status')
           ? h(
@@ -259,7 +290,7 @@ async function onSubmit(): Promise<void> {
     tenantName: form.tenantName,
     packageId: form.packageId,
     // 后端是 LocalDateTime:这里传本地时间字符串,不带时区后缀
-    expireTime: form.expireTime ? new Date(form.expireTime).toISOString().slice(0, 19) : null,
+    expireTime: form.expireTime ? toLocalDateTime(form.expireTime) : null,
     adminUsername: form.adminUsername,
     adminNickname: form.adminNickname,
     adminPassword: form.adminPassword || null,
@@ -302,6 +333,35 @@ async function onChangePackage(): Promise<void> {
     await changeTenantPackage(targetTenantId.value, targetPackageId.value)
     message.success('已变更,权限变更在用户下一次请求生效')
     packageVisible.value = false
+    await load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ——— 改有效期 ———
+
+const expireVisible = ref(false)
+const targetExpireTime = ref<number | null>(null)
+const expireTenantId = ref<Id | null>(null)
+
+function openChangeExpireTime(row: TenantView): void {
+  expireTenantId.value = row.id
+  // 后端返回的是 "yyyy-MM-ddTHH:mm:ss",n-date-picker 要时间戳
+  targetExpireTime.value = row.expireTime ? new Date(row.expireTime).getTime() : null
+  expireVisible.value = true
+}
+
+async function onChangeExpireTime(): Promise<void> {
+  if (!expireTenantId.value) {
+    return
+  }
+  submitting.value = true
+  try {
+    await changeTenantExpireTime(expireTenantId.value,
+      targetExpireTime.value ? toLocalDateTime(targetExpireTime.value) : null)
+    message.success('已修改,该租户用户在下一次请求时按新有效期校验')
+    expireVisible.value = false
     await load()
   } finally {
     submitting.value = false

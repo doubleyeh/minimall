@@ -6,6 +6,8 @@ import com.minimall.sys.api.dto.TenantPackageChangeRequest;
 import com.minimall.sys.api.dto.TenantView;
 import com.minimall.common.PageResult;
 
+import java.time.LocalDateTime;
+
 /**
  * 租户管理(平台级能力,只有平台超管可用,见架构文档 4.10)。
  *
@@ -37,4 +39,12 @@ public interface TenantService {
      * 启用/禁用租户。禁用时先删 Redis 的租户状态缓存再落库,使该租户在线会话在下一次请求即被拦下(4.11)。
      */
     void changeStatus(Long tenantId, int status);
+
+    /**
+     * 修改租户有效期,{@code expireTime} 为空表示改为不过期。
+     *
+     * <p>与启停一样是惰性生效:删掉租户状态缓存后,该租户用户的下一个请求就会按新有效期校验(4.11)。
+     * 改成已过去的时间等价于立刻禁用,会一并撤销全部刷新令牌。
+     */
+    void changeExpireTime(Long tenantId, LocalDateTime expireTime);
 }

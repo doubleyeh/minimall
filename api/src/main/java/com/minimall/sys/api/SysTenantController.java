@@ -3,6 +3,7 @@ package com.minimall.sys.api;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.minimall.sys.api.dto.TenantCreateRequest;
 import com.minimall.sys.api.dto.TenantCreateResponse;
+import com.minimall.sys.api.dto.TenantExpireTimeRequest;
 import com.minimall.sys.api.dto.TenantPackageChangeRequest;
 import com.minimall.sys.api.dto.TenantView;
 import com.minimall.common.ApiResponse;
@@ -75,6 +76,18 @@ public class SysTenantController {
     public ApiResponse<Void> changeStatus(@PathVariable Long tenantId,
                                          @RequestParam int status) {
         tenantService.changeStatus(tenantId, status);
+        return ApiResponse.ok();
+    }
+
+    /**
+     * 改有效期:与启停同样惰性生效(4.11);传空表示改为不过期。
+     */
+    @AuditLog(module = "租户管理", permCode = "system:tenant:expire")
+    @PutMapping("/{tenantId}/expire-time")
+    @SaCheckPermission("system:tenant:expire")
+    public ApiResponse<Void> changeExpireTime(@PathVariable Long tenantId,
+                                              @RequestBody TenantExpireTimeRequest request) {
+        tenantService.changeExpireTime(tenantId, request.expireTime());
         return ApiResponse.ok();
     }
 }

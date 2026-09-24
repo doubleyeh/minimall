@@ -33,3 +33,12 @@ export function changeTenantPackage(tenantId: Id, packageId: Id): Promise<void> 
 export function changeTenantStatus(tenantId: Id, status: number): Promise<void> {
   return request.put<void>(`/system/tenants/${tenantId}/status`, undefined, { params: { status } })
 }
+
+/**
+ * 改租户有效期,`expireTime` 传 null 表示改为不过期。
+ *
+ * 与启停同样是惰性生效:改成一个已过去的时间等价于立刻禁用,该租户用户会在下一次请求时被挡下。
+ */
+export function changeTenantExpireTime(tenantId: Id, expireTime: string | null): Promise<void> {
+  return request.put<void>(`/system/tenants/${tenantId}/expire-time`, { expireTime })
+}
