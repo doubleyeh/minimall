@@ -17,6 +17,16 @@ sa-token:
   timeout: 1800
 
 minimall:
+  # 关掉全部定时任务:测试进程里也会起调度器,它会与用例的直接调用抢同一把锁
+  # (表现是"任务被跳过"而用例断言失败,而且只在整分钟附近偶发)。
+  # "-" 是 Spring 约定的"禁用该定时任务"
+  schedule:
+    cron:
+      close-timeout-orders: "-"
+      auto-receive-orders: "-"
+      after-sale-timeout: "-"
+      expire-coupon-records: "-"
+      tenant-expiry: "-"
   # 上传的文件往 target 下写:不污染工作目录,且 target 本来就被忽略
   file:
     root-dir: ./target/test-files

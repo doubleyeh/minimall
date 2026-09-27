@@ -71,7 +71,7 @@ public class MallScheduledTasks {
     }
 
     /** 订单超时关闭(每分钟)。 */
-    @Scheduled(cron = "0 * * * * ?")
+    @Scheduled(cron = "${minimall.schedule.cron.close-timeout-orders:0 * * * * ?}")
     public void closeTimeoutOrders() {
         // 多实例部署时每个实例都会触发:MallScheduledTasks 的四个任务都要抢锁,抢不到就整个跳过
         taskLock.runIfNotLocked("关闭超时未支付订单", () -> {
@@ -89,7 +89,7 @@ public class MallScheduledTasks {
     }
 
     /** 订单自动确认收货(每小时)。 */
-    @Scheduled(cron = "0 0 * * * ?")
+    @Scheduled(cron = "${minimall.schedule.cron.auto-receive-orders:0 0 * * * ?}")
     public void autoReceiveOrders() {
         taskLock.runIfNotLocked("订单自动确认收货", () -> {
             int days = dictInt(DICT_AUTO_RECEIVE, DEFAULT_AUTO_RECEIVE_DAYS);
@@ -111,7 +111,7 @@ public class MallScheduledTasks {
      * <p>三个阈值都来自字典 {@code after_sale_timeout}(72 小时 / 7 天 / 10 天),
      * 而不是硬编码 —— 售后时效是最常被业务方要求调整的参数(3.9)。
      */
-    @Scheduled(cron = "0 15 * * * ?")
+    @Scheduled(cron = "${minimall.schedule.cron.after-sale-timeout:0 15 * * * ?}")
     public void handleAfterSaleTimeout() {
         taskLock.runIfNotLocked("售后超时处理", () -> {
             // 三档阈值存在同一个字典类型下(按标签区分),这里按标签取值的顺序与 V4 种子数据一致:
@@ -134,7 +134,7 @@ public class MallScheduledTasks {
     }
 
     /** 优惠券过期清理(每天 3:30,避开业务高峰)。 */
-    @Scheduled(cron = "0 30 3 * * ?")
+    @Scheduled(cron = "${minimall.schedule.cron.expire-coupon-records:0 30 3 * * ?}")
     public void expireCouponRecords() {
         taskLock.runIfNotLocked("优惠券过期清理", () -> {
             var result = tenantTaskRunner.runForEachTenant("优惠券过期清理", SYSTEM_ACTOR_ID,

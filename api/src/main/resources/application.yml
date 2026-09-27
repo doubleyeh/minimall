@@ -99,11 +99,24 @@ minimall:
     captcha-after-failures: 3
     # 验证码有效期(秒)。验证成功后立即删除,同一个验证码不能用两次
     captcha-ttl-seconds: 120
+    # 新密码不能与最近几次用过的相同(历史只存哈希)。防的是"改密时在原密码后面加个 1"
+    password-history-count: 5
+    # 密码有效期(天),0 表示不启用。启用后所有存量用户下一次登录都会被打到改密页 ——
+    # 这是产品决定,所以默认关着,要用就改这里
+    password-expire-days: 0
   # 定时任务(架构文档 6.2)。多实例部署时靠 Redis 锁保证同一任务只有一个实例在跑
   schedule:
     # 锁的存活时间(秒),必须明显大于任务最长耗时 —— 否则任务还没跑完锁就过期,
     # 另一个实例会跟着跑起来,互斥等于没有。代价:进程被强杀后最多等这么久才有人接手
     task-lock-seconds: 1800
+    # 各任务的触发时间。改动不用发版;值为 "-" 表示禁用该任务(测试 profile 就是这么关掉的,
+    # 否则测试进程里的调度器会与用例的直接调用抢同一把锁)
+    cron:
+      close-timeout-orders: "0 * * * * ?"
+      auto-receive-orders: "0 0 * * * ?"
+      after-sale-timeout: "0 15 * * * ?"
+      expire-coupon-records: "0 30 3 * * ?"
+      tenant-expiry: "0 50 3 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600

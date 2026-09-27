@@ -71,6 +71,10 @@ public class SysUser extends BaseTenantEntity implements OwnedEntity {
     @Column(name = "pwd_update_time")
     private LocalDateTime pwdUpdateTime;
 
+    /** 最近若干次密码哈希(逗号分隔,最近一次在最前),用于禁止重复使用;只存哈希,不存明文 */
+    @Column(name = "password_history", length = 512)
+    private String passwordHistory;
+
     @Column(name = "login_fail_count", nullable = false)
     private Integer loginFailCount;
 

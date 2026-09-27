@@ -43,7 +43,7 @@ public class SysScheduledTasks {
      * <p>为什么要主动禁用:有效期一直只是"用户请求时被动校验",库里状态永远停在"正常",
      * 看租户列表会以为一切正常。
      */
-    @Scheduled(cron = "0 50 3 * * ?")
+    @Scheduled(cron = "${minimall.schedule.cron.tenant-expiry:0 50 3 * * ?}")
     public void handleTenantExpiry() {
         // 多实例部署时每个实例都会触发,必须抢锁:重复执行会把同一批租户禁两遍(幂等但不该白跑)
         taskLock.runIfNotLocked("租户到期处理", () -> {

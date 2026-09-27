@@ -18,6 +18,7 @@ import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.security.LoginProperties;
 import com.minimall.infra.security.CaptchaService;
 import com.minimall.infra.security.LoginRateLimiter;
+import com.minimall.infra.security.PasswordPolicy;
 import com.minimall.infra.security.PermissionProvider;
 import com.minimall.infra.security.RefreshTokenPayload;
 import com.minimall.infra.security.RefreshTokenService;
@@ -61,6 +62,7 @@ public class AuthServiceImpl implements AuthService {
     private final LoginRateLimiter loginRateLimiter;
     private final LoginProperties loginProperties;
     private final CaptchaService captchaService;
+    private final PasswordPolicy passwordPolicy;
     private final TenantFilterService tenantFilterService;
 
     @PersistenceContext
@@ -74,6 +76,7 @@ public class AuthServiceImpl implements AuthService {
                            LoginRateLimiter loginRateLimiter,
                            LoginProperties loginProperties,
                            CaptchaService captchaService,
+                           PasswordPolicy passwordPolicy,
                            TenantFilterService tenantFilterService) {
         this.tenantLookup = tenantLookup;
         this.userRepository = userRepository;
@@ -83,6 +86,7 @@ public class AuthServiceImpl implements AuthService {
         this.loginRateLimiter = loginRateLimiter;
         this.loginProperties = loginProperties;
         this.captchaService = captchaService;
+        this.passwordPolicy = passwordPolicy;
         this.tenantFilterService = tenantFilterService;
     }
 
@@ -144,11 +148,16 @@ public class AuthServiceImpl implements AuthService {
             }
             registerSuccess(user);
 
+            // 密码有效期(7.1.2):到期与"首登未改密"走同一条路 —— 只影响本次会话与响应,
+            // 不把状态写回库里(否则策略关掉之后这些账号还会被一直要求改密)
+            boolean mustChangePassword = user.isMustChangePassword()
+                    || passwordPolicy.isExpired(user.getPwdUpdateTime());
+
             // 到这里身份已确认,把审计快照补全:后面改 user 行的 update_by 才会是本人
             AuditContext.bind(new AuditContext(tenant.id(), user.getId(), audit.ip(), audit.traceId()));
 
             // 第 5、6 步:建会话 + 强制改密标记
-            return issueTokens(user, tenant.id(), normalizeDeviceId(request.deviceId()));
+            return issueTokens(user, tenant.id(), normalizeDeviceId(request.deviceId()), mustChangePassword);
         });
     }
 
@@ -193,7 +202,9 @@ public class AuthServiceImpl implements AuthService {
                 throw new BusinessException(ErrorCode.UNAUTHORIZED);
             }
 
-            String newAccessToken = issueAccessSession(user, tenant.id());
+            // 刷新时同样按"首登未改密 或 密码已过期"重算:策略在会话中途到期也该被拦下
+            String newAccessToken = issueAccessSession(user, tenant.id(),
+                    user.isMustChangePassword() || passwordPolicy.isExpired(user.getPwdUpdateTime()));
             return new RefreshTokenResponse(newAccessToken, rotated.newToken(), accessTokenTtlSeconds());
         }));
     }
@@ -220,10 +231,13 @@ public class AuthServiceImpl implements AuthService {
         if (!passwordEncoder.matches(request.oldPassword(), user.getPassword())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "原密码不正确");
         }
-        if (passwordEncoder.matches(request.newPassword(), user.getPassword())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "新密码不能与原密码相同");
-        }
+        // 历史不可复用(7.1.2):只挡"当前这一个"是不够的,最常见的应对是"在原密码后面加个 1"
+        passwordPolicy.ensureAcceptable(user.getPassword(), user.getPasswordHistory(),
+                request.newPassword(), request.oldPassword());
 
+        // 先把旧哈希记进历史,再覆盖密码 —— 顺序反了记进去的就是新密码
+        user.setPasswordHistory(passwordPolicy.historyAfterChange(
+                user.getPasswordHistory(), user.getPassword()));
         user.setPassword(passwordEncoder.encode(request.newPassword()));
         user.setPwdUpdateTime(LocalDateTime.now());
         user.setMustChangePassword(0);
@@ -250,8 +264,8 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /** 7.1.1 第 5 步:建会话 + 写会话扩展数据 + 签发刷新令牌。 */
-    private LoginResponse issueTokens(SysUser user, Long tenantId, String deviceId) {
-        String accessToken = issueAccessSession(user, tenantId);
+    private LoginResponse issueTokens(SysUser user, Long tenantId, String deviceId, boolean mustChangePassword) {
+        String accessToken = issueAccessSession(user, tenantId, mustChangePassword);
         RefreshTokenService.IssuedRefreshToken refreshToken =
                 refreshTokenService.issue(user.getId(), tenantId, user.isSuperUser());
         // 刷新令牌也放进会话:登出时据此精确撤销本次登录的那一张
@@ -265,18 +279,18 @@ public class AuthServiceImpl implements AuthService {
                 user.getId(),
                 tenantId,
                 user.isSuperUser(),
-                user.isMustChangePassword(),
+                mustChangePassword,
                 user.getNickname(),
                 List.copyOf(permissions.menuTree()),
                 List.copyOf(permissions.permCodes()));
     }
 
-    private String issueAccessSession(SysUser user, Long tenantId) {
+    private String issueAccessSession(SysUser user, Long tenantId, boolean mustChangePassword) {
         StpUtil.login(user.getId());
         SaSession session = StpUtil.getSession();
         session.set(SessionKeys.TENANT_ID, tenantId);
         session.set(SessionKeys.SUPER_USER, user.isSuperUser());
-        session.set(SessionKeys.MUST_CHANGE_PASSWORD, user.isMustChangePassword());
+        session.set(SessionKeys.MUST_CHANGE_PASSWORD, mustChangePassword);
         return StpUtil.getTokenValue();
     }
 

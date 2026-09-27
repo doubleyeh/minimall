@@ -166,6 +166,8 @@ public class TenantServiceImpl implements TenantService {
             SysUser admin = new SysUser();
             admin.setUsername(request.adminUsername());
             admin.setPassword(passwordEncoder.encode(rawPassword));
+            // 初始密码也算"刚设过":漏写这一列,开启密码有效期后新租户管理员一登录就被要求改密
+            admin.setPwdUpdateTime(LocalDateTime.now());
             admin.setNickname(request.adminNickname() == null ? request.adminUsername() : request.adminNickname());
             admin.setStatus(1);
             admin.setIsSuper(0);

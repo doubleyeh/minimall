@@ -8,9 +8,11 @@ import com.minimall.mall.domain.repository.MallOrderStatusLogRepository;
 import com.minimall.sys.api.dto.DictDataSaveRequest;
 import com.minimall.sys.api.dto.DictDataView;
 import com.minimall.sys.service.DictService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,6 +39,20 @@ class MallScheduledTasksIntegrationTest extends MallClientServiceTestBase {
     private MallOrderStatusLogRepository statusLogRepository;
     @Autowired
     private DictService dictService;
+    @Autowired
+    private StringRedisTemplate redis;
+
+    /**
+     * 清掉任务互斥锁再跑。
+     *
+     * <p>锁是**跨运行的全局状态**(TTL 30 分钟):上一次运行如果被强杀,锁会留到下一次运行,
+     * 表现是"任务被跳过"、用例断言莫名失败,而且只在 30 分钟窗口内偶发。
+     * 测试里主动清掉,让每次运行都从干净状态开始。
+     */
+    @BeforeEach
+    void clearTaskLocks() {
+        redis.delete(redis.keys("task:lock:*"));
+    }
 
     private void backdateOrder(Long orderId, String column, LocalDateTime value) {
         inTenant(() -> {

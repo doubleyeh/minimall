@@ -55,6 +55,7 @@ public class UserServiceImpl implements UserService {
     private final SysDeptRepository deptRepository;
     private final SysRoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final com.minimall.infra.security.PasswordPolicy passwordPolicy;
     private final PermissionCacheService permissionCacheService;
     private final RefreshTokenService refreshTokenService;
 
@@ -63,13 +64,15 @@ public class UserServiceImpl implements UserService {
                            SysRoleRepository roleRepository,
                            PasswordEncoder passwordEncoder,
                            PermissionCacheService permissionCacheService,
-                           RefreshTokenService refreshTokenService) {
+                           RefreshTokenService refreshTokenService,
+                           com.minimall.infra.security.PasswordPolicy passwordPolicy) {
         this.userRepository = userRepository;
         this.deptRepository = deptRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.permissionCacheService = permissionCacheService;
         this.refreshTokenService = refreshTokenService;
+        this.passwordPolicy = passwordPolicy;
     }
 
     @Override
@@ -125,6 +128,8 @@ public class UserServiceImpl implements UserService {
         SysUser user = new SysUser();
         user.setUsername(request.username());
         user.setPassword(passwordEncoder.encode(rawPassword));
+        // 新建时的初始密码也算"刚设过":漏写这一列,开启密码有效期后这些账号会立刻要求改密
+        user.setPwdUpdateTime(java.time.LocalDateTime.now());
         user.setNickname(request.nickname());
         user.setPhone(request.phone());
         user.setDeptId(request.deptId());
@@ -204,6 +209,9 @@ public class UserServiceImpl implements UserService {
     public UserResetPasswordResponse resetPassword(Long userId) {
         SysUser user = load(userId);
         String rawPassword = PasswordGenerator.generate();
+        // 旧哈希进历史:否则用户改密时可以把密码改回"刚被管理员重置掉的那个"
+        user.setPasswordHistory(passwordPolicy.historyAfterChange(
+                user.getPasswordHistory(), user.getPassword()));
         user.setPassword(passwordEncoder.encode(rawPassword));
         user.setMustChangePassword(1);
         user.setPwdUpdateTime(java.time.LocalDateTime.now());

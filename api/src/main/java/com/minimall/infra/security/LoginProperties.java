@@ -13,13 +13,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "minimall.login")
 public record LoginProperties(Integer maxFailCount, Integer lockMinutes, Integer ipLimitPerMinute,
-                              Integer captchaAfterFailures, Integer captchaTtlSeconds) {
+                              Integer captchaAfterFailures, Integer captchaTtlSeconds,
+                              Integer passwordHistoryCount, Integer passwordExpireDays) {
 
     private static final int DEFAULT_MAX_FAIL_COUNT = 5;
     private static final int DEFAULT_LOCK_MINUTES = 15;
     private static final int DEFAULT_IP_LIMIT_PER_MINUTE = 10;
     private static final int DEFAULT_CAPTCHA_AFTER_FAILURES = 3;
     private static final int DEFAULT_CAPTCHA_TTL_SECONDS = 120;
+    private static final int DEFAULT_PASSWORD_HISTORY_COUNT = 5;
+    /** 0 表示不启用有效期:开启后所有存量用户下次登录都要改密,那是产品决定 */
+    private static final int DEFAULT_PASSWORD_EXPIRE_DAYS = 0;
 
     public LoginProperties {
         maxFailCount = maxFailCount == null ? DEFAULT_MAX_FAIL_COUNT : maxFailCount;
@@ -27,8 +31,11 @@ public record LoginProperties(Integer maxFailCount, Integer lockMinutes, Integer
         ipLimitPerMinute = ipLimitPerMinute == null ? DEFAULT_IP_LIMIT_PER_MINUTE : ipLimitPerMinute;
         captchaAfterFailures = captchaAfterFailures == null ? DEFAULT_CAPTCHA_AFTER_FAILURES : captchaAfterFailures;
         captchaTtlSeconds = captchaTtlSeconds == null ? DEFAULT_CAPTCHA_TTL_SECONDS : captchaTtlSeconds;
+        passwordHistoryCount = passwordHistoryCount == null ? DEFAULT_PASSWORD_HISTORY_COUNT : passwordHistoryCount;
+        passwordExpireDays = passwordExpireDays == null ? DEFAULT_PASSWORD_EXPIRE_DAYS : passwordExpireDays;
         if (maxFailCount <= 0 || lockMinutes <= 0 || ipLimitPerMinute <= 0
-                || captchaAfterFailures <= 0 || captchaTtlSeconds <= 0) {
+                || captchaAfterFailures <= 0 || captchaTtlSeconds <= 0
+                || passwordHistoryCount <= 0 || passwordExpireDays < 0) {
             throw new IllegalArgumentException("minimall.login.* 必须为正数");
         }
     }
