@@ -1,5 +1,7 @@
 package com.minimall.sys.service.impl;
 
+import com.minimall.common.BusinessException;
+import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;
 import com.minimall.sys.api.dto.OperLogQuery;
 import com.minimall.sys.api.dto.OperLogView;
@@ -68,5 +70,17 @@ public class OperLogServiceImpl implements OperLogService {
         return new OperLogView(log.getId(), log.getTenantId(), log.getUserId(), log.getModule(),
                 log.getPermCode(), log.getMethod(), log.getRequestParams(), log.getStatus(),
                 log.getErrorMsg(), log.getIp(), log.getTraceId(), log.getCreateTime());
+    }
+
+    @Override
+    public List<OperLogView> listForExport(OperLogQuery query, int limit) {
+        // 多取一条用来判断"是否超上限":够不够比 total 更直接,也少一次查询
+        PageResult<OperLogView> page = page(new OperLogQuery(query.tenantId(), query.userId(), query.module(),
+                query.status(), query.startTime(), query.endTime(), 1, limit + 1));
+        if (page.list().size() > limit) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "结果超过 " + limit + " 条,请缩小时间范围后再导出");
+        }
+        return page.list();
     }
 }

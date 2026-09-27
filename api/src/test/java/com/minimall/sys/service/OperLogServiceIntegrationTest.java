@@ -1,5 +1,6 @@
 package com.minimall.sys.service;
 
+import com.minimall.common.BusinessException;
 import com.minimall.common.PageResult;
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.tenant.TenantContext;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 操作日志查询验证(架构文档 7.2)。
@@ -123,6 +125,23 @@ class OperLogServiceIntegrationTest {
         assertThat(ofPlatform.list().get(0).tenantId()).isEqualTo(PLATFORM_TENANT_ID);
         assertThat(ofOther.total()).isEqualTo(1);
         assertThat(ofOther.list().get(0).tenantId()).isEqualTo(OTHER_TENANT_ID);
+    }
+
+    @Test
+    @DisplayName("导出上限:超过就报错让调用方缩小范围,不静默截断")
+    void exportRefusesWhenOverLimit() {
+        String module = "用例导出" + System.nanoTime();
+        for (int i = 0; i < 3; i++) {
+            saveLog(PLATFORM_TENANT_ID, module, 1, null, LocalDateTime.now().minusMinutes(i + 1L));
+        }
+
+        OperLogQuery query = new OperLogQuery(null, null, module, null, null, null, 1, 10);
+
+        assertThat(asTenant(PLATFORM_TENANT_ID, () -> operLogService.listForExport(query, 5)))
+                .as("上限之内正常返回").hasSize(3);
+        assertThatThrownBy(() -> asTenant(PLATFORM_TENANT_ID, () -> operLogService.listForExport(query, 2)))
+                .as("静默截断的导出最危险:拿到的人会以为\"就这么多\"")
+                .isInstanceOf(BusinessException.class);
     }
 
     /** 写入方必须显式给 tenant_id/user_id:异步线程里没有租户上下文(见仓储注释)。 */

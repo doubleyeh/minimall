@@ -196,6 +196,46 @@ function failAuth(error: unknown): Promise<never> {
  * 拆包放在这里而不是响应拦截器里,是因为 axios 的拦截器签名要求返回 `AxiosResponse` ——
  * 在那里返回 `data` 只能靠类型断言绕过检查,一旦 axios 升级或行为变化,断言不会报错、运行期才炸。
  */
+/**
+ * 下载文件(导出用)。
+ *
+ * 与普通请求有两处不同,都必须处理:
+ * 1. 响应体是 Blob 而不是统一响应体 —— 但**出业务错误时后端仍然返回 JSON**,
+ *    所以这里按 content-type 判断:不是文件就把 Blob 读成文本、取出统一响应体里的提示再抛错。
+ *    不判断的话,用户会下到一个装着错误 JSON 的 csv,打开才发现不对。
+ * 2. 文件名从 Content-Disposition 取,取不到时用调用方给的兜底名。
+ */
+export async function download(
+  url: string,
+  config?: AppRequestConfig,
+  fallbackFilename = 'export.csv',
+): Promise<void> {
+  const response = await http.get<Blob>(url, { ...config, responseType: 'blob' })
+  const contentType = String(response.headers['content-type'] ?? '')
+  if (contentType.includes('application/json')) {
+    const body = JSON.parse(await (response.data as Blob).text()) as ApiEnvelope<{ message?: string }>
+    if (!config?.skipErrorMessage) {
+      message.error(body.message || '导出失败')
+    }
+    throw new ApiError(body.code, body.message)
+  }
+  saveBlob(response.data as Blob, filenameOf(response.headers['content-disposition']) ?? fallbackFilename)
+}
+
+function filenameOf(contentDisposition: unknown): string | null {
+  const match = /filename="?([^";]+)"?/.exec(String(contentDisposition ?? ''))
+  return match ? match[1] : null
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(objectUrl)
+}
+
 export const request = {
   async get<T>(url: string, config?: AppRequestConfig): Promise<T> {
     return unwrap(await http.get(url, config)) as T

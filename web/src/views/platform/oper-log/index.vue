@@ -23,6 +23,7 @@
           <n-space>
             <n-button type="primary" @click="load(1)">查询</n-button>
             <n-button @click="onResetQuery">重置</n-button>
+            <n-button :loading="exporting" @click="onExport">导出 CSV</n-button>
           </n-space>
         </n-form-item>
       </n-form>
@@ -73,12 +74,14 @@
 import { NButton, NTag } from 'naive-ui'
 import { h, onMounted, reactive, ref } from 'vue'
 
-import { pageOperLogs } from '@/api/operLog'
+import { pageOperLogs, type OperLogPageQuery } from '@/api/operLog'
+import { download } from '@/utils/request'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import type { OperLogView } from '@/types/system'
 import { toLocalDateTime } from '@/utils/datetime'
 
 const loading = ref(false)
+const exporting = ref(false)
 const rows = ref<OperLogView[]>([])
 const timeRange = ref<[number, number] | null>(null)
 
@@ -97,25 +100,53 @@ const statusOptions: SelectOption[] = [
 
 const pagination = reactive({ page: 1, pageSize: 10, itemCount: 0, showSizePicker: false })
 
+/** 当前筛选条件。列表与导出共用一处,否则"导出的"和"看到的"不是同一批数据。 */
+function currentFilter(): Omit<OperLogPageQuery, 'pageNo' | 'pageSize'> {
+  return {
+    module: query.module || undefined,
+    userId: query.userId || undefined,
+    status: query.status,
+    startTime: timeRange.value ? toLocalDateTime(timeRange.value[0]) : undefined,
+    endTime: timeRange.value ? toLocalDateTime(timeRange.value[1]) : undefined,
+  }
+}
+
 async function load(page = query.pageNo): Promise<void> {
   loading.value = true
   try {
     query.pageNo = page
-    const result = await pageOperLogs({
-      module: query.module || undefined,
-      userId: query.userId || undefined,
-      status: query.status,
-      startTime: timeRange.value ? toLocalDateTime(timeRange.value[0]) : undefined,
-      endTime: timeRange.value ? toLocalDateTime(timeRange.value[1]) : undefined,
-      pageNo: page,
-      pageSize: query.pageSize,
-    })
+    const result = await pageOperLogs({ ...currentFilter(), pageNo: page, pageSize: query.pageSize })
     rows.value = result.list
     pagination.page = page
     pagination.itemCount = result.total
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 导出当前条件下的日志。
+ *
+ * 后端超过上限会返回业务错误(提示缩小范围),由 download 统一弹提示 ——
+ * 这里不自己判断,免得两边规则不一致。
+ */
+async function onExport(): Promise<void> {
+  exporting.value = true
+  try {
+    await download(`/system/oper-logs/export?${toQueryString(currentFilter())}`, undefined, 'oper-log.csv')
+  } finally {
+    exporting.value = false
+  }
+}
+
+function toQueryString(filter: Omit<OperLogPageQuery, 'pageNo' | 'pageSize'>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.append(key, String(value))
+    }
+  }
+  return params.toString()
 }
 
 function onResetQuery(): void {
