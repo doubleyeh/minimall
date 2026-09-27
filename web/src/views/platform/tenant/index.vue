@@ -400,8 +400,8 @@ async function onCloseAction(key: string, row: TenantView): Promise<void> {
   }
   dialog.error({
     title: '注销租户',
-    content: `注销后 3 个月内数据保留但不可用,到期将被【物理删除且不可恢复】。`
-      + '删除前建议先导出数据存档。确认注销?',
+    content: '注销后 3 个月内数据保留但不可用,到期将【物理删除该租户的业务数据且不可恢复】'
+      + '(审计日志保留,作为"当时做过什么"的凭据)。删除前建议先导出数据存档。确认注销?',
     positiveText: '确认注销',
     negativeText: '取消',
     onPositiveClick: async () => {

@@ -116,6 +116,7 @@ class TenantPurgeIntegrationTest {
         long otherUsersBefore = countUsersOf(otherTenantId);
         assertThat(countUsersOf(tenantId)).as("先确认确实有数据可删").isPositive();
         assertThat(countJunction("sys_user_role", tenantId)).as("关联表也有数据").isPositive();
+        insertOperLog(tenantId);
 
         backdatePurgeAt(tenantId);
         int purged = asSuperUser(tenantService::purgeExpiredTenants);
@@ -127,6 +128,9 @@ class TenantPurgeIntegrationTest {
                 .as("关联表没有 tenant_id,漏掉就留下永远查不到的孤儿行").isZero();
         assertThat(countJunction("sys_role_menu", tenantId)).isZero();
         assertThat(rowCount("select count(*) from tenant where id = ?", tenantId)).isZero();
+        assertThat(countOperLogsOf(tenantId))
+                .as("审计日志要留着:业务数据都没了,它是\"这个租户当时做过什么\"的唯一凭据")
+                .isEqualTo(1);
 
         assertThat(countUsersOf(otherTenantId)).as("删错租户是灾难,不是 bug").isEqualTo(otherUsersBefore);
         assertThat(rowCount("select count(*) from tenant where id = ?", otherTenantId)).isEqualTo(1);
@@ -149,7 +153,8 @@ class TenantPurgeIntegrationTest {
     void exportContainsDataButNoCredentials() throws Exception {
         Map<String, String> files = unzip(tenantDataExporter.export(tenantId));
 
-        assertThat(files).containsKeys("manifest.txt", "sys_user.csv", "sys_role.csv", "sys_user_role.csv");
+        assertThat(files).containsKeys("manifest.txt", "sys_user.csv", "sys_role.csv",
+                "sys_user_role.csv", "sys_oper_log.csv");
         assertThat(files.get("sys_user.csv")).as("该租户的用户数据要在里面").contains(tenantUsername);
         assertThat(files.get("manifest.txt")).as("清单要能看出每张表导了多少行").contains("表,行数");
         assertThat(files.get("sys_user.csv"))
@@ -176,6 +181,17 @@ class TenantPurgeIntegrationTest {
     private void backdatePurgeAt(long id) {
         jdbcTemplate.update("update tenant set purge_at = ? where id = ?",
                 LocalDateTime.now().minusMinutes(1), id);
+    }
+
+    /** 造一条该租户的操作日志:purge 之后它必须还在(见下面那条断言)。 */
+    private void insertOperLog(long id) {
+        // id 是雪花 ID,没有库端默认值 —— 手写 SQL 造数据时必须自己给
+        jdbcTemplate.update("insert into sys_oper_log (id, tenant_id, module, method, status) "
+                + "values (?, ?, '注销用例', 'GET /用例', 1)", com.minimall.infra.id.SnowflakeIdGenerator.nextId(), id);
+    }
+
+    private long countOperLogsOf(long id) {
+        return rowCount("select count(*) from sys_oper_log where tenant_id = ?", id);
     }
 
     private long countUsersOf(long id) {

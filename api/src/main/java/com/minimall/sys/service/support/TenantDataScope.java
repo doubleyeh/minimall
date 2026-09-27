@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * "哪些数据属于一个租户"(架构文档 4.11)。
@@ -20,6 +21,9 @@ import java.util.List;
  * </ol>
  *
  * <p>关联表排在前面:删除时先删它们 —— 反查依赖的还是租户的用户/角色行,先删了用户就找不到了。
+ *
+ * <p><b>导出范围与删除范围刻意不完全相同</b>:审计日志要留着(见 {@link #RETAINED_TABLES})。
+ * 导出仍包含它 —— 存档里少了审计记录,"这个租户原来做过什么"就再也说不清了。
  */
 @Component
 public class TenantDataScope {
@@ -27,13 +31,25 @@ public class TenantDataScope {
     private static final List<String> JUNCTION_TABLES = List.of(
             "sys_user_role", "sys_role_menu", "sys_role_dept");
 
+    /**
+     * 物理删除时**留下来**的表。
+     *
+     * <p>{@code sys_oper_log}:审计日志要保留得比业务数据久。它是"这个租户当时做过什么"的唯一凭据,
+     * 而注销之后业务数据都不在了,一旦再删日志,任何争议都无法回溯。
+     *
+     * <p>留下的日志会带着一个已不存在的 tenant_id,这是可以接受的:雪花 ID 不复用,所以不会被后来
+     * 新建的租户"认领";平台侧的操作日志页按 tenant_id 精确过滤,照样能查到它们。
+     * 代价是这些行会长期留着 —— 何时归档/清理属于另一条策略(当前未实现,见架构文档第 10 节)。
+     */
+    private static final Set<String> RETAINED_TABLES = Set.of("sys_oper_log");
+
     private final JdbcTemplate jdbcTemplate;
 
     public TenantDataScope(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 关联表在前,带 tenant_id 的表在后(顺序对删除有意义,对导出没有)。 */
+    /** 该租户的全部数据(导出用):关联表在前,带 tenant_id 的表在后。 */
     public List<String> tables() {
         List<String> tables = new ArrayList<>(JUNCTION_TABLES);
         tables.addAll(jdbcTemplate.queryForList(
@@ -42,6 +58,11 @@ public class TenantDataScope {
                         + "order by table_name",
                 String.class));
         return tables;
+    }
+
+    /** 物理删除的范围:与 {@link #tables()} 相同,但去掉要保留的表。 */
+    public List<String> deletableTables() {
+        return tables().stream().filter(table -> !RETAINED_TABLES.contains(table)).toList();
     }
 
     public String selectSql(String table) {
