@@ -9,6 +9,7 @@ import com.minimall.sys.api.dto.TenantView;
 import com.minimall.common.ApiResponse;
 import com.minimall.common.PageResult;
 import com.minimall.sys.service.TenantService;
+import com.minimall.sys.service.support.TenantDataExporter;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +19,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+
+import java.time.LocalDate;
 import com.minimall.infra.audit.AuditLog;
 
 /**
@@ -31,9 +37,11 @@ import com.minimall.infra.audit.AuditLog;
 public class SysTenantController {
 
     private final TenantService tenantService;
+    private final TenantDataExporter tenantDataExporter;
 
-    public SysTenantController(TenantService tenantService) {
+    public SysTenantController(TenantService tenantService, TenantDataExporter tenantDataExporter) {
         this.tenantService = tenantService;
+        this.tenantDataExporter = tenantDataExporter;
     }
 
     @GetMapping
@@ -77,6 +85,43 @@ public class SysTenantController {
                                          @RequestParam int status) {
         tenantService.changeStatus(tenantId, status);
         return ApiResponse.ok();
+    }
+
+    /**
+     * 注销租户(4.11):必须先禁用。保留期内数据一行不动、可以取消注销,到期由任务物理删除。
+     */
+    @AuditLog(module = "租户管理", permCode = "system:tenant:close")
+    @PutMapping("/{tenantId}/close")
+    @SaCheckPermission("system:tenant:close")
+    public ApiResponse<Void> close(@PathVariable Long tenantId) {
+        tenantService.close(tenantId);
+        return ApiResponse.ok();
+    }
+
+    /** 取消注销:保留期内有效。 */
+    @AuditLog(module = "租户管理", permCode = "system:tenant:close")
+    @PutMapping("/{tenantId}/close/cancel")
+    @SaCheckPermission("system:tenant:close")
+    public ApiResponse<Void> cancelClose(@PathVariable Long tenantId) {
+        tenantService.cancelClose(tenantId);
+        return ApiResponse.ok();
+    }
+
+    /**
+     * 导出该租户的全部数据(ZIP,每张表一个 CSV) —— 物理删除前留一份存档的唯一手段。
+     *
+     * <p>权限码与"注销"共用:能删就能导。反过来单独给个"导出"码,等于让"只能看不能删"的角色
+     * 也能把整租户的数据拖走。
+     */
+    @AuditLog(module = "租户管理", permCode = "system:tenant:close")
+    @GetMapping("/{tenantId}/data-export")
+    @SaCheckPermission("system:tenant:close")
+    public ResponseEntity<byte[]> exportData(@PathVariable Long tenantId) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"tenant-" + tenantId + "-" + LocalDate.now() + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(tenantDataExporter.export(tenantId));
     }
 
     /**

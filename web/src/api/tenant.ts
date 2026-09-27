@@ -42,3 +42,18 @@ export function changeTenantStatus(tenantId: Id, status: number): Promise<void> 
 export function changeTenantExpireTime(tenantId: Id, expireTime: string | null): Promise<void> {
   return request.put<void>(`/system/tenants/${tenantId}/expire-time`, { expireTime })
 }
+
+/**
+ * 注销租户(后端 PUT /system/tenants/{id}/close)。
+ *
+ * 必须**先禁用**再注销:注销的终点是数据被物理删除,一步到位太容易误点。
+ * 注销后进入保留期(默认 3 个月),期间数据一行不动、可以取消;到期由任务清理。
+ */
+export function closeTenant(tenantId: Id): Promise<void> {
+  return request.put<void>(`/system/tenants/${tenantId}/close`)
+}
+
+/** 取消注销(保留期内有效)。数据本来就还在,清掉清理时间即可。 */
+export function cancelCloseTenant(tenantId: Id): Promise<void> {
+  return request.put<void>(`/system/tenants/${tenantId}/close/cancel`)
+}

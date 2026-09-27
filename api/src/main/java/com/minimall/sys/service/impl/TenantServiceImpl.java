@@ -26,6 +26,8 @@ import com.minimall.infra.security.RefreshTokenService;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.infra.tenant.TenantFilterService;
 import com.minimall.infra.tenant.TenantLookup;
+import com.minimall.infra.tenant.TenantProperties;
+import com.minimall.sys.service.support.TenantDataPurger;
 import com.minimall.infra.tenant.TenantSnapshot;
 import com.minimall.sys.service.TenantService;
 import com.minimall.sys.service.support.PasswordGenerator;
@@ -82,6 +84,8 @@ public class TenantServiceImpl implements TenantService {
     private final PermissionCacheService permissionCacheService;
     private final RefreshTokenService refreshTokenService;
     private final TenantFilterService tenantFilterService;
+    private final TenantProperties tenantProperties;
+    private final TenantDataPurger tenantDataPurger;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -97,7 +101,9 @@ public class TenantServiceImpl implements TenantService {
                              TenantLookup tenantLookup,
                              PermissionCacheService permissionCacheService,
                              RefreshTokenService refreshTokenService,
-                             TenantFilterService tenantFilterService) {
+                             TenantFilterService tenantFilterService,
+                             TenantProperties tenantProperties,
+                             TenantDataPurger tenantDataPurger) {
         this.tenantRepository = tenantRepository;
         this.packageRepository = packageRepository;
         this.roleRepository = roleRepository;
@@ -110,6 +116,8 @@ public class TenantServiceImpl implements TenantService {
         this.permissionCacheService = permissionCacheService;
         this.refreshTokenService = refreshTokenService;
         this.tenantFilterService = tenantFilterService;
+        this.tenantProperties = tenantProperties;
+        this.tenantDataPurger = tenantDataPurger;
     }
 
     @Override
@@ -212,7 +220,7 @@ public class TenantServiceImpl implements TenantService {
                 .map(tenant -> new TenantView(tenant.getId(), tenant.getTenantCode(), tenant.getTenantName(),
                         tenant.getStatus(), tenant.getPackageId(),
                         tenant.getPackageId() == null ? null : packageNames.get(tenant.getPackageId()),
-                        tenant.getExpireTime(), tenant.getCreateTime()))
+                        tenant.getExpireTime(), tenant.getPurgeAt(), tenant.getCreateTime()))
                 .toList();
         return PageResult.of(page.getTotalElements(), views);
     }
@@ -301,6 +309,55 @@ public class TenantServiceImpl implements TenantService {
             return;
         }
         log.info("租户有效期已修改 tenantId={} expireTime={}", tenantId, expireTime);
+    }
+
+    @Override
+    public void close(Long tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (tenant.getStatus() != null && tenant.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "请先禁用租户,再执行注销");
+        }
+        if (tenant.getPurgeAt() != null) {
+            throw new BusinessException(ErrorCode.DATA_CONFLICT, "该租户已注销,无需重复操作");
+        }
+        tenant.setPurgeAt(LocalDateTime.now().plusDays(tenantProperties.purgeAfterDays()));
+        log.warn("租户已注销 tenantId={} 数据将于 {} 清理(期间可取消注销)", tenantId, tenant.getPurgeAt());
+    }
+
+    @Override
+    public void cancelClose(Long tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (tenant.getPurgeAt() == null) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "该租户没有处于注销状态");
+        }
+        tenant.setPurgeAt(null);
+        // 数据一行都没动过,所以这里只是把"到期清理"取消掉;租户仍是禁用状态,要恢复使用还得启用
+        log.info("租户已取消注销 tenantId={}", tenantId);
+    }
+
+    @Override
+    public int purgeExpiredTenants() {
+        // 与到期禁用同一套:平台级跨租户操作,用超管上下文表达(见 DataScopeBypass 的说明)
+        return TenantContext.callAsTenant(null, true, () -> {
+            tenantFilterService.apply(entityManager);
+
+            QTenant qTenant = QTenant.tenant;
+            BooleanBuilder where = new BooleanBuilder();
+            where.and(qTenant.purgeAt.isNotNull());
+            where.and(qTenant.purgeAt.loe(LocalDateTime.now()));
+            List<Tenant> closed = tenantRepository.findAll(where, Pageable.unpaged()).getContent();
+
+            closed.forEach(tenant -> {
+                // 先把缓存清掉:数据都没了,不能让 TTL 内的快照还指着它
+                tenantLookup.evict(toSnapshot(tenant));
+                int deleted = tenantDataPurger.purge(tenant.getId());
+                log.warn("已物理删除注销租户 tenantId={} tenantCode={} 共 {} 行",
+                        tenant.getId(), tenant.getTenantCode(), deleted);
+            });
+            return closed.size();
+        });
     }
 
     @Override

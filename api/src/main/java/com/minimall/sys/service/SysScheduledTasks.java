@@ -63,6 +63,22 @@ public class SysScheduledTasks {
         });
     }
 
+    /**
+     * 清理已过保留期的注销租户(每天 4:10)。
+     *
+     * <p>**不可逆**:执行前唯一的退路是管理员先导出数据存档(见 TenantDataExporter)。
+     * 保留期默认 90 天(见 minimall.tenant.purge-after-days),期间可以取消注销。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.tenant-purge:0 10 4 * * ?}")
+    public void purgeClosedTenants() {
+        taskLock.runIfNotLocked("注销租户数据清理", () -> {
+            int purged = tenantService.purgeExpiredTenants();
+            if (purged > 0) {
+                log.warn("注销租户数据清理:已物理删除 {} 个租户的全部数据", purged);
+            }
+        });
+    }
+
     /** 提醒阈值取字典;取不到或不是整数就用默认值 —— 配置问题不该让任务整体卡住。 */
     private int noticeDays() {
         try {

@@ -56,6 +56,24 @@ public interface TenantService {
     List<TenantSnapshot> listExpiringBetween(LocalDateTime from, LocalDateTime to);
 
     /**
+     * 注销租户:必须先禁用,再走这一步。记录数据清理时间(默认 90 天后),期间数据一行不动。
+     *
+     * <p>两步走是刻意的:注销不可逆(到期后数据被物理删除),一步到位太容易误点。
+     * 禁用那一步已经会踢下线并撤销刷新令牌,租户立刻不可用。
+     */
+    void close(Long tenantId);
+
+    /** 取消注销:保留期内都有效。数据本来就还在,清掉清理时间即可(租户仍是禁用状态)。 */
+    void cancelClose(Long tenantId);
+
+    /**
+     * 物理删除已过保留期的注销租户及其全部数据,返回清理的租户数。
+     *
+     * <p>仅供定时任务调用。不可逆,删除前唯一的退路是导出存档(见 TenantDataExporter)。
+     */
+    int purgeExpiredTenants();
+
+    /**
      * 把已过有效期的启用中租户置为禁用,返回处理条数。
      *
      * <p>仅供定时任务调用:有效期此前只是"用户请求时被动校验",没人主动处理,

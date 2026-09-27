@@ -13,6 +13,8 @@ public record TenantView(
         Long packageId,
         String packageName,
         LocalDateTime expireTime,
+        /** 非空表示已注销,这是数据被物理删除的时间(保留期内可取消注销) */
+        LocalDateTime purgeAt,
         LocalDateTime createTime
 ) {
 }

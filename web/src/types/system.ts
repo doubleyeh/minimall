@@ -145,6 +145,8 @@ export interface TenantView {
   packageId: Id | null
   packageName: string | null
   expireTime: string | null
+  /** 非空表示已注销,这是数据被物理删除的时间(保留期内可取消注销) */
+  purgeAt: string | null
   createTime: string | null
 }
 

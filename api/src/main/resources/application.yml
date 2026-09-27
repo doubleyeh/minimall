@@ -81,6 +81,9 @@ minimall:
       # 不代表免鉴权 —— ClientAuthFilter 对 /mall/api/** 除公开清单外一律要求有效令牌。
       - /mall/api/**
     tenant-status-cache-seconds: 60
+    # 注销到物理清理的保留期(天)。这段时间数据一行不动,只是不允许登录 ——
+    # 删错了还能取消注销救回来;到期后由任务真删,那时只能靠导出留的存档
+    purge-after-days: 90
   # 权限缓存(架构文档 5.5):key 带租户级版本号,失效只需 INCR 版本号
   permission:
     cache-ttl-seconds: 7200
@@ -117,6 +120,7 @@ minimall:
       after-sale-timeout: "0 15 * * * ?"
       expire-coupon-records: "0 30 3 * * ?"
       tenant-expiry: "0 50 3 * * ?"
+      tenant-purge: "0 10 4 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600

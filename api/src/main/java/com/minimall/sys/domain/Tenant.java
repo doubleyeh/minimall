@@ -36,6 +36,10 @@ public class Tenant extends BaseAuditEntity {
     private Long packageId;
 
     /** 为空表示不过期 */
+    /** 注销后的数据清理时间:到点由任务物理删除该租户的全部数据(架构文档 4.11) */
+    @Column(name = "purge_at")
+    private LocalDateTime purgeAt;
+
     @Column(name = "expire_time")
     private LocalDateTime expireTime;
 }

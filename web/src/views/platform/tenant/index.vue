@@ -121,17 +121,20 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NDropdown, NTag, useDialog, useMessage } from 'naive-ui'
 import { h, onMounted, reactive, ref } from 'vue'
 
 import { pagePackages } from '@/api/package'
 import {
+  cancelCloseTenant,
   changeTenantExpireTime,
   changeTenantPackage,
   changeTenantStatus,
+  closeTenant,
   createTenant,
   pageTenants,
 } from '@/api/tenant'
+import { download } from '@/utils/request'
 import { usePermissionStore } from '@/stores/permission'
 import type { Id } from '@/types/api'
 import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
@@ -195,13 +198,22 @@ const columns: DataTableColumns<TenantView> = [
   {
     title: '状态',
     key: 'status',
-    width: 100,
-    render: (row) =>
-      h(
+    width: 150,
+    render: (row) => {
+      if (row.purgeAt) {
+        // 已注销:禁用的一个特殊状态 —— 差在"到点会被物理删除",必须显眼
+        return h(
+          NTag,
+          { size: 'small', type: 'error', bordered: false },
+          { default: () => `已注销 ${row.purgeAt?.slice(0, 10) ?? ''} 清理` },
+        )
+      }
+      return h(
         NTag,
         { size: 'small', type: row.status === 1 ? 'success' : 'default', bordered: false },
         { default: () => (row.status === 1 ? '启用' : '禁用') },
-      ),
+      )
+    },
   },
   { title: '有效期', key: 'expireTime', width: 180, render: (row) => row.expireTime ?? '不过期' },
   {
@@ -227,6 +239,14 @@ const columns: DataTableColumns<TenantView> = [
                 onClick: () => onToggleStatus(row),
               },
               { default: () => (row.status === 1 ? '禁用' : '启用') },
+            )
+          : null,
+        // 注销相关收进下拉:它们的终点是"数据被物理删除",和日常操作并排容易被顺手点到
+        permission.hasPerm('system:tenant:close') && !isPlatformTenant
+          ? h(
+              NDropdown,
+              { options: closeOptionsOf(row), onSelect: (key: string) => onCloseAction(key, row) },
+              { default: () => h(NButton, { size: 'tiny' }, { default: () => '更多 ▾' }) },
             )
           : null,
       ])
@@ -337,6 +357,59 @@ async function onChangePackage(): Promise<void> {
   } finally {
     submitting.value = false
   }
+}
+
+// ——— 注销 / 取消注销 / 导出存档 ———
+
+/**
+ * 注销是"两步 + 保留期"的设计:先禁用,再注销;保留期(默认 3 个月)内数据一行不动,
+ * 所以下拉项按状态给出当前可做的那一个,避免出现"点了才知道不行"。
+ */
+function closeOptionsOf(row: TenantView): Array<{ label: string; key: string }> {
+  if (row.purgeAt) {
+    return [
+      { label: '导出数据存档', key: 'export' },
+      { label: '取消注销', key: 'cancel' },
+    ]
+  }
+  return [{ label: row.status === 1 ? '注销(需先禁用)' : '注销', key: 'close' }]
+}
+
+async function onCloseAction(key: string, row: TenantView): Promise<void> {
+  if (key === 'export') {
+    await download(`/system/tenants/${row.id}/data-export`, undefined, `tenant-${row.tenantCode}.zip`)
+    return
+  }
+  if (key === 'cancel') {
+    dialog.warning({
+      title: '取消注销',
+      content: '取消后该租户不再进入清理流程。数据本来就还在,但租户仍是禁用状态,要用还得先启用。',
+      positiveText: '确认取消注销',
+      negativeText: '再想想',
+      onPositiveClick: async () => {
+        await cancelCloseTenant(row.id)
+        message.success('已取消注销')
+        await load()
+      },
+    })
+    return
+  }
+  if (row.status === 1) {
+    message.warning('请先禁用该租户,再执行注销')
+    return
+  }
+  dialog.error({
+    title: '注销租户',
+    content: `注销后 3 个月内数据保留但不可用,到期将被【物理删除且不可恢复】。`
+      + '删除前建议先导出数据存档。确认注销?',
+    positiveText: '确认注销',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await closeTenant(row.id)
+      message.success('已注销,可在到期前取消,或先导出数据存档')
+      await load()
+    },
+  })
 }
 
 // ——— 改有效期 ———
