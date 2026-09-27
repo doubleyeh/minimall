@@ -6,64 +6,20 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 日志脱敏的单元测试(架构文档 7.2)。
+ * 单值脱敏与截断的单元测试(架构文档 7.2)。
  *
- * <p>为什么这条用例值得单写:操作日志是**明文落库**的,脱敏是唯一的防线,
- * 而它的失效不会有任何报错——只有"密码出现在日志表里"这一个后果。
- * 这里不依赖 DB/Redis,所以它会在每次 {@code mvn test} 里跑。
+ * <p>文本级的字段脱敏(整个请求体那种)已经移到 {@code Masker},那里规则可配置;
+ * 这里剩下的两件事与配置无关:手机号这种"已知是手机号"的单值处理,以及文本截断。
  */
 class MaskingTest {
 
     @Test
-    @DisplayName("字典型参数里的密码/令牌/密钥被掩码")
-    void masksSensitiveKeysInMapLikeText() {
-        String params = "{username=admin, password=admin123, token=abc.def.ghi, secret=s3cr3t}";
-
-        String masked = Masking.maskSensitiveText(params);
-
-        assertThat(masked).doesNotContain("admin123").doesNotContain("abc.def.ghi").doesNotContain("s3cr3t");
-        assertThat(masked).contains("username=admin");
-        assertThat(masked).contains("password=***");
-    }
-
-    @Test
-    @DisplayName("record 的 toString 形态同样会被掩码(login 请求体的真实形态)")
-    void masksRecordToString() {
-        // 登录请求的 toString 长这样:LoginRequest[tenantCode=acme, username=admin, password=admin123, deviceId=...]
-        String params = "LoginRequest[tenantCode=acme, username=admin, password=admin123, deviceId=web-1]";
-
-        String masked = Masking.maskSensitiveText(params);
-
-        assertThat(masked).doesNotContain("admin123");
-        assertThat(masked).contains("password=***");
-        assertThat(masked).contains("tenantCode=acme");
-    }
-
-    @Test
-    @DisplayName("改密接口的新旧密码都被掩码")
-    void masksBothOldAndNewPassword() {
-        String params = "ChangePasswordRequest[oldPassword=old12345, newPassword=new12345]";
-
-        String masked = Masking.maskSensitiveText(params);
-
-        assertThat(masked).doesNotContain("old12345").doesNotContain("new12345");
-    }
-
-    @Test
     @DisplayName("手机号保留前3后4,中间打码")
     void masksPhoneKeepingHeadAndTail() {
-        String masked = Masking.maskSensitiveText("UserSaveRequest[username=u1, phone=13800138000]");
-
-        assertThat(masked).contains("138****8000");
-        assertThat(masked).doesNotContain("13800138000");
-    }
-
-    @Test
-    @DisplayName("不碰无关内容:普通参数原样保留")
-    void keepsNonSensitiveContent() {
-        String params = "RoleMenuGrantRequest[menuIds=[11, 12, 13]]";
-
-        assertThat(Masking.maskSensitiveText(params)).isEqualTo(params);
+        assertThat(Masking.maskPhone("13800138000")).isEqualTo("138****8000");
+        assertThat(Masking.maskPhone(null)).isNull();
+        assertThat(Masking.maskPhone("  ")).isEqualTo("  ");
+        assertThat(Masking.maskPhone("123")).as("短到没法保留前后时整段打码").isEqualTo("***");
     }
 
     @Test
@@ -82,15 +38,7 @@ class MaskingTest {
     @Test
     @DisplayName("空值与未超长文本原样返回,不抛异常")
     void handlesEmptyAndShortText() {
-        assertThat(Masking.maskSensitiveText(null)).isNull();
-        assertThat(Masking.maskSensitiveText("")).isEmpty();
         assertThat(Masking.truncate("short", 4000)).isEqualTo("short");
         assertThat(Masking.truncate(null, 4000)).isNull();
-    }
-
-    @Test
-    @DisplayName("phone 字段脱敏与 maskPhone 的单值脱敏结果一致")
-    void phoneMaskingIsConsistentWithSingleValueVersion() {
-        assertThat(Masking.maskSensitiveText("phone=13800138000")).contains(Masking.maskPhone("13800138000"));
     }
 }

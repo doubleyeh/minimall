@@ -46,9 +46,11 @@ public class OperLogAspect {
     private static final int FAILURE = 0;
 
     private final OperLogWriter writer;
+    private final Masker masker;
 
-    public OperLogAspect(OperLogWriter writer) {
+    public OperLogAspect(OperLogWriter writer, Masker masker) {
         this.writer = writer;
+        this.masker = masker;
     }
 
     @Around("@annotation(auditLog)")
@@ -73,7 +75,7 @@ public class OperLogAspect {
             // 失败也要记,而且要把错误信息带上——"哪些操作在报错"正是操作日志最常用的用法
             writer.write(new OperLogEntry(audit.tenantId(), audit.userId(), auditLog.module(), auditLog.permCode(),
                     method, requestParams, FAILURE,
-                    Masking.truncate(Masking.maskSensitiveText(describeError(ex)), MAX_TEXT_LENGTH),
+                    Masking.truncate(masker.mask(describeError(ex)), MAX_TEXT_LENGTH),
                     audit.ip(), traceId, LocalDateTime.now()));
             throw ex;
         }
@@ -97,7 +99,7 @@ public class OperLogAspect {
             return null;
         }
         // 脱敏必须在主线程完成:交给异步线程意味着敏感内容会多存活一段时间,而且那时拼串成本也在异步侧
-        return Masking.truncate(Masking.maskSensitiveText(text), MAX_TEXT_LENGTH);
+        return Masking.truncate(masker.mask(text), MAX_TEXT_LENGTH);
     }
 
     private String describeMethod(ProceedingJoinPoint joinPoint) {

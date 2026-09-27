@@ -120,6 +120,28 @@ minimall:
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600
+  # 日志脱敏(架构文档 7.2):字段名单放配置里,线上发现漏了某个字段加一行重启即可
+  masking:
+    sensitive-fields:
+      - password
+      - oldPassword
+      - newPassword
+      - confirmPassword
+      - pwd
+      - token
+      - accessToken
+      - refreshToken
+      - secret
+      - appSecret
+      - privateKey
+      - idCard
+      - idNumber
+      - bankCard
+    phone-fields:
+      - phone
+      - mobile
+      - mobilePhone
+      - telephone
   # 文件存储(架构文档 7.5):本地磁盘实现。换对象存储时实现 FileStorage 接口即可,业务侧不动
   file:
     # 生产必须挂持久卷,否则重启即丢。目录会按租户 + 日期分好,便于排查与清理
