@@ -32,8 +32,8 @@ import java.util.function.Consumer;
  *       需要跨租户的能力时应该显式加方法,而不是靠这里的参数</li>
  * </ol>
  *
- * <p>多实例部署时 {@code @Scheduled} 会在每个实例上触发、同一批租户被处理多遍,
- * 需要分布式锁或调度中心,本方案未展开(见架构文档 6.2 与第 10 节)。
+ * <p>多实例部署时 {@code @Scheduled} 会在每个实例上触发:互斥由调用方的
+ * {@code ScheduledTaskLock} 保证(抢不到锁就整个跳过),本类只管"一个实例内逐个租户"。
  */
 @Component
 public class TenantTaskRunner {

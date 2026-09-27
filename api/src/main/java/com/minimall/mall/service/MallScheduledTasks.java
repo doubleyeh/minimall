@@ -4,6 +4,7 @@ import com.minimall.sys.api.dto.DictItemView;
 import com.minimall.mall.service.MarketingMaintenanceService;
 import com.minimall.mall.service.OrderService;
 import com.minimall.sys.service.DictService;
+import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.sys.service.support.TenantTaskRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,8 +28,8 @@ import java.util.List;
  *       "人做的"和"系统做的"),这里用固定的系统操作人 ID,并在流水备注里写清是系统行为</li>
  * </ol>
  *
- * <p>注意:售后相关的三个超时任务还没实现 —— 售后流程本身尚未开发(见待办),
- * 补上售后后在这里加对应任务即可,骨架与下面这些完全一致。
+ * <p>四个任务都先抢 Redis 锁再执行(多实例部署时同一批数据只能被处理一遍,见架构文档 6.2),
+ * 抢不到锁就整个跳过。
  */
 @Component
 public class MallScheduledTasks {
@@ -53,47 +54,55 @@ public class MallScheduledTasks {
     private final AfterSaleService afterSaleService;
     private final MarketingMaintenanceService marketingMaintenanceService;
     private final DictService dictService;
+    private final ScheduledTaskLock taskLock;
 
     public MallScheduledTasks(TenantTaskRunner tenantTaskRunner,
                               OrderService orderService,
                               AfterSaleService afterSaleService,
                               MarketingMaintenanceService marketingMaintenanceService,
-                              DictService dictService) {
+                              DictService dictService,
+                              ScheduledTaskLock taskLock) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
         this.afterSaleService = afterSaleService;
         this.marketingMaintenanceService = marketingMaintenanceService;
         this.dictService = dictService;
+        this.taskLock = taskLock;
     }
 
     /** 订单超时关闭(每分钟)。 */
     @Scheduled(cron = "0 * * * * ?")
     public void closeTimeoutOrders() {
-        int minutes = dictInt(DICT_PAY_TIMEOUT, DEFAULT_PAY_TIMEOUT_MINUTES);
-        LocalDateTime deadline = LocalDateTime.now().minusMinutes(minutes);
-        var result = tenantTaskRunner.runForEachTenant("关闭超时未支付订单", SYSTEM_ACTOR_ID,
-                tenantId -> {
-                    int closed = orderService.closeTimeoutOrders(deadline);
-                    if (closed > 0) {
-                        log.info("租户 {} 关闭超时未支付订单 {} 笔", tenantId, closed);
-                    }
-                });
-        logIfFailed("关闭超时未支付订单", result);
+        // 多实例部署时每个实例都会触发:MallScheduledTasks 的四个任务都要抢锁,抢不到就整个跳过
+        taskLock.runIfNotLocked("关闭超时未支付订单", () -> {
+            int minutes = dictInt(DICT_PAY_TIMEOUT, DEFAULT_PAY_TIMEOUT_MINUTES);
+            LocalDateTime deadline = LocalDateTime.now().minusMinutes(minutes);
+            var result = tenantTaskRunner.runForEachTenant("关闭超时未支付订单", SYSTEM_ACTOR_ID,
+                    tenantId -> {
+                        int closed = orderService.closeTimeoutOrders(deadline);
+                        if (closed > 0) {
+                            log.info("租户 {} 关闭超时未支付订单 {} 笔", tenantId, closed);
+                        }
+                    });
+            logIfFailed("关闭超时未支付订单", result);
+        });
     }
 
     /** 订单自动确认收货(每小时)。 */
     @Scheduled(cron = "0 0 * * * ?")
     public void autoReceiveOrders() {
-        int days = dictInt(DICT_AUTO_RECEIVE, DEFAULT_AUTO_RECEIVE_DAYS);
-        LocalDateTime deadline = LocalDateTime.now().minusDays(days);
-        var result = tenantTaskRunner.runForEachTenant("订单自动确认收货", SYSTEM_ACTOR_ID,
-                tenantId -> {
-                    int finished = orderService.autoReceiveOrders(deadline);
-                    if (finished > 0) {
-                        log.info("租户 {} 自动确认收货 {} 笔", tenantId, finished);
-                    }
-                });
-        logIfFailed("订单自动确认收货", result);
+        taskLock.runIfNotLocked("订单自动确认收货", () -> {
+            int days = dictInt(DICT_AUTO_RECEIVE, DEFAULT_AUTO_RECEIVE_DAYS);
+            LocalDateTime deadline = LocalDateTime.now().minusDays(days);
+            var result = tenantTaskRunner.runForEachTenant("订单自动确认收货", SYSTEM_ACTOR_ID,
+                    tenantId -> {
+                        int finished = orderService.autoReceiveOrders(deadline);
+                        if (finished > 0) {
+                            log.info("租户 {} 自动确认收货 {} 笔", tenantId, finished);
+                        }
+                    });
+            logIfFailed("订单自动确认收货", result);
+        });
     }
 
     /**
@@ -104,35 +113,39 @@ public class MallScheduledTasks {
      */
     @Scheduled(cron = "0 15 * * * ?")
     public void handleAfterSaleTimeout() {
-        // 三档阈值存在同一个字典类型下(按标签区分),这里按标签取值的顺序与 V4 种子数据一致:
-        // 1-商家处理(小时) 2-买家退货(天) 3-商家收货(天)
-        int merchantHours = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 0, DEFAULT_AFTER_SALE_MERCHANT_HOURS);
-        int buyerDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 1, DEFAULT_AFTER_SALE_BUYER_DAYS);
-        int receiveDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 2, DEFAULT_AFTER_SALE_RECEIVE_DAYS);
-        LocalDateTime now = LocalDateTime.now();
-        var result = tenantTaskRunner.runForEachTenant("售后超时处理", SYSTEM_ACTOR_ID, tenantId -> {
-            int autoApproved = afterSaleService.autoApproveTimeout(now.minusHours(merchantHours));
-            int closed = afterSaleService.autoCloseTimeout(now.minusDays(buyerDays));
-            int autoReceived = afterSaleService.autoReceiveTimeout(now.minusDays(receiveDays));
-            if (autoApproved + closed + autoReceived > 0) {
-                log.info("租户 {} 售后超时处理:自动同意 {} / 自动关闭 {} / 自动收货 {}",
-                        tenantId, autoApproved, closed, autoReceived);
-            }
+        taskLock.runIfNotLocked("售后超时处理", () -> {
+            // 三档阈值存在同一个字典类型下(按标签区分),这里按标签取值的顺序与 V4 种子数据一致:
+            // 1-商家处理(小时) 2-买家退货(天) 3-商家收货(天)
+            int merchantHours = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 0, DEFAULT_AFTER_SALE_MERCHANT_HOURS);
+            int buyerDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 1, DEFAULT_AFTER_SALE_BUYER_DAYS);
+            int receiveDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 2, DEFAULT_AFTER_SALE_RECEIVE_DAYS);
+            LocalDateTime now = LocalDateTime.now();
+            var result = tenantTaskRunner.runForEachTenant("售后超时处理", SYSTEM_ACTOR_ID, tenantId -> {
+                int autoApproved = afterSaleService.autoApproveTimeout(now.minusHours(merchantHours));
+                int closed = afterSaleService.autoCloseTimeout(now.minusDays(buyerDays));
+                int autoReceived = afterSaleService.autoReceiveTimeout(now.minusDays(receiveDays));
+                if (autoApproved + closed + autoReceived > 0) {
+                    log.info("租户 {} 售后超时处理:自动同意 {} / 自动关闭 {} / 自动收货 {}",
+                            tenantId, autoApproved, closed, autoReceived);
+                }
+            });
+            logIfFailed("售后超时处理", result);
         });
-        logIfFailed("售后超时处理", result);
     }
 
     /** 优惠券过期清理(每天 3:30,避开业务高峰)。 */
     @Scheduled(cron = "0 30 3 * * ?")
     public void expireCouponRecords() {
-        var result = tenantTaskRunner.runForEachTenant("优惠券过期清理", SYSTEM_ACTOR_ID,
-                tenantId -> {
-                    int expired = marketingMaintenanceService.expireOutdatedCouponRecords();
-                    if (expired > 0) {
-                        log.info("租户 {} 过期优惠券清理 {} 条", tenantId, expired);
-                    }
-                });
-        logIfFailed("优惠券过期清理", result);
+        taskLock.runIfNotLocked("优惠券过期清理", () -> {
+            var result = tenantTaskRunner.runForEachTenant("优惠券过期清理", SYSTEM_ACTOR_ID,
+                    tenantId -> {
+                        int expired = marketingMaintenanceService.expireOutdatedCouponRecords();
+                        if (expired > 0) {
+                            log.info("租户 {} 过期优惠券清理 {} 条", tenantId, expired);
+                        }
+                    });
+            logIfFailed("优惠券过期清理", result);
+        });
     }
 
     /** 读字典里的整数配置;取不到或格式不对时用默认值,并把情况记下来。 */

@@ -1,5 +1,6 @@
 package com.minimall.sys.service;
 
+import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.infra.tenant.TenantSnapshot;
 import com.minimall.sys.api.dto.DictItemView;
 import org.slf4j.Logger;
@@ -27,10 +28,12 @@ public class SysScheduledTasks {
 
     private final TenantService tenantService;
     private final DictService dictService;
+    private final ScheduledTaskLock taskLock;
 
-    public SysScheduledTasks(TenantService tenantService, DictService dictService) {
+    public SysScheduledTasks(TenantService tenantService, DictService dictService, ScheduledTaskLock taskLock) {
         this.tenantService = tenantService;
         this.dictService = dictService;
+        this.taskLock = taskLock;
     }
 
     /**
@@ -42,19 +45,22 @@ public class SysScheduledTasks {
      */
     @Scheduled(cron = "0 50 3 * * ?")
     public void handleTenantExpiry() {
-        LocalDateTime now = LocalDateTime.now();
-        int noticeDays = noticeDays();
+        // 多实例部署时每个实例都会触发,必须抢锁:重复执行会把同一批租户禁两遍(幂等但不该白跑)
+        taskLock.runIfNotLocked("租户到期处理", () -> {
+            LocalDateTime now = LocalDateTime.now();
+            int noticeDays = noticeDays();
 
-        List<TenantSnapshot> expiring = tenantService.listExpiringBetween(now, now.plusDays(noticeDays));
-        if (!expiring.isEmpty()) {
-            log.warn("有 {} 个租户将在 {} 天内到期,请及时续期:{}", expiring.size(), noticeDays,
-                    expiring.stream().map(t -> t.tenantCode() + "(" + t.expireTime() + ")").toList());
-        }
+            List<TenantSnapshot> expiring = tenantService.listExpiringBetween(now, now.plusDays(noticeDays));
+            if (!expiring.isEmpty()) {
+                log.warn("有 {} 个租户将在 {} 天内到期,请及时续期:{}", expiring.size(), noticeDays,
+                        expiring.stream().map(t -> t.tenantCode() + "(" + t.expireTime() + ")").toList());
+            }
 
-        int disabled = tenantService.disableExpiredTenants();
-        if (disabled > 0) {
-            log.info("租户到期处理:已禁用 {} 个到期租户", disabled);
-        }
+            int disabled = tenantService.disableExpiredTenants();
+            if (disabled > 0) {
+                log.info("租户到期处理:已禁用 {} 个到期租户", disabled);
+            }
+        });
     }
 
     /** 提醒阈值取字典;取不到或不是整数就用默认值 —— 配置问题不该让任务整体卡住。 */
