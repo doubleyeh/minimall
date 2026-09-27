@@ -19,6 +19,8 @@ public enum ErrorCode {
 
     UNAUTHORIZED(40100, "未登录或登录已过期"),
     TENANT_ABNORMAL(40101, "租户状态异常,请联系管理员"),
+    /** 幂等键重复且上一次请求还没结束(见 IdempotencyFilter) */
+    DUPLICATE_REQUEST(40901, "请求正在处理中,请勿重复提交"),
     IP_RATE_LIMITED(42900, "请求过于频繁,请稍后重试"),
 
     FORBIDDEN(40300, "无操作权限"),
