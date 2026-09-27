@@ -4,6 +4,7 @@ import com.minimall.common.PageResult;
 import com.minimall.sys.api.dto.OperLogQuery;
 import com.minimall.sys.api.dto.OperLogView;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -22,4 +23,12 @@ public interface OperLogService {
      * 静默截断的导出最危险:拿到文件的人会以为"就这么多",而缺的正好是问题最多的一段。
      */
     List<OperLogView> listForExport(OperLogQuery query, int limit);
+
+    /**
+     * 取 {@code deadline} 之前最早的若干条(按 ID 升序),供归档任务按批处理。
+     *
+     * <p>按 ID 升序而不是时间:归档是"边写文件边删库",必须有一个稳定的推进方向,
+     * 而 ID 单调递增,用它做游标不会漏也不会重复读。
+     */
+    List<OperLogView> listOlderThan(LocalDateTime deadline, int limit);
 }

@@ -37,7 +37,13 @@ public final class CsvExporter {
         return csv.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private static String line(List<String> cells) {
+    /**
+     * 单行 CSV(含行尾换行)。
+     *
+     * <p>暴露它是为了"边写边删"的场景:审计日志归档要按批追加写文件,不能把几十万行
+     * 先攒在内存里再一次性生成。
+     */
+    public static String line(List<String> cells) {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < cells.size(); i++) {
             if (i > 0) {
@@ -49,6 +55,11 @@ public final class CsvExporter {
     }
 
     /** 含分隔符、引号、换行时必须整体加引号并把内部引号翻倍,否则列会错位。 */
+    /** 表头行,与 {@link #toCsv} 用的同一套转义。 */
+    public static String header(List<String> headers) {
+        return line(headers);
+    }
+
     private static String escape(String value) {
         if (value == null || value.isEmpty()) {
             return "";

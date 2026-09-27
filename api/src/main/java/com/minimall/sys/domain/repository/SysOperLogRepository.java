@@ -2,8 +2,12 @@ package com.minimall.sys.domain.repository;
 
 import com.minimall.sys.domain.SysOperLog;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.querydsl.QuerydslPredicateExecutor;
+import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -29,4 +33,14 @@ public interface SysOperLogRepository extends JpaRepository<SysOperLog, Long>,
      * 测试里断言"异步线程写入的 tenant_id/user_id 与提交时一致"(8.4)也依赖它。
      */
     Optional<SysOperLog> findFirstByTraceIdOrderByIdDesc(String traceId);
+
+    /**
+     * 归档后按游标删除:只删 {@code deadline} 之前、且 ID 不超过 {@code maxId} 的日志。
+     *
+     * <p>用 ID 做游标(而不是只按时间)是为了让"边写文件边删库"有一个稳定的推进边界:
+     * 时间相同的行可能有很多,只按时间删会把还没写进归档文件的行一起删掉。
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from SysOperLog l where l.createTime < :deadline and l.id <= :maxId")
+    int deleteArchivedUpTo(@Param("deadline") LocalDateTime deadline, @Param("maxId") Long maxId);
 }

@@ -16,6 +16,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -70,6 +71,14 @@ public class OperLogServiceImpl implements OperLogService {
         return new OperLogView(log.getId(), log.getTenantId(), log.getUserId(), log.getModule(),
                 log.getPermCode(), log.getMethod(), log.getRequestParams(), log.getStatus(),
                 log.getErrorMsg(), log.getIp(), log.getTraceId(), log.getCreateTime());
+    }
+
+    @Override
+    public List<OperLogView> listOlderThan(LocalDateTime deadline, int limit) {
+        BooleanBuilder where = new BooleanBuilder(QSysOperLog.sysOperLog.createTime.before(deadline));
+        Page<SysOperLog> page = operLogRepository.findAll(where,
+                PageRequest.of(0, Math.max(limit, 1), Sort.by(Sort.Direction.ASC, "id")));
+        return page.getContent().stream().map(OperLogServiceImpl::toView).toList();
     }
 
     @Override

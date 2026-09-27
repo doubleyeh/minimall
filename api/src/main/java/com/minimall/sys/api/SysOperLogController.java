@@ -7,6 +7,7 @@ import com.minimall.sys.api.dto.OperLogQuery;
 import com.minimall.sys.api.dto.OperLogView;
 import com.minimall.infra.export.CsvExporter;
 import com.minimall.sys.service.OperLogService;
+import com.minimall.sys.service.support.OperLogCsv;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -34,8 +35,6 @@ public class SysOperLogController {
 
     /** 导出上限。超过就报错让调用方缩小范围,不静默截断(见 service 的说明)。 */
     private static final int EXPORT_MAX_ROWS = 10000;
-    private static final List<String> HEADERS = List.of(
-            "时间", "租户ID", "用户ID", "模块", "权限码", "方法", "结果", "错误信息", "IP", "traceId", "请求参数");
 
     private final OperLogService operLogService;
 
@@ -82,7 +81,9 @@ public class SysOperLogController {
         OperLogQuery query = new OperLogQuery(tenantId, userId, module, status, startTime, endTime, 1, 1);
         List<OperLogView> rows = operLogService.listForExport(query, EXPORT_MAX_ROWS);
 
-        byte[] csv = CsvExporter.toCsv(HEADERS, rows.stream().map(SysOperLogController::toRow).toList());
+        // 列定义与归档任务共用一处(OperLogCsv),避免"导出的列"和"归档的列"走偏
+        byte[] csv = CsvExporter.toCsv(OperLogCsv.HEADERS,
+                rows.stream().map(OperLogCsv::cells).toList());
         return ResponseEntity.ok()
                 // 文件名用纯 ASCII:中文文件名要按 RFC 5987 编码,各家浏览器行为还不一致,没必要
                 .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -91,18 +92,4 @@ public class SysOperLogController {
                 .body(csv);
     }
 
-    private static List<String> toRow(OperLogView view) {
-        return List.of(
-                String.valueOf(view.createTime()),
-                view.tenantId() == null ? "" : String.valueOf(view.tenantId()),
-                view.userId() == null ? "" : String.valueOf(view.userId()),
-                view.module(),
-                view.permCode() == null ? "" : view.permCode(),
-                view.method(),
-                view.status() != null && view.status() == 1 ? "成功" : "失败",
-                view.errorMsg() == null ? "" : view.errorMsg(),
-                view.ip() == null ? "" : view.ip(),
-                view.traceId() == null ? "" : view.traceId(),
-                view.requestParams() == null ? "" : view.requestParams());
-    }
 }

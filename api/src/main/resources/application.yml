@@ -121,9 +121,13 @@ minimall:
       expire-coupon-records: "0 30 3 * * ?"
       tenant-expiry: "0 50 3 * * ?"
       tenant-purge: "0 10 4 * * ?"
+      oper-log-archive: "0 40 4 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600
+  # 审计日志归档(架构文档 7.2):超期的先归档成文件、再删库;0 表示不归档
+  audit:
+    archive-after-days: 180
   # 日志脱敏(架构文档 7.2):字段名单放配置里,线上发现漏了某个字段加一行重启即可
   masking:
     sensitive-fields:

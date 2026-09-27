@@ -29,11 +29,17 @@ public class SysScheduledTasks {
     private final TenantService tenantService;
     private final DictService dictService;
     private final ScheduledTaskLock taskLock;
+    private final com.minimall.sys.service.support.OperLogArchiver operLogArchiver;
+    private final com.minimall.infra.audit.AuditProperties auditProperties;
 
-    public SysScheduledTasks(TenantService tenantService, DictService dictService, ScheduledTaskLock taskLock) {
+    public SysScheduledTasks(TenantService tenantService, DictService dictService, ScheduledTaskLock taskLock,
+                             com.minimall.sys.service.support.OperLogArchiver operLogArchiver,
+                             com.minimall.infra.audit.AuditProperties auditProperties) {
         this.tenantService = tenantService;
         this.dictService = dictService;
         this.taskLock = taskLock;
+        this.operLogArchiver = operLogArchiver;
+        this.auditProperties = auditProperties;
     }
 
     /**
@@ -75,6 +81,22 @@ public class SysScheduledTasks {
             int purged = tenantService.purgeExpiredTenants();
             if (purged > 0) {
                 log.warn("注销租户数据清理:已物理删除 {} 个租户的全部数据", purged);
+            }
+        });
+    }
+
+    /**
+     * 审计日志归档(每天 4:40):超过保留期(默认 180 天)的日志先归档成文件再从库里删除。
+     *
+     * <p>与租户清理分开排期,免得两个重任务挤在同一分钟。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.oper-log-archive:0 40 4 * * ?}")
+    public void archiveOperLogs() {
+        taskLock.runIfNotLocked("审计日志归档", () -> {
+            int archived = operLogArchiver.archive();
+            if (archived > 0) {
+                log.warn("审计日志归档:已归档并删除 {} 行(保留期 {} 天)",
+                        archived, auditProperties.archiveAfterDays());
             }
         });
     }
