@@ -114,7 +114,11 @@ export interface ClientOrderView {
   freightAmount: number
   promotionDiscountAmount: number
   couponDiscountAmount: number
+  /** 积分抵现金额 */
+  pointsDiscountAmount: number
   payAmount: number
+  /** 本单用掉的积分数 */
+  pointsUsed: number
   receiverName: string
   receiverPhone: string
   receiverAddress: string
@@ -137,7 +141,11 @@ export interface OrderCreateResponse {
   freightAmount: number
   promotionDiscountAmount: number
   couponDiscountAmount: number
+  /** 积分抵现金额 */
+  pointsDiscountAmount: number
   payAmount: number
+  /** 本单用掉的积分数 */
+  pointsUsed: number
   payParams?: {
     timeStamp: string
     nonceStr: string
@@ -191,6 +199,10 @@ export interface ClientProfileView {
   gender?: number | null
   points: number
   growthValue: number
+  /** 当前等级名;租户还没建任何等级定义时是"普通会员" */
+  memberLevelName: string
+  /** 还差多少成长值升级;已是最高等级时为 null */
+  growthToNextLevel?: number | null
   orderCounts: {
     pendingPay: number
     pendingShip: number
@@ -236,4 +248,58 @@ export interface ReviewCreateRequest {
   content?: string | null
   images?: string[]
   anonymous?: boolean
+}
+
+/**
+ * 结算试算(后端 OrderPreviewView)。
+ *
+ * 结算页展示的金额一律来自它,**端上不自己算**:运费(模板/区域/包邮)、满减、券门槛、
+ * 积分上限都只在服务端算得准,端上自己算一遍会与真实下单漂移,而漂移的方向是少收钱。
+ */
+export interface OrderPreviewView {
+  items: OrderPreviewItemView[]
+  goodsAmount: number
+  promotionDiscountAmount: number
+  couponDiscountAmount: number
+  pointsDiscountAmount: number
+  freightAmount: number
+  payAmount: number
+  /** 本次试算实际用掉的积分 */
+  pointsUsed: number
+  /** 本单最多能用多少积分 —— 端上据此限制"使用积分"的开关能抵多少 */
+  maxRedeemPoints: number
+  /** 上面那些积分值多少钱(由服务端按 100:1 换算,端上不自己除) */
+  maxRedeemAmount: number
+  /** 客户当前可用积分(已剔除过期批次) */
+  customerPoints: number
+  /** 还没选收货地址:此时运费按 0 计,金额不是最终值 */
+  needAddress: boolean
+}
+
+export interface OrderPreviewItemView {
+  skuId: Id
+  goodsId: Id
+  goodsName: string
+  skuName: string
+  goodsImage: string
+  price: number
+  quantity: number
+  totalAmount: number
+  availableStock: number
+}
+
+/**
+ * 积分流水。
+ *
+ * `bizTypeText` 由服务端拼好 —— 小程序与管理端都要这段文案,两边各写一份必然走偏。
+ * `changePoints` 正数是获得、负数是消耗。
+ */
+export interface PointsLogView {
+  id: Id
+  changePoints: number
+  balancePoints: number
+  bizType: number
+  bizTypeText: string
+  remark?: string | null
+  createTime: string
 }

@@ -1,0 +1,18 @@
+<view class="page">
+  <view wx:if="{{rows.length === 0 && !loading}}" class="empty">还没有积分记录</view>
+
+  <view wx:for="{{rows}}" wx:key="id" class="log">
+    <view class="log__body">
+      <view class="log__reason">{{item.reason}}</view>
+      <view wx:if="{{item.remark}}" class="log__remark ellipsis-1">{{item.remark}}</view>
+      <view class="log__time">{{item.time}}</view>
+    </view>
+    <view class="log__right">
+      <text class="log__change {{item.isGain ? 'log__change--gain' : ''}}">{{item.changeText}}</text>
+      <text class="log__balance">{{item.balanceText}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="tip">加载中…</view>
+  <view wx:elif="{{rows.length > 0 && !hasMore}}" class="tip">没有更多了</view>
+</view>

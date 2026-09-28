@@ -1,5 +1,8 @@
 package com.minimall.mall.service;
 
+import com.minimall.common.PageResult;
+import com.minimall.mall.api.dto.PointsLogView;
+
 import java.math.BigDecimal;
 
 /**
@@ -86,4 +89,7 @@ public interface MemberPointsService {
      * @return 实际扣回的积分数
      */
     int clawBack(Long afterSaleId, Long orderId, Long customerId, BigDecimal refundAmount, int afterSaleType);
+
+    /** 某客户的积分流水,最近的在前(小程序"积分明细"与管理端客户详情共用)。 */
+    PageResult<PointsLogView> pageLogs(Long customerId, int pageNo, int pageSize);
 }

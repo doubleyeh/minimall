@@ -7,10 +7,13 @@
         {{nickname}}
         <text class="header__edit">修改</text>
       </view>
-      <view class="header__stats">
+      <view class="header__level">{{memberLevelName}}</view>
+      <view class="header__stats" bindtap="onPointsTap">
         <text>积分 {{points}}</text>
         <text class="header__dot">·</text>
         <text>成长值 {{growthValue}}</text>
+        <text wx:if="{{growthToNextText}}" class="header__next">{{growthToNextText}}</text>
+        <text class="header__arrow">›</text>
       </view>
     </view>
   </view>
@@ -41,6 +44,10 @@
     </view>
     <view class="entry" bindtap="onAddressTap">
       <text>收货地址</text>
+      <text class="entry__arrow">›</text>
+    </view>
+    <view class="entry" bindtap="onPointsTap">
+      <text>积分明细</text>
       <text class="entry__arrow">›</text>
     </view>
     <view class="entry" bindtap="onAfterSaleTap">

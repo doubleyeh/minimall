@@ -15,6 +15,13 @@ public record ClientProfileView(
         Integer gender,
         Integer points,
         Integer growthValue,
+        /**
+         * 当前等级名。没有匹配到任何等级定义时是"普通会员"(见 {@code MallMemberLevel.DEFAULT_LEVEL_NAME})——
+         * 等级定义是每租户自建的,空库下所有客户都是这个。
+         */
+        String memberLevelName,
+        /** 下一等级还差多少成长值;已是最高等级时为 null。 */
+        Integer growthToNextLevel,
         OrderCounts orderCounts) {
 
     /** 个人中心的订单角标。 */

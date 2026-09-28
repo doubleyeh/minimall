@@ -11,7 +11,9 @@ import type {
   ClientProfileView,
   Id,
   OrderCreateResponse,
+  OrderPreviewView,
   PageResult,
+  PointsLogView,
   ReviewCreateRequest,
   ReviewView,
 } from '../types/client'
@@ -116,13 +118,34 @@ export function addressSetDefault(addressId: Id): Promise<void> {
 
 // ---------------------------------------------------------------- 订单
 
+/**
+ * 下单。
+ *
+ * `pointsToUse` 只是"意向"——上限由服务端按商品金额重算,超过就报错而不是静默夹取,
+ * 所以端上要拿试算给的 `maxRedeemPoints` 来传。
+ */
 export function createOrder(data: {
   items?: Array<{ skuId: Id; quantity: number }>
   addressId: Id
   couponRecordId?: Id | null
+  pointsToUse?: number | null
   remark?: string
 }): Promise<OrderCreateResponse> {
   return request.post<OrderCreateResponse>('/mall/api/orders', data)
+}
+
+/**
+ * 结算试算:只算不落单,不占库存、不核销券、不扣积分。
+ *
+ * `addressId` 可空(还没选地址时运费按 0 计,响应的 `needAddress` 会告诉端上)。
+ */
+export function orderPreview(data: {
+  items?: Array<{ skuId: Id; quantity: number }>
+  addressId?: Id | null
+  couponRecordId?: Id | null
+  pointsToUse?: number | null
+}): Promise<OrderPreviewView> {
+  return request.post<OrderPreviewView>('/mall/api/orders/preview', data)
 }
 
 export function orderList(
@@ -242,6 +265,12 @@ export function profile(): Promise<ClientProfileView> {
 
 export function updateProfile(data: { nickname?: string; avatarUrl?: string; gender?: number }): Promise<void> {
   return request.put<void>('/mall/api/profile', data)
+}
+
+/** 我的积分明细。 */
+export function pointsLogs(pageNo = 1, pageSize = 20): Promise<PageResult<PointsLogView>> {
+  const qs = buildQuery({ pageNo, pageSize })
+  return request.get<PageResult<PointsLogView>>(`/mall/api/profile/points-logs?${qs}`)
 }
 
 // ---------------------------------------------------------------- 商品评价

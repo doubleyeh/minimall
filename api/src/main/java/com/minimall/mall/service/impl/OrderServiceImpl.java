@@ -268,6 +268,7 @@ public class OrderServiceImpl implements OrderService {
         return new OrderPreviewView(items, prepared.goodsAmount(), prepared.promotionDiscount(),
                 prepared.couponDiscount(), prepared.pointsDiscount(), calculator.money(prepared.freight()),
                 prepared.payAmount(), prepared.pointsUsed(), prepared.maxRedeemPoints(),
+                calculator.pointsToMoney(prepared.maxRedeemPoints()),
                 prepared.customerPoints(), prepared.address() == null);
     }
 

@@ -8,6 +8,7 @@
     "pages/checkout/index",
     "pages/order-detail/index",
     "pages/coupons/index",
+    "pages/points/index",
     "pages/address/index",
     "pages/after-sale/index",
     "pages/after-sale/apply/index",

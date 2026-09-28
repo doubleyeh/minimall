@@ -49,6 +49,25 @@
   margin: 0 10rpx;
 }
 
+/* 等级徽标:与统计数据分行,避免"积分 1200 · 成长值 800 普通会员"糊成一串 */
+.header__level {
+  display: inline-block;
+  margin-top: 10rpx;
+  padding: 2rpx 16rpx;
+  font-size: 22rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.header__next {
+  margin-left: 10rpx;
+  opacity: 0.8;
+}
+
+.header__arrow {
+  margin-left: 6rpx;
+}
+
 .section-title {
   display: flex;
   justify-content: space-between;

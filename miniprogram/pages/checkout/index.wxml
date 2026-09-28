@@ -1,0 +1,92 @@
+<view class="page page-with-action-bar">
+  <!-- 收货地址:点整块去地址页选(select=1 进入选择模式) -->
+  <view class="card addr" bindtap="onPickAddress">
+    <block wx:if="{{address}}">
+      <view class="addr__head">
+        <text class="addr__name">{{address.receiverName}}</text>
+        <text class="addr__phone">{{address.receiverPhone}}</text>
+      </view>
+      <view class="addr__detail">{{addressText}}</view>
+    </block>
+    <view wx:else class="addr__empty">请选择收货地址</view>
+    <text class="addr__arrow">›</text>
+  </view>
+
+  <!-- 商品 -->
+  <view class="card">
+    <view wx:for="{{itemRows}}" wx:key="skuId" class="line">
+      <image class="line__img" src="{{item.goodsImage}}" mode="aspectFill" />
+      <view class="line__body">
+        <view class="line__name ellipsis-2">{{item.goodsName}}</view>
+        <view class="line__sku">{{item.skuName}}</view>
+      </view>
+      <view class="line__right">
+        <text class="line__price">¥{{item.priceText}}</text>
+        <text class="line__qty">×{{item.quantity}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 优惠与积分的选择 -->
+  <view class="card">
+    <picker mode="selector" range="{{couponLabels}}" value="{{couponIndex}}" bindchange="onCouponChange">
+      <view class="row-between field">
+        <text class="field__label">优惠券</text>
+        <view class="field__value-wrap">
+          <text class="field__value ellipsis-1">{{couponLabels[couponIndex]}}</text>
+          <text class="field__arrow">›</text>
+        </view>
+      </view>
+    </picker>
+
+    <view class="row-between field">
+      <view class="field__stack">
+        <text class="field__label">使用积分</text>
+        <text class="field__hint">{{pointsHint}}</text>
+      </view>
+      <switch checked="{{usePoints}}" bindchange="onUsePointsChange" color="#FF4D1C" />
+    </view>
+
+    <view class="field field--last">
+      <text class="field__label">买家留言</text>
+      <input
+        class="field__input"
+        value="{{remark}}"
+        maxlength="255"
+        placeholder="选填,给商家留言"
+        bindinput="onRemarkInput"
+      />
+    </view>
+  </view>
+
+  <!-- 金额明细:每一行都由服务端试算给出,端上不算 -->
+  <view class="card">
+    <view wx:for="{{amountLines}}" wx:key="label" class="amount-line">
+      <text class="amount-line__label">{{item.label}}</text>
+      <text class="amount-line__value">{{item.minus ? '-¥' : '¥'}}{{item.value}}</text>
+    </view>
+    <view class="amount-line amount-line--total">
+      <text class="amount-line__label">实付</text>
+      <view class="price">
+        <text class="price__symbol">¥</text>
+        <text class="price__value">{{payAmountText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="tip">金额计算中…</view>
+</view>
+
+<view class="action-bar">
+  <view class="action-bar__total">
+    <text class="action-bar__total-label">共 {{totalQuantity}} 件,实付</text>
+    <view class="price">
+      <text class="price__symbol">¥</text>
+      <text class="price__value">{{payAmountText}}</text>
+    </view>
+  </view>
+  <view
+    class="action-bar__btn {{submitting || loading ? 'action-bar__btn--off' : ''}}"
+    bindtap="onSubmit"
+  >{{submitting ? '提交中…' : '提交订单'}}</view>
+</view>

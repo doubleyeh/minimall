@@ -22,6 +22,12 @@ public record OrderPreviewView(
         Integer pointsUsed,
         /** 本单最多能用多少积分 —— 端上据此限制输入框 */
         Integer maxRedeemPoints,
+        /**
+         * 上面那些积分值多少钱。
+         *
+         * <p>单独返回而不是让端上按 100:1 换算:比例是结算规则的一部分,端上抄一份就多一处会漂移的地方。
+         */
+        BigDecimal maxRedeemAmount,
         /** 客户当前可用积分(已剔除过期批次) */
         Integer customerPoints,
         /** 是否还没选收货地址(此时运费按 0 计,金额不是最终值) */

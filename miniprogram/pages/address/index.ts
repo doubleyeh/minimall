@@ -1,6 +1,7 @@
 import { addressCreate, addressDelete, addressList, addressSetDefault, addressUpdate } from '../../api/client'
 import type { AddressView, Id } from '../../types/client'
 import { confirmModal, toast, toastError, toastOk } from '../../utils/ui'
+import { setPendingCheckoutAddress } from '../../utils/nav'
 
 interface AddressRow {
   id: Id
@@ -35,10 +36,29 @@ Page({
     form: { ...EMPTY_FORM, region: [] as string[] },
     regionText: '',
     saving: false,
+    /** 从结算页跳来选地址:此时每一行多一个"选择",点一下就把地址传回去 */
+    selectMode: false,
   },
 
-  onLoad() {
+  onLoad(query: Record<string, string | undefined>) {
+    this.setData({ selectMode: query.select === '1' })
     void this.load()
+  },
+
+  /**
+   * 选中一条地址并返回结算页。
+   *
+   * 用槽位把**对象**传回去而不是 query:地址里有省市区与详址,拼进 query 要自己选分隔符,
+   * 而地址内容里本来就可能有分隔符(比如"XX路1号,2单元")。
+   */
+  onSelect(e: WechatMiniprogram.TouchEvent) {
+    const id = String(e.currentTarget.dataset.id || '')
+    const raw = this.rawById(id)
+    if (!raw) {
+      return
+    }
+    setPendingCheckoutAddress(raw)
+    wx.navigateBack()
   },
 
   async load() {

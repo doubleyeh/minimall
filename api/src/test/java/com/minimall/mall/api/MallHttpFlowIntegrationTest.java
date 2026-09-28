@@ -80,6 +80,10 @@ class MallHttpFlowIntegrationTest {
     private MallSkuRepository skuRepository;
     @Autowired
     private MallOrderRepository orderRepository;
+    @Autowired
+    private com.minimall.mall.domain.repository.MallCustomerRepository customerRepository;
+    @Autowired
+    private com.minimall.mall.domain.repository.MallMemberLevelRepository levelRepository;
     /** 以下三个服务只用来**造夹具**:商家侧发货/审核、可领取的券。它们的 HTTP 通路另有用例覆盖。 */
     @Autowired
     private OrderAdminService orderAdminService;
@@ -371,6 +375,35 @@ class MallHttpFlowIntegrationTest {
                         + ",\"pointsToUse\":99999}", token);
         assertThat(tooMany.status()).isEqualTo(200);
         assertThat(tooMany.code()).as("超限报业务错误,而不是悄悄改成 3000").isEqualTo(40003);
+    }
+
+    @Test
+    @DisplayName("用例4e:个人中心给出等级名,积分明细能看到变动原因")
+    void profileShowsLevelAndPointsLogs() {
+        login();
+        long customerId = profileCustomerId();
+        grantPoints(customerId, 5000);
+
+        Response profile = get("/mall/api/profile", token);
+        assertThat(profile.status()).isEqualTo(200);
+        assertThat(profile.text("points")).isEqualTo("5000");
+        // 等级定义是每租户自建的(库里可能有别的用例留下的等级),所以不写死名字,
+        // 而是与"该客户实际挂着的等级"对齐 —— 两种情况都能验证到:
+        // 没挂等级时应当回退到「普通会员」,挂了等级时应当解析成它的展示名
+        assertThat(profile.text("memberLevelName"))
+                .as("等级名要解析成展示名,而不是把 id 丢给端上")
+                .isEqualTo(expectedLevelName(customerId));
+
+        Response logs = get("/mall/api/profile/points-logs?pageNo=1&pageSize=10", token);
+        assertThat(logs.status()).isEqualTo(200);
+        assertThat(logs.body()).contains("\"changePoints\":5000");
+        assertThat(logs.body())
+                .as("变动原因由服务端拼好 —— 小程序与管理端都要这段文案,两边各写一份必然走偏")
+                .contains("确认收货获得");
+
+        assertThat(get("/mall/api/profile/points-logs", null).status())
+                .as("积分明细也是客户自己的数据,不能匿名访问")
+                .isEqualTo(401);
     }
 
     @Test
@@ -1574,6 +1607,15 @@ class MallHttpFlowIntegrationTest {
 
     private String profilePoints() {
         return get("/mall/api/profile", token).text("points");
+    }
+
+    /** 该客户在库里对应的等级展示名;没挂等级时是「普通会员」。 */
+    private String expectedLevelName(long customerId) {
+        Long levelId = inTenant(() -> customerRepository.findById(customerId).orElseThrow().getMemberLevelId());
+        if (levelId == null) {
+            return com.minimall.mall.domain.MallMemberLevel.DEFAULT_LEVEL_NAME;
+        }
+        return inTenant(() -> levelRepository.findById(levelId).orElseThrow().getLevelName());
     }
 
     /** 造夹具:直接调服务发放积分。给客户加分的 HTTP 入口属于管理端,另有用例覆盖。 */

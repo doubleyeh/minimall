@@ -12,6 +12,9 @@ Page({
     avatarChar: '客',
     points: 0,
     growthValue: 0,
+    memberLevelName: '',
+    /** "还差 120 成长值升级";已是最高等级时为空 */
+    growthToNextText: '',
     counts: [
       { label: '待付款', value: 0, status: 1 },
       { label: '待发货', value: 0, status: 2 },
@@ -49,6 +52,10 @@ Page({
       avatarChar: nickname.slice(0, 1),
       points: data.points,
       growthValue: data.growthValue,
+      memberLevelName: data.memberLevelName,
+      growthToNextText: data.growthToNextLevel
+        ? `还差 ${data.growthToNextLevel} 成长值升级`
+        : '',
       counts,
       loadFailed: '',
     })
@@ -119,5 +126,9 @@ Page({
 
   onAfterSaleTap() {
     wx.navigateTo({ url: '/pages/after-sale/index' })
+  },
+
+  onPointsTap() {
+    wx.navigateTo({ url: '/pages/points/index' })
   },
 })

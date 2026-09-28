@@ -39,6 +39,7 @@ const PAGES = [
   { label: '我的', url: '/pages/profile/index', tab: true },
   { label: '商品详情', url: '/pages/goods/detail/index?id=1' },
   { label: '结算', url: '/pages/checkout/index' },
+  { label: '积分明细', url: '/pages/points/index' },
   { label: '订单详情', url: '/pages/order-detail/index?id=1' },
   { label: '优惠券', url: '/pages/coupons/index' },
   { label: '收货地址', url: '/pages/address/index' },

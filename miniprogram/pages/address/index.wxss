@@ -58,6 +58,12 @@
   color: var(--text-2);
 }
 
+/* 选择模式下"选择"是主操作,与"编辑/删除"这类次要操作区分开 */
+.addr__action--primary {
+  color: var(--brand);
+  font-weight: 600;
+}
+
 .form {
   margin: 20rpx 24rpx 0;
   padding: 24rpx;

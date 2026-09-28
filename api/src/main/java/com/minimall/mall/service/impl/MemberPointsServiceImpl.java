@@ -2,6 +2,8 @@ package com.minimall.mall.service.impl;
 
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
+import com.minimall.common.PageResult;
+import com.minimall.mall.api.dto.PointsLogView;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.mall.domain.MallAfterSale;
 import com.minimall.mall.domain.MallCustomer;
@@ -11,6 +13,7 @@ import com.minimall.mall.domain.MallMemberLevel;
 import com.minimall.mall.domain.MallPointsBatch;
 import com.minimall.mall.domain.MallPointsLog;
 import com.minimall.mall.domain.MallPointsUse;
+import com.minimall.mall.domain.QMallPointsLog;
 import com.minimall.mall.domain.repository.MallCustomerRepository;
 import com.minimall.mall.domain.repository.MallGrowthLogRepository;
 import com.minimall.mall.domain.repository.MallMemberLevelRepository;
@@ -20,9 +23,13 @@ import com.minimall.mall.domain.repository.MallPointsLogRepository;
 import com.minimall.mall.domain.repository.MallPointsUseRepository;
 import com.minimall.mall.service.MemberPointsService;
 import com.minimall.sys.service.support.DictIntReader;
+import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -449,6 +456,22 @@ public class MemberPointsServiceImpl implements MemberPointsService {
         }
         BigDecimal ratio = refundAmount.divide(payAmount, 6, RoundingMode.HALF_UP).min(BigDecimal.ONE);
         return BigDecimal.valueOf(granted).multiply(ratio).setScale(0, RoundingMode.FLOOR).intValue();
+    }
+
+    @Override
+    public PageResult<PointsLogView> pageLogs(Long customerId, int pageNo, int pageSize) {
+        BooleanBuilder where = new BooleanBuilder(QMallPointsLog.mallPointsLog.customerId.eq(customerId));
+        PageRequest pageable = PageRequest.of(
+                Math.max(pageNo - 1, 0),
+                Math.max(pageSize, 1),
+                Sort.by(Sort.Direction.DESC, "id"));
+        Page<MallPointsLog> page = pointsLogRepository.findAll(where, pageable);
+        List<PointsLogView> views = page.getContent().stream()
+                .map(item -> new PointsLogView(item.getId(), item.getChangePoints(), item.getBalancePoints(),
+                        item.getBizType(), PointsLogView.text(item.getBizType()), item.getRemark(),
+                        item.getCreateTime()))
+                .toList();
+        return PageResult.of(page.getTotalElements(), views);
     }
 
     /** 按 (类型, 订单) 汇总变动量并取绝对值:发放是正数、扣回是负数。 */

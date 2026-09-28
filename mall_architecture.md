@@ -255,7 +255,12 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 
 **结算顺序**(接 3.5):商品总额 → 满减 → 优惠券 → **积分抵现** → 加运费。所有金额仍以 `mall_order` 落库值为准,订单上同时留 `points_used` / `points_discount_amount` 两个"当时的值"。
 
-**试算接口** `POST /mall/api/orders/preview`:只算不落单,不占库存、不核销券、不扣积分。结算页靠它展示五项金额与"最多可用多少积分",与真实下单共用 `OrderServiceImpl#prepare`,所以两者逐分一致。**超过上限直接报错而不是静默夹取** —— 静默夹取会让端上预览的价与实际实付对不上。
+**试算接口** `POST /mall/api/orders/preview`:只算不落单,不占库存、不核销券、不扣积分。结算页靠它展示五项金额与"最多可用多少积分",与真实下单共用 `OrderServiceImpl#prepare`,所以两者逐分一致。**超过上限直接报错而不是静默夹取** —— 静默夹取会让端上预览的价与实际实付对不上。响应里的 `maxRedeemAmount`(上限值多少钱)也由服务端算好,端上不按 100:1 自己除 —— 比例是结算规则的一部分。
+
+**小程序侧的三处**(`miniprogram`):
+- `pages/checkout/` —— 结算页。**此前是 0 字节的空壳**(购物车「去结算」与商品详情「立即购买」都指向它,点进去是白屏,即小程序根本下不了单),本次从零实现:收货地址、优惠券、积分抵扣、金额明细(全部取自试算接口)、提交下单、拉起支付;
+- `pages/points/` —— 积分明细。变动的**原因文案来自服务端**(`PointsLogView.bizTypeText`),小程序与管理端共用同一份映射;
+- `pages/profile/` —— 展示等级名与"还差多少成长值升级"(`ClientProfileView.memberLevelName` / `growthToNextLevel`),并可点进积分明细。等级定义是每租户自建的,一条都没有时统一展示 `MallMemberLevel.DEFAULT_LEVEL_NAME`("普通会员")
 
 **等级折扣 `discount_rate` 仍不参与结算**(见开放项 2):本次只实现"成长值 → 等级"的升降级。
 

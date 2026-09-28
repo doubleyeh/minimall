@@ -24,6 +24,14 @@ import java.math.BigDecimal;
 @Setter
 public class MallMemberLevel extends BaseTenantEntity {
 
+    /**
+     * 没匹配到任何等级定义时的展示名。
+     *
+     * <p>等级定义是**每租户自建**的(不预置种子):空库下所有客户都展示这个,
+     * 想搞会员体系就在管理端建银卡/金卡。这样也避免了"平台替租户预置门槛"这件事。
+     */
+    public static final String DEFAULT_LEVEL_NAME = "普通会员";
+
     @Column(name = "level_name", nullable = false, length = 32)
     private String levelName;
 

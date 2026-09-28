@@ -9,6 +9,7 @@
     </view>
     <view class="addr__detail">{{item.full}}</view>
     <view class="addr__actions">
+      <text wx:if="{{selectMode}}" class="addr__action addr__action--primary" bindtap="onSelect" data-id="{{item.id}}">选择</text>
       <text wx:if="{{!item.isDefault}}" class="addr__action" bindtap="onSetDefault" data-id="{{item.id}}">设为默认</text>
       <text class="addr__action" bindtap="onEdit" data-id="{{item.id}}">编辑</text>
       <text class="addr__action" bindtap="onDelete" data-id="{{item.id}}">删除</text>
