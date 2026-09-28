@@ -125,7 +125,8 @@ public class PayServiceImpl implements PayService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "订单当前状态不可支付");
         }
         if (order.getPayAmount() == null || order.getPayAmount().signum() <= 0) {
-            // 0 元订单不需要走支付渠道(全额优惠),前端直接进"待发货"
+            // 兜底:0 元订单在下单事务里已经被 settleFreeOrder 置为待发货,正常不会走到这里。
+            // 留着是为了拦住"历史遗留的 0 元待支付订单",给一个比"当前状态不可支付"更好懂的提示
             throw new BusinessException(ErrorCode.PARAM_INVALID, "订单无需支付");
         }
 
@@ -259,21 +260,54 @@ public class PayServiceImpl implements PayService {
                     outTradeNo, payment.getPayAmount(), amount);
             throw new BusinessException(ErrorCode.PAY_AMOUNT_INVALID, "支付金额不一致");
         }
+        markPaid(payment, wxTransactionId, rawBody, "支付成功");
+    }
+
+    @Override
+    public void settleFreeOrder(Long orderId) {
+        MallOrder order = orderRepository.findById(orderId).orElse(null);
+        if (order == null || order.getPayAmount() == null || order.getPayAmount().signum() > 0) {
+            // 只有 0 元订单走这条路;非 0 元的仍由用户拉起支付
+            return;
+        }
+        MallWxPayment payment = paymentRepository.findFirstByOrderIdOrderByIdDesc(orderId).orElse(null);
+        if (payment == null) {
+            log.error("0 元订单找不到支付流水,无法自动结算 orderId={}", orderId);
+            return;
+        }
+        markPaid(payment, null, "{\"auto\":\"0 元订单,无需支付渠道\"}", "0 元订单自动支付");
+    }
+
+    /**
+     * 把订单置为已支付并做后续动作:扣减实际库存、累计销量、写状态日志。
+     *
+     * <p>两个调用方:微信支付成功回调,与**0 元订单** —— 满减/券把实付打到 0 时不需要走支付渠道,
+     * 但订单不能停在"待支付":那条路径对它是死的(`prepay` 会直接拒绝),用户永远付不掉也取消不掉。
+     * 放在下单事务里做,而不是让客户端调一个"确认免支付"的接口 —— 否则任何客户端忘了调,
+     * 订单就永远卡住。
+     *
+     * <p>幂等:流水已是成功时直接返回,所以重复调用不会重复扣库存或重复累计销量。
+     */
+    private void markPaid(MallWxPayment payment, String wxTransactionId, String rawCallback, String remark) {
+        if (payment.getPayStatus() != null && payment.getPayStatus() == MallWxPayment.PAY_STATUS_SUCCESS) {
+            log.info("支付流水已是成功,跳过重复处理 outTradeNo={}", payment.getOutTradeNo());
+            return;
+        }
 
         payment.setPayStatus(MallWxPayment.PAY_STATUS_SUCCESS);
         payment.setWxTransactionId(wxTransactionId);
         payment.setCallbackTime(LocalDateTime.now());
-        payment.setRawCallback(rawBody);
+        payment.setRawCallback(rawCallback);
 
         MallOrder order = orderRepository.findById(payment.getOrderId()).orElse(null);
         if (order == null) {
-            log.error("支付回调找不到订单: orderId={}", payment.getOrderId());
+            log.error("置为已支付时找不到订单: orderId={}", payment.getOrderId());
             return;
         }
         if (order.getStatus() != MallOrder.STATUS_PENDING_PAY) {
             // 订单可能已被超时任务关闭:支付成功了但货已释放,这是"需要退款"的场景,
             // 先记录,交给售后退款流程处理(不在这里静默改订单状态)
-            log.error("订单状态不是待支付,回调无法置为已支付: orderNo={} status={}",
+            log.error("订单状态不是待支付,无法置为已支付: orderNo={} status={}",
                     order.getOrderNo(), order.getStatus());
             return;
         }
@@ -284,7 +318,7 @@ public class PayServiceImpl implements PayService {
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
             int affected = skuRepository.deductStockOnPaid(item.getSkuId(), order.getTenantId(), item.getQuantity());
             if (affected == 0) {
-                log.warn("支付回调扣减库存受影响行数为 0(可能已处理) orderNo={} skuId={}",
+                log.warn("置为已支付时扣减库存受影响行数为 0(可能已处理) orderNo={} skuId={}",
                         order.getOrderNo(), item.getSkuId());
             }
             MallStockLog stockLog = new MallStockLog();
@@ -293,7 +327,7 @@ public class PayServiceImpl implements PayService {
             stockLog.setChangeStock(-item.getQuantity());
             stockLog.setChangeLocked(-item.getQuantity());
             stockLog.setBizId(order.getId());
-            stockLog.setRemark("支付成功扣减库存");
+            stockLog.setRemark(remark + "扣减库存");
             stockLogRepository.save(stockLog);
             // 销量(3.8 最后一步):支付成功才计数,下单未支付不该算销量。
             // 按数量累加而不是 +1 —— 一次买 3 件就是 3 件销量
@@ -306,9 +340,9 @@ public class PayServiceImpl implements PayService {
         statusLog.setFromStatus(from);
         statusLog.setToStatus(MallOrder.STATUS_PENDING_SHIP);
         statusLog.setOperatorType(MallOrderStatusLog.OPERATOR_SYSTEM);
-        statusLog.setRemark("支付成功");
+        statusLog.setRemark(remark);
         statusLogRepository.save(statusLog);
-        log.info("订单支付成功 orderNo={} wxTransactionId={}", order.getOrderNo(), wxTransactionId);
+        log.info("订单已置为已支付 orderNo={} 原因={}", order.getOrderNo(), remark);
     }
 
     private void increaseSaleCount(MallGoods goods, int quantity) {

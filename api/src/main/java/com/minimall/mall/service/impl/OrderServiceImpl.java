@@ -44,6 +44,7 @@ import com.minimall.mall.infra.OrderNumberGenerator;
 import com.minimall.mall.infra.auth.ClientContext;
 import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
+import com.minimall.mall.service.PayService;
 import com.minimall.mall.service.support.OrderAmountCalculator;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
@@ -107,6 +108,7 @@ public class OrderServiceImpl implements OrderService {
     private final MallWxPaymentRepository paymentRepository;
     private final OrderAmountCalculator calculator;
     private final MemberPointsService memberPointsService;
+    private final PayService payService;
     private final OrderNumberGenerator numberGenerator;
 
     public OrderServiceImpl(MallOrderRepository orderRepository,
@@ -126,6 +128,7 @@ public class OrderServiceImpl implements OrderService {
                             MallWxPaymentRepository paymentRepository,
                             OrderAmountCalculator calculator,
                             MemberPointsService memberPointsService,
+                            PayService payService,
                             OrderNumberGenerator numberGenerator) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
@@ -144,6 +147,7 @@ public class OrderServiceImpl implements OrderService {
         this.paymentRepository = paymentRepository;
         this.calculator = calculator;
         this.memberPointsService = memberPointsService;
+        this.payService = payService;
         this.numberGenerator = numberGenerator;
     }
 
@@ -240,6 +244,11 @@ public class OrderServiceImpl implements OrderService {
         payment.setPayAmount(prepared.payAmount());
         payment.setPayStatus(MallWxPayment.PAY_STATUS_PENDING);
         paymentRepository.save(payment);
+
+        // 0 元订单(满减/券把实付打到 0)不留在一个"付不掉"的待支付里:它不走支付渠道,
+        // 而 prepay 对它会直接拒绝,用户既付不了也等不到超时关单之外的结果。
+        // 放在状态日志之后,让流水顺序是"创建订单(null→待支付)"→"自动支付(待支付→待发货)"
+        payService.settleFreeOrder(order.getId());
 
         log.info("订单创建成功 tenantId={} customerId={} orderNo={} payAmount={} pointsUsed={}",
                 tenantId, customerId, order.getOrderNo(), prepared.payAmount(), prepared.pointsUsed());

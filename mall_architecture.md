@@ -108,6 +108,8 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 
 第4-7步必须在同一数据库事务内完成(不含微信支付统一下单这一步的网络调用,网络调用放事务外,失败则整体回滚订单和库存锁定)。
 
+**0 元订单**(满减/优惠券把实付打到 0;积分抵现做不到 —— 它最多抵商品金额的 50%):第 7 步之后**立即执行支付成功的处理**(`PayService#settleFreeOrder`),订单直接进"待发货"。放在下单事务里而不是让客户端调一个"确认免支付"的接口 —— 否则任何客户端忘了调,订单就永远卡在待支付:它不走支付渠道,`prepay` 对它直接拒绝,用户既付不掉也只能等超时关单。
+
 ### 3.4 订单状态机
 
 | status | 含义 |
@@ -173,6 +175,7 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 - `mall_wx_payment.wx_transaction_id` 唯一约束,回调处理前先按 `wx_transaction_id` 查是否已存在成功记录,存在则直接返回成功(不重复处理业务逻辑),防止微信重复推送导致重复触发发货前置状态变更
 - 回调处理顺序:验签 → 查 `mall_wx_payment` 幂等判断 → 更新 `pay_status=1` 及 `callback_time` → 更新 `mall_order.status=2` 及 `pay_time` → 各 SKU `stock -= 数量, locked_stock -= 数量`(写 `mall_stock_log change_type=3`)→ 增加 `mall_goods.sale_count`
 - 支付失败/超时关闭的回调:`pay_status=2`,不改订单状态(订单状态由超时任务或用户取消驱动,不依赖支付失败回调)
+- **两个调用方共用同一段"置为已支付"**(`PayServiceImpl#markPaid`):微信回调与 0 元订单(见 3.3)。共用是必要的 —— 扣减实际库存、累计销量、写状态日志这三件事漏一件,表现都是"订单看着付了但数据不对"。幂等也在这段里(流水已是成功就返回),所以重复调用不会重复扣库存或重复累计销量
 
 ### 3.9 售后完整流程
 

@@ -27,6 +27,13 @@ public interface PayService {
                            String signature, String rawBody);
 
     /** 退款结果回调(3.8):定位退款流水并落最终状态。 */
+    /**
+     * 结算 0 元订单(3.3):满减/券把实付打到 0 时不需要走支付渠道,但要立刻置为已支付。
+     *
+     * <p>只对 `payAmount <= 0` 的订单生效,其余直接返回。幂等。
+     */
+    void settleFreeOrder(Long orderId);
+
     void handleRefundCallback(String tenantCode, String timestamp, String nonce, String serial,
                               String signature, String rawBody);
 }

@@ -299,7 +299,9 @@ Page({
         toastError(err, '发起支付失败,可在订单列表继续支付')
       }
     } else {
-      toast('订单已提交,无需支付')
+      // 后端在下单事务里就把 0 元订单置为待发货了(见 PayService#settleFreeOrder),
+      // 所以这里不是"先不管",而是"它已经付完了"
+      toast('全额优惠,订单已自动完成支付')
     }
     // 用 redirectTo:结算页不该留在栈里,否则返回键会回到一个已经下过单的页面
     wx.redirectTo({ url: `/pages/order-detail/index?id=${orderId}` })
