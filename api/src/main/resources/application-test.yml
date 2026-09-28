@@ -31,6 +31,7 @@ minimall:
       expire-points: "-"
       recompute-growth-levels: "-"
       oper-log-archive: "-"
+      prune-task-run-logs: "-"
   # 上传的文件往 target 下写:不污染工作目录,且 target 本来就被忽略
   file:
     root-dir: ./target/test-files

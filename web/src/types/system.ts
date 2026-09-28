@@ -229,3 +229,30 @@ export interface OperLogView {
   traceId: string | null
   createTime: string
 }
+
+/**
+ * 定时任务执行历史(后端 TaskRunLogView)。
+ *
+ * 状态文案(成功/失败)由服务端拼好 —— 与积分流水同样的理由,不再让前端各维护一份。
+ */
+export interface TaskRunLogView {
+  id: Id
+  taskName: string
+  status: number
+  statusText: string
+  startTime: string
+  endTime: string
+  durationMs: number
+  /** 失败时的异常摘要 */
+  errorMsg?: string | null
+}
+
+/** 每个任务的最近一次执行情况,页面顶部的总览用。 */
+export interface TaskSummaryView {
+  taskName: string
+  totalRuns: number
+  lastStartTime?: string | null
+  lastStatus?: number | null
+  lastStatusText?: string | null
+  lastDurationMs?: number | null
+}

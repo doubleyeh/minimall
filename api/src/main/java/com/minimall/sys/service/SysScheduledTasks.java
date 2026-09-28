@@ -29,15 +29,21 @@ public class SysScheduledTasks {
     private final TenantService tenantService;
     private final DictService dictService;
     private final ScheduledTaskLock taskLock;
+    private final TaskRunLogService taskRunLogService;
+    private final com.minimall.infra.schedule.TaskLogProperties taskLogProperties;
     private final com.minimall.sys.service.support.OperLogArchiver operLogArchiver;
     private final com.minimall.infra.audit.AuditProperties auditProperties;
 
     public SysScheduledTasks(TenantService tenantService, DictService dictService, ScheduledTaskLock taskLock,
+                             TaskRunLogService taskRunLogService,
+                             com.minimall.infra.schedule.TaskLogProperties taskLogProperties,
                              com.minimall.sys.service.support.OperLogArchiver operLogArchiver,
                              com.minimall.infra.audit.AuditProperties auditProperties) {
         this.tenantService = tenantService;
         this.dictService = dictService;
         this.taskLock = taskLock;
+        this.taskRunLogService = taskRunLogService;
+        this.taskLogProperties = taskLogProperties;
         this.operLogArchiver = operLogArchiver;
         this.auditProperties = auditProperties;
     }
@@ -97,6 +103,23 @@ public class SysScheduledTasks {
             if (archived > 0) {
                 log.warn("审计日志归档:已归档并删除 {} 行(保留期 {} 天)",
                         archived, auditProperties.archiveAfterDays());
+            }
+        });
+    }
+
+    /**
+     * 任务执行历史清理(每天 5:00):保留 {@code minimall.task-log.retain-days} 天。
+     *
+     * <p>不清理的话这张表会只增不减 —— 一分钟一次的任务一年就是几十万行,
+     * 与审计日志是同一类问题(见 {@code OperLogArchiver})。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.prune-task-run-logs:0 0 5 * * ?}")
+    public void pruneTaskRunLogs() {
+        // 这个任务自己的执行也会被记进同一张表,没关系:它同样受保留期约束,会被后续的清理带走
+        taskLock.runIfNotLocked("任务历史清理", () -> {
+            int deleted = taskRunLogService.prune(taskLogProperties.retainDays());
+            if (deleted > 0) {
+                log.info("任务历史清理:删除 {} 条(保留 {} 天)", deleted, taskLogProperties.retainDays());
             }
         });
     }

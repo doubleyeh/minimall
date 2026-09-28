@@ -8,6 +8,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,14 +40,21 @@ public class ScheduledTaskLock {
 
     private final StringRedisTemplate redis;
     private final ScheduleProperties properties;
+    private final TaskRunRecorder taskRunRecorder;
 
-    public ScheduledTaskLock(StringRedisTemplate redis, ScheduleProperties properties) {
+    public ScheduledTaskLock(StringRedisTemplate redis, ScheduleProperties properties,
+                             TaskRunRecorder taskRunRecorder) {
         this.redis = redis;
         this.properties = properties;
+        this.taskRunRecorder = taskRunRecorder;
     }
 
     /**
      * 抢到锁才执行;没抢到就跳过(别的实例正在跑)。
+     *
+     * <p>**所有任务的执行结果都在这里落一条历史**(架构文档 6.2):这是 8 个任务共用的唯一咽喉,
+     * 埋在这里任务本身一行都不用改,也不会出现"新加的任务忘了记历史"。
+     * "未抢到锁"不记录 —— 多实例下它每个周期都会产生(实例数-1)条,信息量几乎为零。
      *
      * @return true 表示本次真的执行了
      */
@@ -59,9 +67,15 @@ public class ScheduledTaskLock {
             log.info("任务「{}」已有实例在跑,本实例跳过", taskName);
             return false;
         }
+        LocalDateTime start = LocalDateTime.now();
         try {
             task.run();
+            taskRunRecorder.record(taskName, start, LocalDateTime.now(), null);
             return true;
+        } catch (RuntimeException | Error ex) {
+            taskRunRecorder.record(taskName, start, LocalDateTime.now(), ex);
+            // 保持原行为:异常继续往外抛,由 Spring 记一条(吞掉会让"任务失败了"更隐蔽)
+            throw ex;
         } finally {
             // 任务失败也要放锁:不放的话这个任务在 TTL 到期前谁都不会再跑
             release(taskName, token);

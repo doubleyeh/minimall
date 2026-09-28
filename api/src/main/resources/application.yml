@@ -124,12 +124,16 @@ minimall:
       expire-points: "0 0 4 * * ?"
       recompute-growth-levels: "0 20 4 * * ?"
       oper-log-archive: "0 40 4 * * ?"
+      prune-task-run-logs: "0 0 5 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600
   # 审计日志归档(架构文档 7.2):超期的先归档成文件、再删库;0 表示不归档
   audit:
     archive-after-days: 180
+  # 定时任务执行历史(架构文档 6.2):保留多少天。不保留期的话一分钟一次的任务一年几十万行
+  task-log:
+    retain-days: 30
   # 日志脱敏(架构文档 7.2):字段名单放配置里,线上发现漏了某个字段加一行重启即可
   masking:
     sensitive-fields:

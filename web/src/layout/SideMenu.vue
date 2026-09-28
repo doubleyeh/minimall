@@ -28,6 +28,7 @@ import {
   SettingsOutline,
   ShieldCheckmarkOutline,
   StarOutline,
+  TimeOutline,
   StorefrontOutline,
   WalletOutline,
 } from '@vicons/ionicons5'
@@ -73,6 +74,8 @@ const icons: Record<string, Component> = {
   car: CarOutline,
   crown: RibbonOutline,
   star: StarOutline,
+  // 平台管理 · 定时任务
+  time: TimeOutline,
 }
 
 function renderIcon(name: string | null) {

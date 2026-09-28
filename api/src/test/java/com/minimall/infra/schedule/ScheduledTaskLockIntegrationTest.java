@@ -35,6 +35,9 @@ class ScheduledTaskLockIntegrationTest {
     private ScheduledTaskLock taskLock;
     @Autowired
     private StringRedisTemplate redis;
+    /** 手工 new 锁时需要它 —— 记执行历史是锁的一部分(见 ScheduledTaskLock 的注释)。 */
+    @Autowired
+    private TaskRunRecorder taskRunRecorder;
 
     @Test
     @DisplayName("已经有实例在跑:本次跳过,任务体一次都不执行")
@@ -109,7 +112,7 @@ class ScheduledTaskLockIntegrationTest {
     @DisplayName("锁带 TTL:实例被强杀时任务不会永远停着")
     void lockHasConfiguredTtl() {
         // 用 60 秒 TTL 的实例,好在任务体里直接观察到 TTL(不用真的等 30 分钟)
-        ScheduledTaskLock shortLived = new ScheduledTaskLock(redis, new ScheduleProperties(60));
+        ScheduledTaskLock shortLived = new ScheduledTaskLock(redis, new ScheduleProperties(60), taskRunRecorder);
         String taskName = "用例任务" + System.nanoTime();
         AtomicLong ttlSeen = new AtomicLong(-1);
 
