@@ -5,6 +5,7 @@ import com.minimall.mall.api.dto.MemberLevelView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallMemberLevel;
+import com.minimall.infra.tenant.TenantContext;
 import com.minimall.mall.domain.repository.MallCustomerRepository;
 import com.minimall.mall.domain.repository.MallMemberLevelRepository;
 import com.minimall.mall.service.MemberLevelService;
@@ -30,6 +31,33 @@ public class MemberLevelServiceImpl implements MemberLevelService {
                                   MallCustomerRepository customerRepository) {
         this.levelRepository = levelRepository;
         this.customerRepository = customerRepository;
+    }
+
+    @Override
+    public String displayName(Long levelId) {
+        if (levelId == null) {
+            return MallMemberLevel.DEFAULT_LEVEL_NAME;
+        }
+        return levels().stream()
+                .filter(level -> level.getId().equals(levelId))
+                .map(MallMemberLevel::getLevelName)
+                .findFirst()
+                .orElse(MallMemberLevel.DEFAULT_LEVEL_NAME);
+    }
+
+    @Override
+    public Integer growthToNextLevel(int growth) {
+        // 门槛里第一个还没够着的就是下一级;都够着了说明已是最高等级
+        return levels().stream()
+                .map(MallMemberLevel::getGrowthThreshold)
+                .filter(threshold -> threshold != null && threshold > growth)
+                .min(Integer::compareTo)
+                .map(threshold -> threshold - growth)
+                .orElse(null);
+    }
+
+    private List<MallMemberLevel> levels() {
+        return levelRepository.findByStatusAndTenantIdOrderByGrowthThresholdDesc(1, TenantContext.getTenantId());
     }
 
     @Override

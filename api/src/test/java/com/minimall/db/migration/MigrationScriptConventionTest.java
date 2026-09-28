@@ -31,7 +31,7 @@ class MigrationScriptConventionTest {
     private static final Pattern FILE_NAME = Pattern.compile("^V(\\d+)__([a-z0-9_]+)\\.sql$");
 
     @Test
-    @DisplayName("迁移脚本命名符合 V{n}__{描述}.sql,版本号不重复且与文件名顺序一致")
+    @DisplayName("迁移脚本命名符合 V{n}__{描述}.sql,版本号不重复且从 1 开始")
     void scriptNamesFollowFlywayConvention() throws IOException {
         List<String> fileNames = sqlFileNames();
         assertThat(fileNames).as("迁移目录里没有脚本:空库无法建起来").isNotEmpty();
@@ -47,10 +47,17 @@ class MigrationScriptConventionTest {
 
         assertThat(versions).as("版本号重复:Flyway 会直接报错,但如果文件名大小写/下划线不同,重复会更隐蔽")
                 .doesNotHaveDuplicates();
-        assertThat(versions)
-                .as("按文件名排序后版本号应当递增——乱序会让 review 时看不出执行顺序,也容易撞版本号")
-                .isSorted();
-        assertThat(versions.get(0)).as("版本号从 1 开始(基线脚本 V1 是建表脚本)").isEqualTo(1);
+        // 注意按**数值**取最小值:文件名按字典序排时 V10 会排在 V1 前面('0' < '_'),
+        // 所以"第一个文件是 V1"这种写法到两位数版本号就不成立了
+        assertThat(versions.stream().min(Integer::compareTo).orElseThrow())
+                .as("版本号从 1 开始(基线脚本 V1 是建表脚本)")
+                .isEqualTo(1);
+
+        // 这里**不能**再断言"按文件名排序后版本号递增":版本号到了两位数之后,
+        // 文件名的字典序与版本顺序就不一致了,那条断言会变成假阳性。
+        // 真正要拦的"新脚本撞了已有版本号"由上面的 doesNotHaveDuplicates 覆盖 ——
+        // 整数版本号下,会与已有脚本乱序的写法必然是复用了同一个号或用了更小的号,
+        // 前者被这条拦住,后者会被 Flyway 的 outOfOrder 检查拒绝执行。
     }
 
     private List<String> sqlFileNames() throws IOException {

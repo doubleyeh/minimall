@@ -262,6 +262,13 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 - `pages/points/` —— 积分明细。变动的**原因文案来自服务端**(`PointsLogView.bizTypeText`),小程序与管理端共用同一份映射;
 - `pages/profile/` —— 展示等级名与"还差多少成长值升级"(`ClientProfileView.memberLevelName` / `growthToNextLevel`),并可点进积分明细。等级定义是每租户自建的,一条都没有时统一展示 `MallMemberLevel.DEFAULT_LEVEL_NAME`("普通会员")
 
+**管理端**:
+- `/mall/admin/customers` 列表 / 详情 / `POST /{id}/adjust` 手动调整,权限码 `mall:customer:list|detail|adjust`(菜单种子见 V10)。**调整单独一个权限码**:能看客户不等于能改别人的资产
+- 调整走 `MemberPointsService#manualAdjust` —— 余额与批次的一致性、等级重算那些不变量只在服务端一处维护,管理端不另抄一份。正数建批次、负数按 FIFO 扣且**扣到 0 为止**;`remark` 必填,手工改动资产要留下"为什么"
+- 客户详情**同时给积分与成长值两种流水**:两者分账(见上),只看一种查不出问题。流水的原因文案与管理端共用同一份映射(`PointsLogView.bizTypeText`)
+
+**等级名与"还差多少升级"的解析收在 `MemberLevelService`**:小程序个人中心与管理端客户列表都要用,各写一份的话回退文案迟早不一致 —— 那正是"同一个人在两处看到不同等级名"的来源。
+
 **等级折扣 `discount_rate` 仍不参与结算**(见开放项 2):本次只实现"成长值 → 等级"的升降级。
 
 ---

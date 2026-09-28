@@ -5,17 +5,14 @@ import com.minimall.mall.api.dto.ClientProfileView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.domain.MallCustomer;
-import com.minimall.mall.domain.MallMemberLevel;
 import com.minimall.mall.domain.MallOrder;
 import com.minimall.mall.domain.repository.MallCustomerRepository;
-import com.minimall.mall.domain.repository.MallMemberLevelRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.infra.auth.ClientContext;
 import com.minimall.mall.service.ClientProfileService;
-import com.minimall.infra.tenant.TenantContext;
+import com.minimall.mall.service.MemberLevelService;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -31,14 +28,14 @@ public class ClientProfileServiceImpl implements ClientProfileService {
 
     private final MallCustomerRepository customerRepository;
     private final MallOrderRepository orderRepository;
-    private final MallMemberLevelRepository levelRepository;
+    private final MemberLevelService memberLevelService;
 
     public ClientProfileServiceImpl(MallCustomerRepository customerRepository,
                                     MallOrderRepository orderRepository,
-                                    MallMemberLevelRepository levelRepository) {
+                                    MemberLevelService memberLevelService) {
         this.customerRepository = customerRepository;
         this.orderRepository = orderRepository;
-        this.levelRepository = levelRepository;
+        this.memberLevelService = memberLevelService;
     }
 
     @Override
@@ -50,37 +47,11 @@ public class ClientProfileServiceImpl implements ClientProfileService {
                 count(customerId, MallOrder.STATUS_PENDING_SHIP),
                 count(customerId, MallOrder.STATUS_PENDING_RECEIVE),
                 count(customerId, MallOrder.STATUS_FINISHED));
-        LevelInfo level = levelInfo(customer);
+        int growth = customer.getGrowthValue() == null ? 0 : customer.getGrowthValue();
         return new ClientProfileView(customer.getId(), customer.getNickname(), customer.getAvatarUrl(),
                 customer.getPhone(), customer.getGender(), customer.getPoints(), customer.getGrowthValue(),
-                level.name(), level.growthToNext(), counts);
-    }
-
-    /**
-     * 当前等级名与"还差多少成长值升级"。
-     *
-     * <p>等级定义是每租户自建的,所以查出来的列表可能是空的 —— 那时所有客户都是"普通会员"。
-     */
-    private LevelInfo levelInfo(MallCustomer customer) {
-        List<MallMemberLevel> levels = levelRepository.findByStatusAndTenantIdOrderByGrowthThresholdDesc(
-                1, TenantContext.getTenantId());
-        String name = levels.stream()
-                .filter(level -> level.getId().equals(customer.getMemberLevelId()))
-                .map(MallMemberLevel::getLevelName)
-                .findFirst()
-                .orElse(MallMemberLevel.DEFAULT_LEVEL_NAME);
-        int growth = customer.getGrowthValue() == null ? 0 : customer.getGrowthValue();
-        // 门槛里第一个还没够着的就是下一级;都够着了说明已是最高等级
-        Integer toNext = levels.stream()
-                .map(MallMemberLevel::getGrowthThreshold)
-                .filter(threshold -> threshold != null && threshold > growth)
-                .min(Integer::compareTo)
-                .map(threshold -> threshold - growth)
-                .orElse(null);
-        return new LevelInfo(name, toNext);
-    }
-
-    private record LevelInfo(String name, Integer growthToNext) {
+                memberLevelService.displayName(customer.getMemberLevelId()),
+                memberLevelService.growthToNextLevel(growth), counts);
     }
 
     @Override

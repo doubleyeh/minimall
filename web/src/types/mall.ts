@@ -270,6 +270,53 @@ export interface MemberLevelView {
   status: number
 }
 
+// ---------------------------------------------------------------- 客户管理
+
+export interface CustomerView {
+  id: Id
+  nickname?: string | null
+  phone?: string | null
+  /** 解析后的等级展示名;租户还没建等级时是「普通会员」 */
+  memberLevelName: string
+  points: number
+  growthValue: number
+  registerTime: string
+}
+
+/** 积分流水。变动原因文案由服务端拼好(小程序与管理端共用同一份映射)。 */
+export interface PointsLogView {
+  id: Id
+  changePoints: number
+  balancePoints: number
+  bizType: number
+  bizTypeText: string
+  remark?: string | null
+  createTime: string
+}
+
+/** 成长值流水。与积分分账,所以两种流水都要看得到。 */
+export interface GrowthLogView {
+  id: Id
+  changeGrowth: number
+  bizType: number
+  bizTypeText: string
+  remark?: string | null
+  createTime: string
+}
+
+export interface CustomerDetailView {
+  customer: CustomerView
+  pointsLogs: PointsLogView[]
+  growthLogs: GrowthLogView[]
+}
+
+/** 手动调整。两个 delta 不能同时为 0,原因是必填 —— 手工改动资产要留下"为什么"。 */
+export interface MemberValueAdjustRequest {
+  pointsDelta?: number | null
+  growthDelta?: number | null
+  remark: string
+}
+
 export interface ReviewView {
   id: Id
   goodsId: Id

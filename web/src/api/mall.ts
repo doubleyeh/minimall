@@ -6,6 +6,8 @@ import type {
   CategoryTreeNode,
   CouponSaveRequest,
   CouponView,
+  CustomerDetailView,
+  CustomerView,
   FreightTemplateSaveRequest,
   FreightTemplateView,
   GoodsDetailView,
@@ -13,6 +15,7 @@ import type {
   GoodsView,
   MemberLevelSaveRequest,
   MemberLevelView,
+  MemberValueAdjustRequest,
   PromotionSaveRequest,
   PromotionView,
   ReviewView,
@@ -234,6 +237,33 @@ export function createMemberLevel(data: MemberLevelSaveRequest): Promise<Id> {
 
 export function updateMemberLevel(levelId: Id, data: MemberLevelSaveRequest): Promise<void> {
   return request.put<void>(`/mall/admin/member-levels/${levelId}`, data)
+}
+
+// ---------------------------------------------------------------- 客户管理
+
+export interface CustomerPageQuery {
+  nickname?: string
+  phone?: string
+  pageNo: number
+  pageSize: number
+}
+
+export function pageCustomers(query: CustomerPageQuery): Promise<PageResult<CustomerView>> {
+  return request.get<PageResult<CustomerView>>('/mall/admin/customers', { params: query })
+}
+
+export function getCustomer(customerId: Id): Promise<CustomerDetailView> {
+  return request.get<CustomerDetailView>(`/mall/admin/customers/${customerId}`)
+}
+
+/**
+ * 手动调整积分与成长值。
+ *
+ * 后端只允许"至少调整一项",且扣减**扣到 0 为止**(不允许负积分)——
+ * 所以传一个超过余额的负数不会报错,但实际扣减量会小于它,以返回后的重新查询为准。
+ */
+export function adjustCustomer(customerId: Id, data: MemberValueAdjustRequest): Promise<void> {
+  return request.post<void>(`/mall/admin/customers/${customerId}/adjust`, data)
 }
 
 // ---------------------------------------------------------------- 商品评价
