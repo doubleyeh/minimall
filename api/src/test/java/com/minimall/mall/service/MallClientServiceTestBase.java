@@ -234,7 +234,7 @@ abstract class MallClientServiceTestBase {
         return asClient(ownerCustomerId, () -> orderService.create(
                 new CreateOrderRequest(
                         java.util.List.of(new CreateOrderRequest.Item(skuId, quantity)),
-                        ownerAddressId, null, null)));
+                        ownerAddressId, null, null, null)));
     }
 
     /** 把订单直接推到指定状态(用于"订单已处于某状态之后"的用例)。 */

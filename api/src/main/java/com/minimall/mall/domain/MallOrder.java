@@ -66,13 +66,25 @@ public class MallOrder extends BaseTenantEntity {
     private BigDecimal promotionDiscountAmount;
 
     /**
-     * 实付金额 = 商品总额 - 满减 - 优惠券 + 运费(3.5)。
+     * 实付金额 = 商品总额 - 满减 - 优惠券 - 积分抵现 + 运费(3.5)。
      *
      * <p>落库而不是每次算:价格与活动都可能变,只有落库的值才是"当时算出来的值",
      * 事后对账(尤其是退款金额)必须以它为准。
      */
     @Column(name = "pay_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal payAmount;
+
+    /** 本单积分抵现消耗的积分数。 */
+    @Column(name = "points_used", nullable = false)
+    private Integer pointsUsed;
+
+    /**
+     * 积分抵现金额。上限是**商品金额**的 50%,运费不可抵。
+     *
+     * <p>与 {@link #pointsUsed} 一样落库:退款扣回按订单实付金额算占比,订单详情也要展示。
+     */
+    @Column(name = "points_discount_amount", nullable = false, precision = 10, scale = 2)
+    private BigDecimal pointsDiscountAmount;
 
     /** 使用的优惠券领取记录,未使用为空。 */
     @Column(name = "coupon_record_id")

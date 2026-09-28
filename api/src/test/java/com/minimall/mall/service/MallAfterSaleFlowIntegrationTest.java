@@ -313,7 +313,7 @@ class MallAfterSaleFlowIntegrationTest {
     /** 下单并支付(支付后订单进入待发货,这是仅退款的合法时机)。 */
     private OrderCreateResponse paidOrder(int quantity) {
         OrderCreateResponse order = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, quantity)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, quantity)), addressId, null, null, null));
         payCallback.paySuccess(order.orderNo(), order.payAmount());
         return order;
     }

@@ -3,6 +3,8 @@ package com.minimall.mall.api;
 import com.minimall.mall.api.dto.ClientOrderView;
 import com.minimall.mall.api.dto.CreateOrderRequest;
 import com.minimall.mall.api.dto.OrderCreateResponse;
+import com.minimall.mall.api.dto.OrderPreviewRequest;
+import com.minimall.mall.api.dto.OrderPreviewView;
 import com.minimall.common.ApiResponse;
 import com.minimall.common.PageResult;
 import com.minimall.mall.service.OrderService;
@@ -36,6 +38,17 @@ public class ClientOrderController {
     @PostMapping
     public ApiResponse<OrderCreateResponse> create(@Valid @RequestBody CreateOrderRequest request) {
         return ApiResponse.ok(orderService.create(request));
+    }
+
+    /**
+     * 结算试算(3.11):只算不落单,不占库存、不核销券、不扣积分。
+     *
+     * <p>结算页靠它展示五项金额 —— 运费/满减/券门槛/积分上限都只在服务端算得准,
+     * 端上自己算一遍必然与真实下单漂移。
+     */
+    @PostMapping("/preview")
+    public ApiResponse<OrderPreviewView> preview(@Valid @RequestBody OrderPreviewRequest request) {
+        return ApiResponse.ok(orderService.preview(request));
     }
 
     @GetMapping

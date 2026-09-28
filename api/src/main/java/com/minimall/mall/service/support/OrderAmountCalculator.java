@@ -37,6 +37,16 @@ public class OrderAmountCalculator {
     private static final int MONEY_SCALE = 2;
     private static final RoundingMode MONEY_ROUNDING = RoundingMode.HALF_UP;
 
+    /** 积分抵现比例:100 积分 = 1 元,即 1 积分 = 1 分钱,任何整数积分都能精确到分。 */
+    public static final int POINTS_PER_YUAN = 100;
+
+    /**
+     * 单笔订单的积分抵扣上限:**商品金额**的比例(3.11)。
+     *
+     * <p>基数是商品金额而不是实付金额 —— 用实付算的话,运费会把上限一起抬高,等于运费也能用积分抵。
+     */
+    private static final BigDecimal REDEEM_CAP_RATE = new BigDecimal("0.5");
+
     /** 只用于解析满减阶梯规则(库里的 JSON 字符串),不参与 HTTP 序列化,所以独立 new 一个。 */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -213,15 +223,63 @@ public class OrderAmountCalculator {
         return value == null ? BigDecimal.ZERO : value.setScale(MONEY_SCALE, MONEY_ROUNDING);
     }
 
+    /**
+     * 本单最多能用多少积分(3.11):取"客户可用积分"与"抵扣上限"里小的那个。
+     *
+     * <p>上限同时受两条约束,少一条都会算错钱:
+     * <ul>
+     *   <li>商品金额的 50% —— 基数是**商品金额**,含运费的话等于运费也能用积分抵;</li>
+     *   <li>满减与优惠券抵扣完之后剩下的商品金额 —— 否则能把订单抵成 0 甚至负数。</li>
+     * </ul>
+     *
+     * @param customerPoints 客户当前可用积分(由调用方取,过期批次已经在那边清掉了)
+     * @return 可用积分上限;商品已被优惠抵光时返回 0
+     */
+    public int maxRedeemPoints(BigDecimal goodsAmount, BigDecimal promotionDiscount, BigDecimal couponDiscount,
+                               int customerPoints) {
+        if (goodsAmount == null || goodsAmount.signum() <= 0 || customerPoints <= 0) {
+            return 0;
+        }
+        BigDecimal remainingGoods = goodsAmount
+                .subtract(promotionDiscount == null ? BigDecimal.ZERO : promotionDiscount)
+                .subtract(couponDiscount == null ? BigDecimal.ZERO : couponDiscount)
+                .max(BigDecimal.ZERO);
+        BigDecimal capYuan = goodsAmount.multiply(REDEEM_CAP_RATE).min(remainingGoods);
+        if (capYuan.signum() <= 0) {
+            return 0;
+        }
+        // 向下取整:多算出 1 分钱就等于让用户少付 1 分
+        int capPoints = capYuan.multiply(BigDecimal.valueOf(POINTS_PER_YUAN))
+                .setScale(0, RoundingMode.FLOOR)
+                .intValue();
+        return Math.min(customerPoints, capPoints);
+    }
+
+    /** 积分换算成抵扣金额(100 积分 = 1 元)。 */
+    public BigDecimal pointsToMoney(int points) {
+        if (points <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(points)
+                .divide(BigDecimal.valueOf(POINTS_PER_YUAN), MONEY_SCALE, MONEY_ROUNDING);
+    }
+
     /** 校验"实付金额"不会算成负数(优惠叠加超过商品总额时必须挡住,不能让订单变成倒找钱)。 */
     public BigDecimal payable(BigDecimal goodsAmount, BigDecimal promotionDiscount, BigDecimal couponDiscount,
                               BigDecimal freight) {
+        return payable(goodsAmount, promotionDiscount, couponDiscount, BigDecimal.ZERO, freight);
+    }
+
+    /** 同 {@link #payable(BigDecimal, BigDecimal, BigDecimal, BigDecimal)},多一步积分抵现(3.11 的结算顺序)。 */
+    public BigDecimal payable(BigDecimal goodsAmount, BigDecimal promotionDiscount, BigDecimal couponDiscount,
+                              BigDecimal pointsDiscount, BigDecimal freight) {
         BigDecimal payable = goodsAmount
                 .subtract(promotionDiscount == null ? BigDecimal.ZERO : promotionDiscount)
                 .subtract(couponDiscount == null ? BigDecimal.ZERO : couponDiscount)
+                .subtract(pointsDiscount == null ? BigDecimal.ZERO : pointsDiscount)
                 .add(freight == null ? BigDecimal.ZERO : freight);
         if (payable.signum() < 0) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "优惠金额超过订单金额,请调整优惠券");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "优惠金额超过订单金额,请调整优惠券或积分");
         }
         return money(payable);
     }

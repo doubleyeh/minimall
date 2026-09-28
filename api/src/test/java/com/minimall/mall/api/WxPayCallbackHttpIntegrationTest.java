@@ -76,6 +76,9 @@ class WxPayCallbackHttpIntegrationTest {
             order.setFreightAmount(BigDecimal.ZERO);
             order.setCouponDiscountAmount(BigDecimal.ZERO);
             order.setPromotionDiscountAmount(BigDecimal.ZERO);
+            // 积分两列是 NOT NULL(Hibernate 会把未赋值的字段以 NULL 送进 INSERT,库端默认值兜不住)
+            order.setPointsDiscountAmount(BigDecimal.ZERO);
+            order.setPointsUsed(0);
             order.setPayAmount(AMOUNT);
             order.setReceiverName("测试");
             order.setReceiverPhone("13900000000");

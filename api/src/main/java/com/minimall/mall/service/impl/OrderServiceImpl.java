@@ -3,6 +3,8 @@ package com.minimall.mall.service.impl;
 import com.minimall.mall.api.dto.ClientOrderView;
 import com.minimall.mall.api.dto.CreateOrderRequest;
 import com.minimall.mall.api.dto.OrderCreateResponse;
+import com.minimall.mall.api.dto.OrderPreviewRequest;
+import com.minimall.mall.api.dto.OrderPreviewView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;
@@ -40,6 +42,7 @@ import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxPaymentRepository;
 import com.minimall.mall.infra.OrderNumberGenerator;
 import com.minimall.mall.infra.auth.ClientContext;
+import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
 import com.minimall.mall.service.support.OrderAmountCalculator;
 import com.querydsl.core.BooleanBuilder;
@@ -103,6 +106,7 @@ public class OrderServiceImpl implements OrderService {
     private final MallStockLogRepository stockLogRepository;
     private final MallWxPaymentRepository paymentRepository;
     private final OrderAmountCalculator calculator;
+    private final MemberPointsService memberPointsService;
     private final OrderNumberGenerator numberGenerator;
 
     public OrderServiceImpl(MallOrderRepository orderRepository,
@@ -121,6 +125,7 @@ public class OrderServiceImpl implements OrderService {
                             MallStockLogRepository stockLogRepository,
                             MallWxPaymentRepository paymentRepository,
                             OrderAmountCalculator calculator,
+                            MemberPointsService memberPointsService,
                             OrderNumberGenerator numberGenerator) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
@@ -138,6 +143,7 @@ public class OrderServiceImpl implements OrderService {
         this.stockLogRepository = stockLogRepository;
         this.paymentRepository = paymentRepository;
         this.calculator = calculator;
+        this.memberPointsService = memberPointsService;
         this.numberGenerator = numberGenerator;
     }
 
@@ -148,44 +154,27 @@ public class OrderServiceImpl implements OrderService {
         if (tenantId == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
-
-        boolean fromCart = request.items() == null || request.items().isEmpty();
-        List<Line> lines = fromCart ? linesFromCart(customerId) : linesFromRequest(request.items(), customerId);
-        if (lines.isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "没有可结算的商品");
+        if (request.addressId() == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "请选择收货地址");
         }
 
-        MallCustomerAddress address = addressRepository.findById(request.addressId())
-                .filter(item -> Objects.equals(item.getCustomerId(), customerId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "收货地址不存在"));
-
-        BigDecimal goodsAmount = lines.stream().map(Line::totalAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        // ① 满减(3.5):同一订单只取减免最大的一个活动
-        OrderAmountCalculator.PromotionHit promotion = bestPromotion(lines, goodsAmount);
-        BigDecimal promotionDiscount = promotion == null ? BigDecimal.ZERO : promotion.discount();
-        BigDecimal amountAfterPromotion = goodsAmount.subtract(promotionDiscount);
-
-        // ② 优惠券:门槛按"满减后的商品金额"判断(3.5)
-        CouponUse couponUse = resolveCoupon(request.couponRecordId(), customerId, amountAfterPromotion);
-        BigDecimal couponDiscount = couponUse.discount();
-
-        // ③ 运费(3.7):按商品金额与数量/重量分组计算
-        BigDecimal freight = freightAmount(lines, address.getProvince());
-
-        BigDecimal payAmount = calculator.payable(goodsAmount, promotionDiscount, couponDiscount, freight);
+        // 算价与校验全部走 prepare:与结算试算共用同一段,保证"端上看到的价"与"实付"逐分一致
+        PreparedOrder prepared = prepare(request.items(), request.addressId(), request.couponRecordId(),
+                request.pointsToUse(), customerId);
+        MallCustomerAddress address = prepared.address();
 
         MallOrder order = new MallOrder();
         order.setOrderNo(numberGenerator.nextOrderNo());
         order.setCustomerId(customerId);
         order.setStatus(MallOrder.STATUS_PENDING_PAY);
-        order.setGoodsAmount(calculator.money(goodsAmount));
-        order.setFreightAmount(calculator.money(freight));
-        order.setPromotionDiscountAmount(calculator.money(promotionDiscount));
-        order.setCouponDiscountAmount(calculator.money(couponDiscount));
-        order.setPayAmount(payAmount);
-        order.setCouponRecordId(couponUse.recordId());
+        order.setGoodsAmount(prepared.goodsAmount());
+        order.setFreightAmount(calculator.money(prepared.freight()));
+        order.setPromotionDiscountAmount(prepared.promotionDiscount());
+        order.setCouponDiscountAmount(prepared.couponDiscount());
+        order.setPointsDiscountAmount(prepared.pointsDiscount());
+        order.setPointsUsed(prepared.pointsUsed());
+        order.setPayAmount(prepared.payAmount());
+        order.setCouponRecordId(prepared.couponUse().recordId());
         order.setReceiverName(address.getReceiverName());
         order.setReceiverPhone(address.getReceiverPhone());
         order.setReceiverAddress(address.getProvince() + address.getCity() + address.getDistrict()
@@ -193,7 +182,7 @@ public class OrderServiceImpl implements OrderService {
         order.setRemark(request.remark());
         order = orderRepository.save(order);
 
-        for (Line line : lines) {
+        for (Line line : prepared.lines()) {
             MallOrderItem item = new MallOrderItem();
             item.setOrderId(order.getId());
             item.setSkuId(line.sku().getId());
@@ -218,8 +207,8 @@ public class OrderServiceImpl implements OrderService {
             writeStockLog(line.sku().getId(), STOCK_LOCK, 0, line.quantity(), order.getId(), "下单锁定");
         }
 
-        if (couponUse.recordId() != null) {
-            int used = couponRecordRepository.useForOrder(couponUse.recordId(), customerId, tenantId,
+        if (prepared.couponUse().recordId() != null) {
+            int used = couponRecordRepository.useForOrder(prepared.couponUse().recordId(), customerId, tenantId,
                     order.getId(), LocalDateTime.now());
             if (used == 0) {
                 // 券在"校验"与"核销"之间被别的订单用掉了(同一张券开了两个结算页)
@@ -227,7 +216,14 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        if (fromCart) {
+        // 积分预扣(3.11):与库存/券同一个事务,扣不动就整单回滚 ——
+        // 等到支付成功才扣的话,"下单到支付"之间积分会被另一单用掉,那时支付金额已经定了,只能少收钱。
+        // 占用明细记在 mall_points_use 里,订单关闭时据此退回原批次
+        if (prepared.pointsUsed() > 0) {
+            memberPointsService.redeem(customerId, order.getId(), prepared.pointsUsed());
+        }
+
+        if (prepared.fromCart()) {
             cartRepository.deleteAll(cartRepository.findByCustomerIdOrderByIdDesc(customerId).stream()
                     .filter(cart -> Objects.equals(cart.getSelected(), SELECTED))
                     .toList());
@@ -241,16 +237,95 @@ public class OrderServiceImpl implements OrderService {
         MallWxPayment payment = new MallWxPayment();
         payment.setOrderId(order.getId());
         payment.setOutTradeNo(order.getOrderNo());
-        payment.setPayAmount(payAmount);
+        payment.setPayAmount(prepared.payAmount());
         payment.setPayStatus(MallWxPayment.PAY_STATUS_PENDING);
         paymentRepository.save(payment);
 
-        log.info("订单创建成功 tenantId={} customerId={} orderNo={} payAmount={}",
-                tenantId, customerId, order.getOrderNo(), payAmount);
+        log.info("订单创建成功 tenantId={} customerId={} orderNo={} payAmount={} pointsUsed={}",
+                tenantId, customerId, order.getOrderNo(), prepared.payAmount(), prepared.pointsUsed());
 
         return new OrderCreateResponse(order.getId(), order.getOrderNo(),
                 order.getGoodsAmount(), order.getFreightAmount(), order.getPromotionDiscountAmount(),
-                order.getCouponDiscountAmount(), order.getPayAmount(), null);
+                order.getCouponDiscountAmount(), order.getPointsDiscountAmount(), order.getPayAmount(),
+                order.getPointsUsed(), null);
+    }
+
+    @Override
+    public OrderPreviewView preview(OrderPreviewRequest request) {
+        Long customerId = ClientContext.requireCustomerId();
+        if (TenantContext.getTenantId() == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        PreparedOrder prepared = prepare(request.items(), request.addressId(), request.couponRecordId(),
+                request.pointsToUse(), customerId);
+        List<OrderPreviewView.Item> items = prepared.lines().stream()
+                .map(line -> new OrderPreviewView.Item(line.sku().getId(), line.goods().getId(),
+                        line.goods().getGoodsName(), line.sku().getSkuName(),
+                        line.sku().getSkuImage() != null ? line.sku().getSkuImage() : line.goods().getMainImage(),
+                        line.sku().getPrice(), line.quantity(), line.totalAmount(),
+                        line.sku().availableStock()))
+                .toList();
+        return new OrderPreviewView(items, prepared.goodsAmount(), prepared.promotionDiscount(),
+                prepared.couponDiscount(), prepared.pointsDiscount(), calculator.money(prepared.freight()),
+                prepared.payAmount(), prepared.pointsUsed(), prepared.maxRedeemPoints(),
+                prepared.customerPoints(), prepared.address() == null);
+    }
+
+    /**
+     * 结算准备:商品行 → 五种金额(3.5 的顺序 + 3.11 的积分抵现)。
+     *
+     * <p><b>试算与下单共用这一段是有意的</b>:端上自己算一遍的话,运费(模板/区域/包邮)、满减(活动+范围+阶梯)、
+     * 券门槛、积分上限任何一处漂移,方向都是**少收钱**。这里只读不写,除了积分可用量会顺带做一次懒过期。
+     *
+     * @param addressId 可空:试算时允许还没选地址(运费按 0 计并置 needAddress),下单由调用方保证非空
+     */
+    private PreparedOrder prepare(List<CreateOrderRequest.Item> items, Long addressId, Long couponRecordId,
+                                  Integer pointsToUse, Long customerId) {
+        boolean fromCart = items == null || items.isEmpty();
+        List<Line> lines = fromCart ? linesFromCart(customerId) : linesFromRequest(items, customerId);
+        if (lines.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "没有可结算的商品");
+        }
+
+        MallCustomerAddress address = null;
+        if (addressId != null) {
+            address = addressRepository.findById(addressId)
+                    .filter(item -> Objects.equals(item.getCustomerId(), customerId))
+                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "收货地址不存在"));
+        }
+
+        BigDecimal goodsAmount = calculator.money(lines.stream().map(Line::totalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+
+        // ① 满减(3.5):同一订单只取减免最大的一个活动
+        OrderAmountCalculator.PromotionHit promotion = bestPromotion(lines, goodsAmount);
+        BigDecimal promotionDiscount = promotion == null ? BigDecimal.ZERO : calculator.money(promotion.discount());
+        BigDecimal amountAfterPromotion = goodsAmount.subtract(promotionDiscount);
+
+        // ② 优惠券:门槛按"满减后的商品金额"判断(3.5)
+        CouponUse couponUse = resolveCoupon(couponRecordId, customerId, amountAfterPromotion);
+        BigDecimal couponDiscount = couponUse.discount();
+
+        // ③ 积分抵现(3.11):上限由服务端重算,端上传来的只是意向 —— 超限直接报错而不是静默夹取,
+        //    静默夹取会让"端上预览的价"与"实际实付"对不上
+        int customerPoints = memberPointsService.usablePoints(customerId);
+        int maxRedeemPoints = calculator.maxRedeemPoints(goodsAmount, promotionDiscount, couponDiscount,
+                customerPoints);
+        int pointsUsed = pointsToUse == null ? 0 : pointsToUse;
+        if (pointsUsed > maxRedeemPoints) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "本单最多可用 " + maxRedeemPoints + " 积分(可用 " + customerPoints + "),请调整后重试");
+        }
+        BigDecimal pointsDiscount = calculator.pointsToMoney(pointsUsed);
+
+        // ④ 运费(3.7):按商品金额与数量/重量分组计算
+        BigDecimal freight = address == null ? BigDecimal.ZERO : freightAmount(lines, address.getProvince());
+
+        BigDecimal payAmount = calculator.payable(goodsAmount, promotionDiscount, couponDiscount,
+                pointsDiscount, freight);
+
+        return new PreparedOrder(lines, address, fromCart, goodsAmount, promotionDiscount, couponUse,
+                couponDiscount, pointsUsed, pointsDiscount, freight, payAmount, maxRedeemPoints, customerPoints);
     }
 
     @Override
@@ -363,6 +438,9 @@ public class OrderServiceImpl implements OrderService {
         }
         // 未支付关闭要把券还给买家,否则买家白丢一张券(3.4)
         couponRecordRepository.releaseByOrder(order.getId(), tenantId);
+        // 预扣的积分退回**原批次**(3.11)。这里面的更新同样带 clearAutomatically,
+        // 但上面已用显式 UPDATE 落过状态,所以批处理里第 2 笔起的游离对象不会丢改动
+        memberPointsService.returnForOrder(order.getId(), order.getCustomerId());
 
         writeStatusLog(order.getId(), from, toStatus, operatorType, operatorId, remark);
     }
@@ -559,7 +637,8 @@ public class OrderServiceImpl implements OrderService {
                 .toList();
         return new ClientOrderView(order.getId(), order.getOrderNo(), order.getStatus(),
                 order.getGoodsAmount(), order.getFreightAmount(), order.getPromotionDiscountAmount(),
-                order.getCouponDiscountAmount(), order.getPayAmount(), order.getReceiverName(),
+                order.getCouponDiscountAmount(), order.getPointsDiscountAmount(), order.getPayAmount(),
+                order.getPointsUsed(), order.getReceiverName(),
                 order.getReceiverPhone(), order.getReceiverAddress(), order.getRemark(),
                 order.getLogisticsCompany(), order.getLogisticsNo(), order.getCloseReason(),
                 order.getCreateTime(), order.getPayTime(), order.getShipTime(), order.getReceiveTime(),
@@ -571,5 +650,13 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private record CouponUse(Long recordId, BigDecimal discount) {
+    }
+
+    /** 结算准备的结果(3.5 的五种金额 + 3.11 的积分)。试算与下单共用,见 {@link #prepare}。 */
+    private record PreparedOrder(List<Line> lines, MallCustomerAddress address, boolean fromCart,
+                                 BigDecimal goodsAmount, BigDecimal promotionDiscount, CouponUse couponUse,
+                                 BigDecimal couponDiscount, int pointsUsed, BigDecimal pointsDiscount,
+                                 BigDecimal freight, BigDecimal payAmount, int maxRedeemPoints,
+                                 int customerPoints) {
     }
 }

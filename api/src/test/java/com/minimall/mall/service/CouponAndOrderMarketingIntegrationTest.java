@@ -110,7 +110,7 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
     /** 带券下单(基类的 createOrder 固定不传券)。 */
     private OrderCreateResponse createOrderWithCoupon(Long ownerCustomerId, int quantity, Long couponRecordId) {
         return asClient(ownerCustomerId, () -> orderService.create(new CreateOrderRequest(
-                List.of(new CreateOrderRequest.Item(skuId, quantity)), addressId, couponRecordId, null)));
+                List.of(new CreateOrderRequest.Item(skuId, quantity)), addressId, couponRecordId, null, null)));
     }
 
     private MallCoupon coupon(Long couponId) {

@@ -179,6 +179,89 @@ class OrderAmountCalculatorTest {
                 .hasMessageContaining("超过订单金额");
     }
 
+    // ---------------------------------------------------------------- 积分抵现(3.11)
+
+    @Test
+    @DisplayName("积分抵扣上限:商品金额的 50%(运费不计入上限基数)")
+    void maxRedeemPointsCappedByGoodsRate() {
+        int cap = calculator.maxRedeemPoints(new BigDecimal("100.00"), BigDecimal.ZERO, BigDecimal.ZERO, 99999);
+
+        assertThat(cap).as("100 元的 50% 是 50 元,即 5000 积分").isEqualTo(5000);
+    }
+
+    @Test
+    @DisplayName("积分抵扣上限:还要受'优惠抵完剩下的商品金额'约束")
+    void maxRedeemPointsCappedByRemainingGoods() {
+        int cap = calculator.maxRedeemPoints(new BigDecimal("100.00"), BigDecimal.ZERO,
+                new BigDecimal("90.00"), 99999);
+
+        assertThat(cap).as("券把商品抵到只剩 10 元,积分最多再抵这 10 元").isEqualTo(1000);
+    }
+
+    @Test
+    @DisplayName("积分抵扣上限:基数是**商品金额**而不是优惠后的实付金额")
+    void maxRedeemPointsUsesGoodsAmountNotPayable() {
+        // 商品 100,券抵 10 → 实付 90。上限基数是 100 而不是 90:
+        // 按实付算的话上限会跟着优惠一起缩水(4500 而不是 5000),这是很容易写错的地方
+        int cap = calculator.maxRedeemPoints(new BigDecimal("100.00"), BigDecimal.ZERO,
+                new BigDecimal("10.00"), 99999);
+
+        assertThat(cap).isEqualTo(5000);
+    }
+
+    @Test
+    @DisplayName("积分抵扣上限:取客户可用积分与上限里小的那个")
+    void maxRedeemPointsCappedByCustomerBalance() {
+        int cap = calculator.maxRedeemPoints(new BigDecimal("100.00"), BigDecimal.ZERO, BigDecimal.ZERO, 300);
+
+        assertThat(cap).as("上限 5000 分,但客户只有 300").isEqualTo(300);
+    }
+
+    @Test
+    @DisplayName("商品已被优惠抵光时积分一分都不能用(否则会把订单抵成负数)")
+    void maxRedeemPointsIsZeroWhenGoodsFullyDiscounted() {
+        int cap = calculator.maxRedeemPoints(new BigDecimal("100.00"), new BigDecimal("30.00"),
+                new BigDecimal("70.00"), 99999);
+
+        assertThat(cap).isZero();
+    }
+
+    @Test
+    @DisplayName("积分抵扣上限向下取整:多算一分钱就等于让用户少付一分")
+    void maxRedeemPointsFloorsResult() {
+        // 49.99 * 50% = 24.995 元 = 2499.5 分
+        int cap = calculator.maxRedeemPoints(new BigDecimal("49.99"), BigDecimal.ZERO, BigDecimal.ZERO, 99999);
+
+        assertThat(cap).isEqualTo(2499);
+    }
+
+    @Test
+    @DisplayName("积分换算成金额:100 积分 = 1 元,任意整数积分都能精确到分")
+    void pointsToMoneyIsExact() {
+        assertThat(calculator.pointsToMoney(0)).isEqualByComparingTo("0.00");
+        assertThat(calculator.pointsToMoney(100)).isEqualByComparingTo("1.00");
+        assertThat(calculator.pointsToMoney(150)).isEqualByComparingTo("1.50");
+        assertThat(calculator.pointsToMoney(1)).isEqualByComparingTo("0.01");
+    }
+
+    @Test
+    @DisplayName("实付金额 = 商品总额 - 满减 - 券 - 积分抵现 + 运费")
+    void payableWithPoints() {
+        BigDecimal payable = calculator.payable(new BigDecimal("100.00"), new BigDecimal("10.00"),
+                new BigDecimal("5.00"), new BigDecimal("20.00"), new BigDecimal("8.00"));
+
+        assertThat(payable).isEqualByComparingTo("73.00");
+    }
+
+    @Test
+    @DisplayName("积分把订单抵成负数时同样拒绝")
+    void payableRejectsOverDiscountWithPoints() {
+        assertThatThrownBy(() -> calculator.payable(new BigDecimal("10.00"), BigDecimal.ZERO,
+                BigDecimal.ZERO, new BigDecimal("11.00"), BigDecimal.ZERO))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("超过订单金额");
+    }
+
     // ---------------------------------------------------------------- 防御分支
 
     /**

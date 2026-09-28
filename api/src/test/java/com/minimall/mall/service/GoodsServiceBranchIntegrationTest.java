@@ -473,7 +473,7 @@ class GoodsServiceBranchIntegrationTest extends MallClientServiceTestBase {
                 List.of(sku("ORD-" + suffix(), "1.00", 5))));
         Long skuId = skusOf(goodsId).get(0).getId();
         asClient(customerId, () -> orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null)));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null, null)));
 
         assertThatThrownBy(() -> inTenant(() -> {
             goodsService.delete(goodsId);

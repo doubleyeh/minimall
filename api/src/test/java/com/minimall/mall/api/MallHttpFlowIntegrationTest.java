@@ -90,6 +90,13 @@ class MallHttpFlowIntegrationTest {
     /** 造真签名 + 真密文的支付回调;回调入参是密文,明文 DTO 那条路已经不通了。 */
     @Autowired
     private WxPayCallbackFixture wxPay;
+    /** 只用来**造夹具**:积分没有"给客户加分"的 HTTP 入口(那是管理端的事,另有用例覆盖)。 */
+    @Autowired
+    private com.minimall.mall.service.MemberPointsService memberPointsService;
+
+    /** 积分用例造出来的客户与订单:这些表没有外键,清理要靠自己记住。 */
+    private final List<Long> pointsCustomerIds = new java.util.ArrayList<>();
+    private final List<Long> pointsOrderIds = new java.util.ArrayList<>();
 
     private String token;
     private Long goodsId;
@@ -104,6 +111,9 @@ class MallHttpFlowIntegrationTest {
     private UserService sysUserService;
     @Autowired
     private org.springframework.data.redis.core.StringRedisTemplate redis;
+    /** 清理积分表用:它们没有外键约束,业务仓储删不掉别的东西留下的行。 */
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @BeforeEach
     void setUp() {
@@ -159,6 +169,27 @@ class MallHttpFlowIntegrationTest {
                     .forEach(orderRepository::delete);
             skuRepository.findById(skuId).ifPresent(skuRepository::delete);
             goodsRepository.findById(goodsId).ifPresent(goodsRepository::delete);
+            return null;
+        });
+    }
+
+    /** 清掉积分用例造出来的数据:批次/流水/占用明细都不在那个 @AfterEach 的清理范围内。 */
+    @AfterEach
+    void tearDownPointsData() {
+        inTenant(() -> {
+            for (Long orderId : pointsOrderIds) {
+                jdbc.update("delete from mall_points_use where tenant_id = ? and order_id = ?", TENANT_ID, orderId);
+            }
+            for (Long customerId : pointsCustomerIds) {
+                jdbc.update("delete from mall_points_batch where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, customerId);
+                jdbc.update("delete from mall_points_log where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, customerId);
+                jdbc.update("delete from mall_growth_log where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, customerId);
+            }
+            pointsOrderIds.clear();
+            pointsCustomerIds.clear();
             return null;
         });
     }
@@ -264,6 +295,82 @@ class MallHttpFlowIntegrationTest {
             assertThat(sku.getLockedStock()).isZero();
             return null;
         });
+    }
+
+    @Test
+    @DisplayName("用例4b:结算试算只算不落单,且金额与真实下单逐分一致")
+    void previewMatchesOrderOverHttp() {
+        login();
+        long addressId = createAddressOverHttp();
+        long customerId = profileCustomerId();
+        grantPoints(customerId, 5000);
+        long ordersBefore = inTenant(() -> orderRepository.count());
+
+        // 2 件 × 60.00 = 120.00;上限是商品金额的 50% = 6000 分,客户只有 5000 → 上限取 5000
+        Response preview = post("/mall/api/orders/preview",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":2}],\"addressId\":" + addressId
+                        + ",\"pointsToUse\":2000}", token);
+        assertThat(preview.status()).isEqualTo(200);
+        assertThat(preview.text("goodsAmount")).isEqualTo("120.00");
+        assertThat(preview.text("pointsDiscountAmount")).as("2000 积分 = 20 元").isEqualTo("20.00");
+        assertThat(preview.text("payAmount")).isEqualTo("100.00");
+        assertThat(preview.text("maxRedeemPoints")).as("上限取'客户可用'与'金额 50%'里小的").isEqualTo("5000");
+        assertThat(preview.text("customerPoints")).isEqualTo("5000");
+        assertThat(preview.text("needAddress")).isEqualTo("false");
+
+        // 试算不能有任何副作用 —— 这是它敢在结算页每次改动都调一次的前提
+        assertThat(inTenant(() -> orderRepository.count())).as("试算不能落单").isEqualTo(ordersBefore);
+        assertThat(profilePoints()).as("试算不能扣积分").isEqualTo("5000");
+
+        // 真实下单的金额必须与试算完全一致,否则"端上看到的价"就是错的
+        Response order = post("/mall/api/orders",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":2}],\"addressId\":" + addressId
+                        + ",\"pointsToUse\":2000}", token);
+        assertThat(order.status()).isEqualTo(200);
+        pointsOrderIds.add(Long.parseLong(order.text("orderId")));
+        assertThat(order.text("goodsAmount")).isEqualTo(preview.text("goodsAmount"));
+        assertThat(order.text("pointsDiscountAmount")).isEqualTo(preview.text("pointsDiscountAmount"));
+        assertThat(order.text("payAmount")).isEqualTo(preview.text("payAmount"));
+        assertThat(order.text("pointsUsed")).isEqualTo("2000");
+        assertThat(profilePoints()).as("下单要真扣").isEqualTo("3000");
+    }
+
+    @Test
+    @DisplayName("用例4c:取消订单后预扣的积分退回,余额恢复")
+    void cancellingOrderReturnsPointsOverHttp() {
+        login();
+        long addressId = createAddressOverHttp();
+        grantPoints(profileCustomerId(), 5000);
+
+        Response order = post("/mall/api/orders",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":2}],\"addressId\":" + addressId
+                        + ",\"pointsToUse\":2000}", token);
+        long orderId = Long.parseLong(order.text("orderId"));
+        pointsOrderIds.add(orderId);
+        assertThat(profilePoints()).isEqualTo("3000");
+
+        assertThat(post("/mall/api/orders/" + orderId + "/cancel", null, token).status()).isEqualTo(200);
+
+        assertThat(profilePoints()).as("取消要退回,否则用户白丢积分").isEqualTo("5000");
+    }
+
+    @Test
+    @DisplayName("用例4d:试算需要登录态;超过抵扣上限直接拒绝而不是静默夹取")
+    void previewBoundaries() {
+        assertThat(post("/mall/api/orders/preview", "{\"pointsToUse\":1}", null).status())
+                .as("试算也是客户数据,不能匿名访问")
+                .isEqualTo(401);
+
+        login();
+        long addressId = createAddressOverHttp();
+        grantPoints(profileCustomerId(), 5000);
+
+        // 1 件 = 60.00 元 → 上限 3000 分,要 99999 必然越界
+        Response tooMany = post("/mall/api/orders/preview",
+                "{\"items\":[{\"skuId\":" + skuId + ",\"quantity\":1}],\"addressId\":" + addressId
+                        + ",\"pointsToUse\":99999}", token);
+        assertThat(tooMany.status()).isEqualTo(200);
+        assertThat(tooMany.code()).as("超限报业务错误,而不是悄悄改成 3000").isEqualTo(40003);
     }
 
     @Test
@@ -1448,6 +1555,31 @@ class MallHttpFlowIntegrationTest {
 
     private Response get(String path, String bearer) {
         return send(HttpRequest.newBuilder().uri(uri(path)).GET(), bearer);
+    }
+
+    /** 建一条收货地址并返回 ID(积分用例都要先有地址才能算运费与下单)。 */
+    private long createAddressOverHttp() {
+        Response address = post("/mall/api/addresses",
+                "{\"receiverName\":\"积分用例\",\"receiverPhone\":\"13900000001\",\"province\":\"广东省\","
+                        + "\"city\":\"深圳市\",\"district\":\"南山区\",\"detailAddress\":\"测试路 3 号\"}", token);
+        assertThat(address.status()).as("建地址失败:%s", address.body()).isEqualTo(200);
+        return Long.parseLong(address.text("data"));
+    }
+
+    private long profileCustomerId() {
+        long customerId = Long.parseLong(get("/mall/api/profile", token).text("customerId"));
+        pointsCustomerIds.add(customerId);
+        return customerId;
+    }
+
+    private String profilePoints() {
+        return get("/mall/api/profile", token).text("points");
+    }
+
+    /** 造夹具:直接调服务发放积分。给客户加分的 HTTP 入口属于管理端,另有用例覆盖。 */
+    private void grantPoints(long customerId, int points) {
+        inTenant(() -> memberPointsService.grant(customerId,
+                com.minimall.infra.id.SnowflakeIdGenerator.nextId(), new BigDecimal(points)));
     }
 
     /** 平台超管登录:商家侧接口(/mall/admin/**)用它的令牌,权限码被 4.10 短路。 */

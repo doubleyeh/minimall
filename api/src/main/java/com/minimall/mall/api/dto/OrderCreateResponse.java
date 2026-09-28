@@ -15,7 +15,11 @@ public record OrderCreateResponse(
         BigDecimal freightAmount,
         BigDecimal promotionDiscountAmount,
         BigDecimal couponDiscountAmount,
+        /** 积分抵现金额 */
+        BigDecimal pointsDiscountAmount,
         BigDecimal payAmount,
+        /** 本单用掉的积分数 */
+        Integer pointsUsed,
         /** 支付所需参数(由 {@link PayParams} 承载;未接通支付渠道时可能为 null) */
         PayParams payParams) {
 

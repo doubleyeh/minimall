@@ -14,6 +14,10 @@ import java.util.List;
  *                      端上两条路径(立即购买 / 购物车结算)共用这一个接口
  * @param addressId     收货地址 ID(服务端会把它快照进订单,之后地址被改不影响历史订单)
  * @param couponRecordId 要使用的优惠券领取记录,可空
+ * @param pointsToUse   本单要用的积分数,可空(空即不用)。**上限由服务端重算**,
+ *                      端上传来的只是意向 —— 超过上限直接报错而不是静默夹取,
+ *                      静默夹取会让"用户看到的价"与"实付"对不上
+ * @param remark        买家留言
  */
 public record CreateOrderRequest(
         List<Item> items,
@@ -22,6 +26,9 @@ public record CreateOrderRequest(
         Long addressId,
 
         Long couponRecordId,
+
+        @Min(value = 0, message = "使用的积分不能为负数")
+        Integer pointsToUse,
 
         @Size(max = 255, message = "买家留言不能超过 255 个字符")
         String remark) {

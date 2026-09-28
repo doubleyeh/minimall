@@ -19,7 +19,11 @@ public record ClientOrderView(
         BigDecimal freightAmount,
         BigDecimal promotionDiscountAmount,
         BigDecimal couponDiscountAmount,
+        /** 积分抵现金额 */
+        BigDecimal pointsDiscountAmount,
         BigDecimal payAmount,
+        /** 本单用掉的积分数 */
+        Integer pointsUsed,
         String receiverName,
         String receiverPhone,
         String receiverAddress,

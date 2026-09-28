@@ -3,6 +3,8 @@ package com.minimall.mall.service;
 import com.minimall.mall.api.dto.ClientOrderView;
 import com.minimall.mall.api.dto.CreateOrderRequest;
 import com.minimall.mall.api.dto.OrderCreateResponse;
+import com.minimall.mall.api.dto.OrderPreviewRequest;
+import com.minimall.mall.api.dto.OrderPreviewView;
 import com.minimall.common.PageResult;
 
 import java.time.LocalDateTime;
@@ -23,6 +25,14 @@ public interface OrderService {
      * 外部网络调用进事务会让数据库连接被网络超时拖住(3.3 的括注)。
      */
     OrderCreateResponse create(CreateOrderRequest request);
+
+    /**
+     * 结算试算(3.11):只算不落单,不占库存、不核销券、不扣积分。
+     *
+     * <p>与 {@link #create} 共用同一段算价编排,所以"端上看到的价"与"实付"逐分一致 ——
+     * 这是它存在的全部理由(端上自算必然漂移,而漂移的方向通常是少收钱)。
+     */
+    OrderPreviewView preview(OrderPreviewRequest request);
 
     /** 买家取消(仅待支付订单)。释放锁定库存并退回优惠券。 */
     void cancel(Long orderId);

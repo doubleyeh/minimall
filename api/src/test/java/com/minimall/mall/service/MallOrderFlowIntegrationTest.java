@@ -178,7 +178,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例1:下单只锁定库存,不动实际库存(可售库存随之减少)")
     void createOrderLocksStockOnly() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, "尽快发货"));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null, "尽快发货"));
 
         assertThat(response.orderNo()).hasSize(16);
         assertThat(response.goodsAmount()).isEqualByComparingTo("100.00");
@@ -202,7 +202,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例2:支付回调同时扣减实际库存与锁定库存,并累加销量")
     void payCallbackDeductsBothStockFields() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 3)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 3)), addressId, null, null, null));
 
         payCallback.paySuccess(response.orderNo(), response.payAmount());
 
@@ -225,7 +225,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例3:重复的支付回调不会重复扣库存(幂等)")
     void duplicateCallbackIsIdempotent() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null, null));
         String transactionId = "wx-txn-dup-" + System.nanoTime();
 
         payCallback.paySuccess(response.orderNo(), response.payAmount());
@@ -243,7 +243,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例4:支付回调金额与订单金额不一致时拒绝处理(防篡改)")
     void callbackRejectsAmountMismatch() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null, null));
 
         assertThatThrownBy(() -> payCallback.paySuccess(response.orderNo(), new BigDecimal("0.01")))
                 .hasMessageContaining("金额不一致");
@@ -259,7 +259,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例5:买家取消订单释放锁定库存,订单进入已关闭")
     void cancelReleasesLockedStock() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 4)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 4)), addressId, null, null, null));
 
         orderService.cancel(response.orderId());
 
@@ -279,7 +279,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例6:超时未支付由系统关闭并释放库存(3.4)")
     void timeoutClosesAndReleases() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 2)), addressId, null, null, null));
 
         inTenant(() -> {
             // 把下单时间往前推,模拟已超过支付超时(不依赖等待真实的 15 分钟)。
@@ -306,7 +306,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例7:库存不足时下单失败,且不会留下订单(整笔回滚)")
     void insufficientStockRollsBackEverything() {
         assertThatThrownBy(() -> orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 11)), addressId, null, null)))
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 11)), addressId, null, null, null)))
                 .hasMessageContaining("库存不足");
 
         inTenant(() -> {
@@ -323,7 +323,7 @@ class MallOrderFlowIntegrationTest {
     @DisplayName("用例8:订单查询只返回自己的订单(跨客户不可见)")
     void ordersAreScopedToCustomer() {
         OrderCreateResponse response = orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null));
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), addressId, null, null, null));
 
         // 换一个客户身份,应当看不到上面那笔订单
         Long otherCustomerId = inTenant(() -> {

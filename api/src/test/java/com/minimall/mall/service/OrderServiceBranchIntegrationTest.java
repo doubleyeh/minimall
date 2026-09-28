@@ -58,7 +58,7 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
     private MallOrderStatusLogRepository statusLogRepository;
 
     private CreateOrderRequest requestOf(Long sku, int quantity) {
-        return new CreateOrderRequest(List.of(new CreateOrderRequest.Item(sku, quantity)), addressId, null, "测试留言");
+        return new CreateOrderRequest(List.of(new CreateOrderRequest.Item(sku, quantity)), addressId, null, null, "测试留言");
     }
 
     /** 把订单推进到"待收货"(支付 + 发货)。备注走 requestOf,便于断言留言透传。 */
@@ -228,7 +228,7 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
         asClientRun(customerId, () -> cartService.update(cartId, new CartUpdateRequest(null, 0)));
 
         assertThatThrownBy(() -> asClient(customerId, () -> orderService.create(
-                new CreateOrderRequest(Collections.emptyList(), addressId, null, null))))
+                new CreateOrderRequest(Collections.emptyList(), addressId, null, null, null))))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("没有可结算的商品");
     }
@@ -239,7 +239,7 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
         Long cartId = asClient(customerId, () -> cartService.add(new CartAddRequest(skuId, 3)));
 
         OrderCreateResponse order = asClient(customerId, () -> orderService.create(
-                new CreateOrderRequest(Collections.emptyList(), addressId, null, null)));
+                new CreateOrderRequest(Collections.emptyList(), addressId, null, null, null)));
 
         inTenant(() -> {
             List<MallOrderItem> items = orderItemRepository.findByOrderIdOrderByIdAsc(order.orderId());
@@ -258,7 +258,7 @@ class OrderServiceBranchIntegrationTest extends MallClientServiceTestBase {
         Long othersAddress = inTenant(() -> newAddress(otherCustomerId, "别人"));
 
         assertThatThrownBy(() -> asClient(customerId, () -> orderService.create(
-                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), othersAddress, null, null))))
+                new CreateOrderRequest(List.of(new CreateOrderRequest.Item(skuId, 1)), othersAddress, null, null, null))))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("收货地址不存在");
     }

@@ -143,11 +143,16 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 商品总额 = Σ(SKU价格 × 数量)
 ① 先应用满减活动(mall_promotion_full_reduction),按reduction_rule阶梯规则匹配最高档
 ② 再应用优惠券(mall_coupon),满减后金额判断是否达到优惠券min_order_amount门槛
-③ 加运费
-实付金额 = 商品总额 - ①减免 - ②减免 + 运费
+③ 再应用积分抵现(mall_points_batch,见 3.11):上限是商品总额的 50%,且不超过①②抵完剩下的商品金额
+④ 加运费
+实付金额 = 商品总额 - ①减免 - ②减免 - ③积分抵现 + 运费
 ```
 
 同一订单**最多使用一张优惠券**,满减活动可与优惠券叠加,但满减活动之间不叠加(取满足条件里减免金额最大的一个活动)。
+
+**积分抵现的基数与上限都在商品金额上,运费既不参与抵扣也不抬高上限** —— 否则运费也能用积分付,等于免运费。
+
+**这段编排只有一个实现**:`OrderServiceImpl#prepare`,结算试算与真实下单共用(`POST /mall/api/orders/preview` 与 `POST /mall/api/orders`)。端上自己算一遍的话,运费(模板/区域/包邮)、满减(活动+范围+阶梯)、券门槛、积分上限任何一处漂移,方向都是少收钱。
 
 ### 3.6 订单号规则
 
@@ -244,7 +249,9 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 - **退款扣回**:售后单到终态时按 `退款金额 / 订单实付金额` 占比扣回,**扣到 0 为止**(不允许负积分),**换货不扣**(没退钱,交易仍然成立)
 - **等级**:按**近 12 个月滚动成长值**判定(字典 `growth_roll_months`),门槛见 `mall_member_level.growth_threshold`。成长值每次变动后按流水**重算**而不是增量累加 —— 窗口已经滚过的客户做累加会一直偏大。**降级只发生在窗口滚出老值的那一刻**,由每日任务负责
 
-**结算顺序**(接 3.5):商品总额 → 满减 → 优惠券 → **积分抵现** → 加运费。所有金额仍以 `mall_order` 落库值为准。
+**结算顺序**(接 3.5):商品总额 → 满减 → 优惠券 → **积分抵现** → 加运费。所有金额仍以 `mall_order` 落库值为准,订单上同时留 `points_used` / `points_discount_amount` 两个"当时的值"。
+
+**试算接口** `POST /mall/api/orders/preview`:只算不落单,不占库存、不核销券、不扣积分。结算页靠它展示五项金额与"最多可用多少积分",与真实下单共用 `OrderServiceImpl#prepare`,所以两者逐分一致。**超过上限直接报错而不是静默夹取** —— 静默夹取会让端上预览的价与实际实付对不上。
 
 **等级折扣 `discount_rate` 仍不参与结算**(见开放项 2):本次只实现"成长值 → 等级"的升降级。
 

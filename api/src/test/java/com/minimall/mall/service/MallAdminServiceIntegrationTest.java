@@ -423,7 +423,7 @@ class MallAdminServiceIntegrationTest {
             var created = orderService.create(new com.minimall.mall.api.dto.CreateOrderRequest(
                     List.of(new com.minimall.mall.api.dto.CreateOrderRequest.Item(
                             skuRepository.findByGoodsIdOrderByIdAsc(goodsForOrder).get(0).getId(), 1)),
-                    addressId, null, null));
+                    addressId, null, null, null));
             payCallback.paySuccess(created.orderNo(), created.payAmount());
             return created.orderId();
         });
