@@ -63,4 +63,17 @@ public interface MallOrderRepository extends JpaRepository<MallOrder, Long>,
     int updateStatusOnClose(@Param("orderId") Long orderId, @Param("tenantId") Long tenantId,
                             @Param("status") int status, @Param("closeReason") Integer closeReason,
                             @Param("cancelTime") LocalDateTime cancelTime);
+
+    /**
+     * 确认收货时把状态落库。与 {@link #updateStatusOnClose} 同理,原因也一样:
+     * 自动确认收货是批处理(同事务最多 200 笔),而紧接着发积分会做
+     * {@code @Modifying(clearAutomatically = true)} 的余额与批次更新,会清空持久化上下文 ——
+     * 第 2 笔起的订单随即游离,只改实体的话提交时不会落库。
+     */
+    @Modifying
+    @Query("update MallOrder o set o.status = :status, o.receiveTime = :receiveTime, o.finishTime = :finishTime "
+            + "where o.id = :orderId and o.tenantId = :tenantId")
+    int updateStatusOnFinish(@Param("orderId") Long orderId, @Param("tenantId") Long tenantId,
+                             @Param("status") int status, @Param("receiveTime") LocalDateTime receiveTime,
+                             @Param("finishTime") LocalDateTime finishTime);
 }

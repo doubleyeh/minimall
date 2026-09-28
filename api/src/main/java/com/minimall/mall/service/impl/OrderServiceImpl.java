@@ -342,18 +342,35 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void confirmReceive(Long orderId) {
         Long customerId = ClientContext.requireCustomerId();
+        Long tenantId = TenantContext.getTenantId();
         MallOrder order = loadOwned(orderId, customerId);
         if (order.getStatus() != MallOrder.STATUS_PENDING_RECEIVE) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "只有待收货的订单可以确认收货");
         }
+        finishAndGrant(order, tenantId, OPERATOR_BUYER, customerId, "确认收货");
+    }
+
+    /**
+     * 确认收货:改状态 + 发积分与成长值(3.4)。
+     *
+     * <p><b>买家手动确认与系统自动确认共用这一段</b>。两条路径原本各写一份"改状态 + 两个时间戳 + 写日志",
+     * 如果把发积分只加在其中一条上,自动确认那条会静默漏发 —— 而自动确认每小时都在跑,漏了要等用户投诉才发现。
+     */
+    private void finishAndGrant(MallOrder order, Long tenantId, int operatorType, Long operatorId, String remark) {
         int from = order.getStatus();
         LocalDateTime now = LocalDateTime.now();
         order.setStatus(MallOrder.STATUS_FINISHED);
         order.setReceiveTime(now);
         order.setFinishTime(now);
-        writeStatusLog(order.getId(), from, MallOrder.STATUS_FINISHED, OPERATOR_BUYER, customerId, "确认收货");
-        // 积分/成长值的增加按 3.4 应在"确认收货"时触发,但积分规则(比例、是否分商品)尚未确定,
-        // 不做半实现 —— 半实现的积分会在规则明确后变成需要人工修正的历史数据(见文档开放项)
+        // 先显式 UPDATE 落状态:下面的发放会做 clearAutomatically 的余额/批次更新,
+        // 批处理里第 2 笔起的订单随即游离,只改实体会丢(与 releaseOrderResources 同一个坑)
+        orderRepository.updateStatusOnFinish(order.getId(), tenantId, MallOrder.STATUS_FINISHED, now, now);
+
+        // 发放以订单为幂等键:两条路径重复触发只会发一次
+        memberPointsService.grant(order.getCustomerId(), order.getId(), order.getPayAmount());
+
+        // 日志放在发放之后:发放里的批量更新带 flushAutomatically,放在前面有被清掉的风险
+        writeStatusLog(order.getId(), from, MallOrder.STATUS_FINISHED, operatorType, operatorId, remark);
     }
 
     @Override
@@ -393,15 +410,12 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public int autoReceiveOrders(LocalDateTime shippedBefore) {
+        Long tenantId = TenantContext.getTenantId();
         List<MallOrder> orders = orderRepository.findAutoReceiveOrders(MallOrder.STATUS_PENDING_RECEIVE,
                 shippedBefore, PageRequest.of(0, BATCH_SIZE));
-        LocalDateTime now = LocalDateTime.now();
         for (MallOrder order : orders) {
-            int from = order.getStatus();
-            order.setStatus(MallOrder.STATUS_FINISHED);
-            order.setReceiveTime(now);
-            order.setFinishTime(now);
-            writeStatusLog(order.getId(), from, MallOrder.STATUS_FINISHED, OPERATOR_SYSTEM, null, "发货后超时,系统自动确认收货");
+            // 与买家手动确认走同一段:发积分不能只加在手动那条路径上
+            finishAndGrant(order, tenantId, OPERATOR_SYSTEM, null, "发货后超时,系统自动确认收货");
         }
         return orders.size();
     }
