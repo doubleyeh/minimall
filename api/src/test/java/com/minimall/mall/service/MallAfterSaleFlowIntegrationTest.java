@@ -20,6 +20,7 @@ import com.minimall.mall.domain.repository.MallGoodsRepository;
 import com.minimall.mall.domain.repository.MallOrderItemRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallSkuRepository;
+import com.minimall.mall.domain.repository.MallPointsBatchRepository;
 import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.infra.auth.ClientContext;
@@ -98,6 +99,10 @@ class MallAfterSaleFlowIntegrationTest {
     @Autowired
     private MallStockLogRepository stockLogRepository;
 
+    /** 只用来读积分与批次(造发放数据走真实的下单→收货流程)。 */
+    @Autowired
+    private MallPointsBatchRepository pointsBatchRepository;
+
     private Long customerId;
     private Long addressId;
     private Long goodsId;
@@ -172,6 +177,13 @@ class MallAfterSaleFlowIntegrationTest {
             skuRepository.findById(skuId).ifPresent(skuRepository::delete);
             goodsRepository.findById(goodsId).ifPresent(goodsRepository::delete);
             addressRepository.findById(addressId).ifPresent(addressRepository::delete);
+            // 积分/成长值表没有外键,不主动清就会留下孤儿行
+            jdbcTemplate.update("delete from mall_points_batch where tenant_id = ? and customer_id = ?",
+                    TENANT_ID, customerId);
+            jdbcTemplate.update("delete from mall_points_log where tenant_id = ? and customer_id = ?",
+                    TENANT_ID, customerId);
+            jdbcTemplate.update("delete from mall_growth_log where tenant_id = ? and customer_id = ?",
+                    TENANT_ID, customerId);
             customerRepository.findById(customerId).ifPresent(customerRepository::delete);
             return null;
         });
@@ -305,7 +317,71 @@ class MallAfterSaleFlowIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("用例6:退货退款按比例扣回确认收货时发放的积分与成长值")
+    void returnRefundClawsBackPoints() {
+        OrderCreateResponse order = paidOrder(1);
+        // 推到"待收货"再确认收货:积分就是在确认收货那一步发的
+        inTenant(() -> {
+            jdbcTemplate.update("update mall_order set status = ?, ship_time = ? where id = ?",
+                    MallOrder.STATUS_PENDING_RECEIVE, LocalDateTime.now().minusDays(1), order.orderId());
+            return null;
+        });
+        orderService.confirmReceive(order.orderId());
+        assertThat(pointsOf()).as("100 元实付 → 发 100 积分").isEqualTo(100);
+        assertThat(growthOf()).isEqualTo(100);
+
+        Long itemId = orderItemId(order.orderId());
+        Long afterSaleId = afterSaleService.apply(new AfterSaleApplyRequest(itemId,
+                MallAfterSale.TYPE_RETURN_REFUND, "质量问题", null, new BigDecimal("100.00"), List.of("a.jpg")));
+        asStaff(() -> {
+            afterSaleService.approve(afterSaleId, null);
+            return null;
+        });
+        afterSaleService.submitReturnLogistics(afterSaleId, "顺丰", "SF123456");
+        asStaff(() -> {
+            afterSaleService.confirmReturnReceived(afterSaleId, null, null, null);
+            return null;
+        });
+
+        assertThat(afterSaleStatus(afterSaleId)).isEqualTo(MallAfterSale.STATUS_DONE);
+        assertThat(pointsOf()).as("全额退款:发的 100 积分全部扣回").isZero();
+        assertThat(growthOf()).as("成长值同样扣回,不让等级停在虚高处").isZero();
+        assertThat(batchSum()).as("批次也要同步归零").isZero();
+    }
+
+    @Test
+    @DisplayName("用例7:还没确认收货就退款 —— 没发过积分,不扣")
+    void refundBeforeReceiveClawsNothing() {
+        OrderCreateResponse order = paidOrder(1);
+        Long itemId = orderItemId(order.orderId());
+        Long afterSaleId = afterSaleService.apply(new AfterSaleApplyRequest(itemId,
+                MallAfterSale.TYPE_REFUND_ONLY, "不想要了", null, new BigDecimal("100.00"), List.of("a.jpg")));
+
+        asStaff(() -> {
+            afterSaleService.approve(afterSaleId, null);
+            return null;
+        });
+
+        assertThat(afterSaleStatus(afterSaleId)).isEqualTo(MallAfterSale.STATUS_DONE);
+        assertThat(pointsOf()).as("订单还没收货,不能扣成负的").isZero();
+        assertThat(growthOf()).isZero();
+    }
+
     // ---------------------------------------------------------------- 辅助
+
+    private int pointsOf() {
+        return inTenant(() -> customerRepository.findById(customerId).orElseThrow().getPoints());
+    }
+
+    private int growthOf() {
+        return inTenant(() -> customerRepository.findById(customerId).orElseThrow().getGrowthValue());
+    }
+
+    private int batchSum() {
+        Long sum = inTenant(() -> pointsBatchRepository.sumUsableRemain(customerId, TENANT_ID, LocalDateTime.now()));
+        return sum == null ? 0 : sum.intValue();
+    }
 
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;

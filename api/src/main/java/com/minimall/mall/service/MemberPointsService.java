@@ -68,4 +68,22 @@ public interface MemberPointsService {
 
     /** 管理端手动调整:正数建批次,负数按 FIFO 扣减且扣到 0 为止。 */
     void manualAdjust(Long customerId, Integer pointsDelta, Integer growthDelta, String remark);
+
+    /**
+     * 售后退款扣回(3.11):按 {@code 退款金额 / 订单实付金额} 的占比扣回该订单发放的积分与成长值,
+     * **扣到 0 为止**(不允许负积分)。
+     *
+     * <p>三条规则都在这里,调用方只说"哪个售后单退了多少钱":
+     * <ul>
+     *   <li><b>换货不扣</b> —— 钱没退,交易仍然成立;</li>
+     *   <li><b>按比例</b> —— 一单可以有多笔部分退款,每次按退款占比扣,累计不超过发放值;</li>
+     *   <li><b>幂等</b> —— 同一售后单只扣一次。</li>
+     * </ul>
+     *
+     * <p>未确认收货就退款时该订单还没发过积分,直接跳过。
+     *
+     * @param refundAmount 本次退款金额;订单实付为 0 或不详时按全额处理
+     * @return 实际扣回的积分数
+     */
+    int clawBack(Long afterSaleId, Long orderId, Long customerId, BigDecimal refundAmount, int afterSaleType);
 }

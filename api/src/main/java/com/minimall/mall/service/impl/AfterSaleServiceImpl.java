@@ -28,6 +28,7 @@ import com.minimall.mall.infra.OrderNumberGenerator;
 import com.minimall.mall.infra.auth.ClientContext;
 import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.mall.service.AfterSaleService;
+import com.minimall.mall.service.MemberPointsService;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private static final int BATCH_SIZE = 200;
 
     private final MallAfterSaleRepository afterSaleRepository;
+    private final MemberPointsService memberPointsService;
     private final MallAfterSaleLogRepository logRepository;
     private final MallAfterSaleImageRepository imageRepository;
     private final MallOrderRepository orderRepository;
@@ -77,6 +79,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final WxPayRefundSubmitter refundSubmitter;
 
     public AfterSaleServiceImpl(MallAfterSaleRepository afterSaleRepository,
+                               MemberPointsService memberPointsService,
                                MallAfterSaleLogRepository logRepository,
                                MallAfterSaleImageRepository imageRepository,
                                MallOrderRepository orderRepository,
@@ -88,6 +91,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                                OrderNumberGenerator numberGenerator,
                                WxPayRefundSubmitter refundSubmitter) {
         this.afterSaleRepository = afterSaleRepository;
+        this.memberPointsService = memberPointsService;
         this.logRepository = logRepository;
         this.imageRepository = imageRepository;
         this.orderRepository = orderRepository;
@@ -421,6 +425,11 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                     || toStatus == MallAfterSale.STATUS_ARBITRATION_PASS) {
                 restoreStock(target);
             }
+            // 按退款金额占比扣回该订单发放的积分与成长值(3.11)。放在这里而不是微信退款到账回调里:
+            // 与库存回补同一时刻、同一事务,语义一致(回调只落退款单状态,拿不到业务上下文)。
+            // 换货不扣、按比例、幂等三条规则都在服务里,调用方只需说是哪张售后单退了多少钱
+            memberPointsService.clawBack(target.getId(), target.getOrderId(), target.getCustomerId(),
+                    target.getRefundAmount(), target.getAfterSaleType());
             markItemAfterSaleDone(target.getOrderItemId());
         } else {
             // 关闭/仲裁驳回:不动资金与库存,但明细要回到"无售后"以便重新申请

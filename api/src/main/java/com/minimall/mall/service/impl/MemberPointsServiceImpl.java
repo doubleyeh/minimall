@@ -3,7 +3,9 @@ package com.minimall.mall.service.impl;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.tenant.TenantContext;
+import com.minimall.mall.domain.MallAfterSale;
 import com.minimall.mall.domain.MallCustomer;
+import com.minimall.mall.domain.MallOrder;
 import com.minimall.mall.domain.MallGrowthLog;
 import com.minimall.mall.domain.MallMemberLevel;
 import com.minimall.mall.domain.MallPointsBatch;
@@ -12,6 +14,7 @@ import com.minimall.mall.domain.MallPointsUse;
 import com.minimall.mall.domain.repository.MallCustomerRepository;
 import com.minimall.mall.domain.repository.MallGrowthLogRepository;
 import com.minimall.mall.domain.repository.MallMemberLevelRepository;
+import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallPointsBatchRepository;
 import com.minimall.mall.domain.repository.MallPointsLogRepository;
 import com.minimall.mall.domain.repository.MallPointsUseRepository;
@@ -64,6 +67,7 @@ public class MemberPointsServiceImpl implements MemberPointsService {
     private final MallPointsUseRepository pointsUseRepository;
     private final MallGrowthLogRepository growthLogRepository;
     private final MallMemberLevelRepository levelRepository;
+    private final MallOrderRepository orderRepository;
     private final DictIntReader dictIntReader;
 
     public MemberPointsServiceImpl(MallCustomerRepository customerRepository,
@@ -72,6 +76,7 @@ public class MemberPointsServiceImpl implements MemberPointsService {
                                    MallPointsUseRepository pointsUseRepository,
                                    MallGrowthLogRepository growthLogRepository,
                                    MallMemberLevelRepository levelRepository,
+                                   MallOrderRepository orderRepository,
                                    DictIntReader dictIntReader) {
         this.customerRepository = customerRepository;
         this.pointsLogRepository = pointsLogRepository;
@@ -79,6 +84,7 @@ public class MemberPointsServiceImpl implements MemberPointsService {
         this.pointsUseRepository = pointsUseRepository;
         this.growthLogRepository = growthLogRepository;
         this.levelRepository = levelRepository;
+        this.orderRepository = orderRepository;
         this.dictIntReader = dictIntReader;
     }
 
@@ -377,6 +383,88 @@ public class MemberPointsServiceImpl implements MemberPointsService {
         refreshRollingGrowth(customerId, tenantId);
         log.info("管理端调整客户 {} 积分 {} / 成长值 {}", customerId, actualPointsChange, growthChange);
     }
+
+    // ---------------------------------------------------------------- 售后退款扣回
+
+    @Override
+    public int clawBack(Long afterSaleId, Long orderId, Long customerId, BigDecimal refundAmount,
+                        int afterSaleType) {
+        Long tenantId = requireTenantId();
+        if (afterSaleType == MallAfterSale.TYPE_EXCHANGE) {
+            // 换货没退钱,交易仍然成立
+            return 0;
+        }
+        if (afterSaleId != null
+                && pointsLogRepository.existsByBizTypeAndBizRefId(MallPointsLog.BIZ_CLAWBACK, afterSaleId)) {
+            // 同一售后单只扣一次
+            return 0;
+        }
+
+        int granted = sumOf(MallPointsLog.BIZ_GRANT, tenantId, customerId, orderId);
+        if (granted <= 0) {
+            // 还没确认收货就退款:这笔订单根本没发过积分
+            return 0;
+        }
+        int remainingGranted = Math.max(granted - sumOf(MallPointsLog.BIZ_CLAWBACK, tenantId, customerId, orderId), 0);
+        if (remainingGranted == 0) {
+            // 多笔部分退款已经累计扣满发放值
+            return 0;
+        }
+
+        int target = Math.min(proportionalClawback(granted, orderId, refundAmount), remainingGranted);
+        int clawedPoints = consumeClampToZero(customerId, tenantId, target);
+        if (clawedPoints > 0) {
+            pointsLogRepository.save(newLog(customerId, -clawedPoints, balanceOf(customerId, tenantId),
+                    MallPointsLog.BIZ_CLAWBACK, orderId, afterSaleId, "售后退款扣回"));
+        }
+
+        // 成长值按同一个"应扣量"扣,而不是按实际扣到的积分:积分可能已经被花掉或过期,
+        // 但成长值代表历史贡献,该降还是要降(扣到 0 为止)
+        int growthTarget = Math.min(target, growthOf(customerId, tenantId));
+        if (growthTarget > 0) {
+            customerRepository.deductGrowthClampToZero(customerId, tenantId, growthTarget);
+            growthLogRepository.save(newGrowthLog(customerId, -growthTarget, MallGrowthLog.BIZ_CLAWBACK,
+                    orderId, afterSaleId, "售后退款扣回"));
+        }
+        refreshRollingGrowth(customerId, tenantId);
+
+        log.info("售后退款扣回 tenantId={} afterSaleId={} orderId={} 积分 {} 成长值 {}",
+                tenantId, afterSaleId, orderId, clawedPoints, growthTarget);
+        return clawedPoints;
+    }
+
+    /**
+     * 应扣量 = 发放量 × (退款金额 / 订单实付金额),向下取整。
+     *
+     * <p>分母用订单实付而不是退款行金额:一单可有多笔部分退款,用实付做分母才能让
+     * "各笔占比之和 == 1"在整单退光时成立。
+     */
+    private int proportionalClawback(int granted, Long orderId, BigDecimal refundAmount) {
+        BigDecimal payAmount = orderRepository.findById(orderId)
+                .map(MallOrder::getPayAmount)
+                .orElse(null);
+        if (payAmount == null || payAmount.signum() <= 0 || refundAmount == null) {
+            // 实付为 0(全额优惠)或不详:按全额扣,不给"退光钱还留着积分"的口子
+            return granted;
+        }
+        BigDecimal ratio = refundAmount.divide(payAmount, 6, RoundingMode.HALF_UP).min(BigDecimal.ONE);
+        return BigDecimal.valueOf(granted).multiply(ratio).setScale(0, RoundingMode.FLOOR).intValue();
+    }
+
+    /** 按 (类型, 订单) 汇总变动量并取绝对值:发放是正数、扣回是负数。 */
+    private int sumOf(int bizType, Long tenantId, Long customerId, Long orderId) {
+        Long sum = pointsLogRepository.sumChangePoints(tenantId, customerId, bizType, orderId);
+        return sum == null ? 0 : Math.abs(sum.intValue());
+    }
+
+    private int growthOf(Long customerId, Long tenantId) {
+        return customerRepository.findById(customerId)
+                .map(MallCustomer::getGrowthValue)
+                .orElseThrow(() -> new IllegalStateException(
+                        "客户不存在或不属于当前租户 customerId=" + customerId + " tenantId=" + tenantId));
+    }
+
+    // ---------------------------------------------------------------- 内部
 
     /**
      * 扣减积分与批次,**扣到 0 为止**(退款扣回、过期清零、手动调减共用)。
