@@ -60,11 +60,18 @@ public class MallCustomer extends BaseTenantEntity {
      *
      * <p><b>不允许绕过流水直接改它</b>:任何变动都要同时写一条 {@link MallPointsLog},
      * 并带上变动后余额。积分是可兑换的资产,没有流水就无法对账。
+     *
+     * <p>它同时必须恒等于该客户所有未过期批次的剩余之和(见 {@link MallPointsBatch})。
      */
     @Column(name = "points", nullable = false)
     private Integer points;
 
-    /** 成长值:用于等级晋升判断,**累计不清零**(区别于可消耗的积分)。 */
+    /**
+     * 近 N 个月(字典 {@code growth_roll_months})的滚动成长值,**可增可减**。
+     *
+     * <p>等级由它判定,所以窗口滚出老值时会降级。真相来源是 {@link MallGrowthLog},
+     * 这一列只是缓存 —— 每次变动后按流水重算,不做增量累加(窗口已滚过的客户会算错)。
+     */
     @Column(name = "growth_value", nullable = false)
     private Integer growthValue;
 

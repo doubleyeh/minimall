@@ -10,11 +10,13 @@ import lombok.Setter;
 import java.math.BigDecimal;
 
 /**
- * 会员等级定义(商城设计文档 5.2 的开放项)。
+ * 会员等级定义(商城设计文档 3.11)。
  *
- * <p><b>本期只建字段,不做晋升与折扣计算</b>:等级折扣与优惠券/满减的叠加顺序尚未确定,
- * 现在实现出来的规则大概率要返工,而"半实现的折扣"会真实地少收钱。字段先留着,
- * 等业务规则明确后再补计算逻辑(开放项 2)。
+ * <p>等级由**近 N 个月滚动成长值**(字典 {@code growth_roll_months})与 {@code growthThreshold}
+ * 比对得出,窗口滚出老值时**会降级**。判定取门槛降序里第一个够得着的等级。
+ *
+ * <p>{@code discountRate} 仍然**只存不用**:等级折扣与优惠券/满减的叠加顺序尚未确定,
+ * 而"半实现的折扣"会真实地少收钱(开放项 2)。
  */
 @Entity
 @Table(name = "mall_member_level")
@@ -33,7 +35,7 @@ public class MallMemberLevel extends BaseTenantEntity {
     @Column(name = "growth_threshold", nullable = false)
     private Integer growthThreshold;
 
-    /** 等级折扣率,如 0.95 表示 9.5 折;本期字段先建,计算逻辑不实现。 */
+    /** 等级折扣率,如 0.95 表示 9.5 折;**只存不用**,不参与结算(见类注释)。 */
     @Column(name = "discount_rate", precision = 3, scale = 2)
     private BigDecimal discountRate;
 

@@ -21,6 +21,14 @@ public interface MallMemberLevelRepository extends JpaRepository<MallMemberLevel
 
     List<MallMemberLevel> findByOrderByLevelSortAsc();
 
+    /**
+     * 按成长值门槛从高到低取启用中的等级 —— 判定当前等级时取**第一个够得着**的。
+     *
+     * <p>按门槛降序而不是按 levelSort:门槛才是判定依据,而两者不一定同序
+     * (运营把门槛配反时,按门槛判定至少结果自洽)。
+     */
+    List<MallMemberLevel> findByStatusAndTenantIdOrderByGrowthThresholdDesc(Integer status, Long tenantId);
+
     boolean existsByLevelName(String levelName);
 
     boolean existsByLevelNameAndIdNot(String levelName, Long id);

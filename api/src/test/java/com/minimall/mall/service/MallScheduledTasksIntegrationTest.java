@@ -1,5 +1,6 @@
 package com.minimall.mall.service;
 
+import com.minimall.infra.id.SnowflakeIdGenerator;
 import com.minimall.mall.api.dto.OrderCreateResponse;
 import com.minimall.mall.domain.MallOrder;
 import com.minimall.mall.domain.MallOrderStatusLog;
@@ -8,12 +9,14 @@ import com.minimall.mall.domain.repository.MallOrderStatusLogRepository;
 import com.minimall.sys.api.dto.DictDataSaveRequest;
 import com.minimall.sys.api.dto.DictDataView;
 import com.minimall.sys.service.DictService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -41,6 +44,8 @@ class MallScheduledTasksIntegrationTest extends MallClientServiceTestBase {
     private DictService dictService;
     @Autowired
     private StringRedisTemplate redis;
+    @Autowired
+    private MemberPointsService memberPointsService;
 
     /**
      * 清掉任务互斥锁再跑。
@@ -52,6 +57,30 @@ class MallScheduledTasksIntegrationTest extends MallClientServiceTestBase {
     @BeforeEach
     void clearTaskLocks() {
         redis.delete(redis.keys("task:lock:*"));
+    }
+
+    /**
+     * 清掉本类造出来的积分数据。
+     *
+     * <p>这些表没有外键,基类只清客户/订单 —— 留下孤儿批次会让别的用例里
+     * "过期涉及多少客户""重算了多少客户"这类计数断言漂移。
+     */
+    @AfterEach
+    void tearDownMemberData() {
+        inTenant(() -> {
+            for (Long id : new Long[] { customerId, otherCustomerId }) {
+                if (id == null) {
+                    continue;
+                }
+                jdbcTemplate.update("delete from mall_points_batch where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, id);
+                jdbcTemplate.update("delete from mall_points_log where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, id);
+                jdbcTemplate.update("delete from mall_growth_log where tenant_id = ? and customer_id = ?",
+                        TENANT_ID, id);
+            }
+            return null;
+        });
     }
 
     private void backdateOrder(Long orderId, String column, LocalDateTime value) {
@@ -189,5 +218,47 @@ class MallScheduledTasksIntegrationTest extends MallClientServiceTestBase {
     @DisplayName("优惠券过期清理:同样可空跑")
     void expireCouponRecordsIsNoopWhenNothingOverdue() {
         assertThatCode(() -> scheduledTasks.expireCouponRecords()).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("积分过期任务:清掉已到期批次,汇总余额同步归零")
+    void expirePointsTaskClearsOverdueBatch() {
+        inTenant(() -> memberPointsService.grant(customerId, SnowflakeIdGenerator.nextId(),
+                new BigDecimal("100.00")));
+        backdateMemberColumn("mall_points_batch", "expire_time", customerId, LocalDateTime.now().minusSeconds(1));
+
+        scheduledTasks.expirePoints();
+
+        inTenant(() -> {
+            assertThat(customerRepository.findById(customerId).orElseThrow().getPoints())
+                    .as("过期的积分要从可用余额里扣掉")
+                    .isZero();
+            return null;
+        });
+    }
+
+    @Test
+    @DisplayName("会员等级重算任务:窗口滚出去的成长值不再计入")
+    void recomputeGrowthLevelsTaskDropsExpiredWindow() {
+        inTenant(() -> memberPointsService.grant(customerId, SnowflakeIdGenerator.nextId(),
+                new BigDecimal("100.00")));
+        backdateMemberColumn("mall_growth_log", "create_time", customerId, LocalDateTime.now().minusMonths(13));
+
+        scheduledTasks.recomputeGrowthLevels();
+
+        inTenant(() -> {
+            assertThat(customerRepository.findById(customerId).orElseThrow().getGrowthValue())
+                    .as("13 个月前的成长值已经滚出 12 个月窗口")
+                    .isZero();
+            return null;
+        });
+    }
+
+    private void backdateMemberColumn(String table, String column, Long ownerCustomerId, LocalDateTime value) {
+        inTenant(() -> {
+            jdbcTemplate.update("update " + table + " set " + column
+                    + " = ? where tenant_id = ? and customer_id = ?", value, TENANT_ID, ownerCustomerId);
+            return null;
+        });
     }
 }

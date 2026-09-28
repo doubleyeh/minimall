@@ -28,6 +28,8 @@ minimall:
       expire-coupon-records: "-"
       tenant-expiry: "-"
       tenant-purge: "-"
+      expire-points: "-"
+      recompute-growth-levels: "-"
       oper-log-archive: "-"
   # 上传的文件往 target 下写:不污染工作目录,且 target 本来就被忽略
   file:

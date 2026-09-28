@@ -1,9 +1,9 @@
 package com.minimall.mall.service;
 
-import com.minimall.sys.api.dto.DictItemView;
 import com.minimall.mall.service.MarketingMaintenanceService;
+import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
-import com.minimall.sys.service.DictService;
+import com.minimall.sys.service.support.DictIntReader;
 import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.sys.service.support.TenantTaskRunner;
 import org.slf4j.Logger;
@@ -45,6 +45,9 @@ public class MallScheduledTasks {
     private static final int DEFAULT_AFTER_SALE_BUYER_DAYS = 7;
     private static final int DEFAULT_AFTER_SALE_RECEIVE_DAYS = 10;
 
+    /** 积分过期单轮上限。剩余的下轮继续 —— 扫描条件是 remain>0 且已过期,天然推进。 */
+    private static final int EXPIRE_BATCH_LIMIT = 500;
+
     private static final String DICT_PAY_TIMEOUT = "order_pay_timeout_minutes";
     private static final String DICT_AUTO_RECEIVE = "order_auto_receive_days";
     private static final String DICT_AFTER_SALE_TIMEOUT = "after_sale_timeout";
@@ -53,20 +56,23 @@ public class MallScheduledTasks {
     private final OrderService orderService;
     private final AfterSaleService afterSaleService;
     private final MarketingMaintenanceService marketingMaintenanceService;
-    private final DictService dictService;
+    private final DictIntReader dictIntReader;
+    private final MemberPointsService memberPointsService;
     private final ScheduledTaskLock taskLock;
 
     public MallScheduledTasks(TenantTaskRunner tenantTaskRunner,
                               OrderService orderService,
                               AfterSaleService afterSaleService,
                               MarketingMaintenanceService marketingMaintenanceService,
-                              DictService dictService,
+                              DictIntReader dictIntReader,
+                              MemberPointsService memberPointsService,
                               ScheduledTaskLock taskLock) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
         this.afterSaleService = afterSaleService;
         this.marketingMaintenanceService = marketingMaintenanceService;
-        this.dictService = dictService;
+        this.dictIntReader = dictIntReader;
+        this.memberPointsService = memberPointsService;
         this.taskLock = taskLock;
     }
 
@@ -75,7 +81,7 @@ public class MallScheduledTasks {
     public void closeTimeoutOrders() {
         // 多实例部署时每个实例都会触发:MallScheduledTasks 的四个任务都要抢锁,抢不到就整个跳过
         taskLock.runIfNotLocked("关闭超时未支付订单", () -> {
-            int minutes = dictInt(DICT_PAY_TIMEOUT, DEFAULT_PAY_TIMEOUT_MINUTES);
+            int minutes = dictIntReader.get(DICT_PAY_TIMEOUT, DEFAULT_PAY_TIMEOUT_MINUTES);
             LocalDateTime deadline = LocalDateTime.now().minusMinutes(minutes);
             var result = tenantTaskRunner.runForEachTenant("关闭超时未支付订单", SYSTEM_ACTOR_ID,
                     tenantId -> {
@@ -92,7 +98,7 @@ public class MallScheduledTasks {
     @Scheduled(cron = "${minimall.schedule.cron.auto-receive-orders:0 0 * * * ?}")
     public void autoReceiveOrders() {
         taskLock.runIfNotLocked("订单自动确认收货", () -> {
-            int days = dictInt(DICT_AUTO_RECEIVE, DEFAULT_AUTO_RECEIVE_DAYS);
+            int days = dictIntReader.get(DICT_AUTO_RECEIVE, DEFAULT_AUTO_RECEIVE_DAYS);
             LocalDateTime deadline = LocalDateTime.now().minusDays(days);
             var result = tenantTaskRunner.runForEachTenant("订单自动确认收货", SYSTEM_ACTOR_ID,
                     tenantId -> {
@@ -116,9 +122,9 @@ public class MallScheduledTasks {
         taskLock.runIfNotLocked("售后超时处理", () -> {
             // 三档阈值存在同一个字典类型下(按标签区分),这里按标签取值的顺序与 V4 种子数据一致:
             // 1-商家处理(小时) 2-买家退货(天) 3-商家收货(天)
-            int merchantHours = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 0, DEFAULT_AFTER_SALE_MERCHANT_HOURS);
-            int buyerDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 1, DEFAULT_AFTER_SALE_BUYER_DAYS);
-            int receiveDays = dictIntAt(DICT_AFTER_SALE_TIMEOUT, 2, DEFAULT_AFTER_SALE_RECEIVE_DAYS);
+            int merchantHours = dictIntReader.getAt(DICT_AFTER_SALE_TIMEOUT, 0, DEFAULT_AFTER_SALE_MERCHANT_HOURS);
+            int buyerDays = dictIntReader.getAt(DICT_AFTER_SALE_TIMEOUT, 1, DEFAULT_AFTER_SALE_BUYER_DAYS);
+            int receiveDays = dictIntReader.getAt(DICT_AFTER_SALE_TIMEOUT, 2, DEFAULT_AFTER_SALE_RECEIVE_DAYS);
             LocalDateTime now = LocalDateTime.now();
             var result = tenantTaskRunner.runForEachTenant("售后超时处理", SYSTEM_ACTOR_ID, tenantId -> {
                 int autoApproved = afterSaleService.autoApproveTimeout(now.minusHours(merchantHours));
@@ -148,29 +154,45 @@ public class MallScheduledTasks {
         });
     }
 
-    /** 读字典里的整数配置;取不到或格式不对时用默认值,并把情况记下来。 */
-    private int dictInt(String dictType, int defaultValue) {
-        return dictIntAt(dictType, 0, defaultValue);
+    /**
+     * 积分过期清零(每天 4:00)。
+     *
+     * <p>只兜底不活跃客户:活跃客户在下单算抵现上限时已经懒过期过了。
+     *
+     * @see MemberPointsService#expireBatches(int)
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.expire-points:0 0 4 * * ?}")
+    public void expirePoints() {
+        taskLock.runIfNotLocked("积分过期清零", () -> {
+            var result = tenantTaskRunner.runForEachTenant("积分过期清零", SYSTEM_ACTOR_ID,
+                    tenantId -> {
+                        int handled = memberPointsService.expireBatches(EXPIRE_BATCH_LIMIT);
+                        if (handled > 0) {
+                            log.info("租户 {} 积分过期清零涉及 {} 个客户", tenantId, handled);
+                        }
+                    });
+            logIfFailed("积分过期清零", result);
+        });
     }
 
     /**
-     * 读字典里第 {@code index} 个条目的整数值。
+     * 会员等级重算(每天 4:20):成长值按滚动窗口重算,够不着门槛的会降级。
      *
-     * <p>一个字典类型下有多档配置时(after_sale_timeout 有三档)只能按顺序取 ——
-     * 字典的条目按 {@code sort_order} 返回,所以这里的下标与 V4 种子数据的顺序是对应的。
-     * 取不到、越界、或值不是整数时一律退回默认值:配置问题不该让任务整体卡住。
+     * <p>这是**降级的唯一来源** —— 发放/扣回/手动调整都是即时重算,只有"窗口滚出老值"
+     * 这件事没有业务动作可依附。
      */
-    private int dictIntAt(String dictType, int index, int defaultValue) {
-        try {
-            List<DictItemView> items = dictService.items(dictType);
-            if (items.size() <= index) {
-                return defaultValue;
-            }
-            return Integer.parseInt(items.get(index).value().trim());
-        } catch (NumberFormatException ex) {
-            log.warn("字典 {} 第 {} 项不是整数,已使用默认值 {}", dictType, index, defaultValue);
-            return defaultValue;
-        }
+    @Scheduled(cron = "${minimall.schedule.cron.recompute-growth-levels:0 20 4 * * ?}")
+    public void recomputeGrowthLevels() {
+        taskLock.runIfNotLocked("会员等级重算", () -> {
+            var result = tenantTaskRunner.runForEachTenant("会员等级重算", SYSTEM_ACTOR_ID,
+                    tenantId -> {
+                        int count = memberPointsService.refreshRollingGrowth();
+                        if (count > 0) {
+                            log.info("租户 {} 会员等级重算 {} 个客户", tenantId, count);
+                        }
+                    });
+            logIfFailed("会员等级重算", result);
+        });
     }
 
     private void logIfFailed(String taskName, TenantTaskRunner.RunResult result) {

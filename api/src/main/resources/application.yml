@@ -121,6 +121,8 @@ minimall:
       expire-coupon-records: "0 30 3 * * ?"
       tenant-expiry: "0 50 3 * * ?"
       tenant-purge: "0 10 4 * * ?"
+      expire-points: "0 0 4 * * ?"
+      recompute-growth-levels: "0 20 4 * * ?"
       oper-log-archive: "0 40 4 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:

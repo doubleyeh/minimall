@@ -21,6 +21,13 @@ import lombok.Setter;
 @Setter
 public class MallPointsLog extends BaseTenantEntity {
 
+    public static final int BIZ_GRANT = 1;
+    public static final int BIZ_REDEEM = 2;
+    public static final int BIZ_CLAWBACK = 3;
+    public static final int BIZ_MANUAL = 4;
+    public static final int BIZ_EXPIRE = 5;
+    public static final int BIZ_RETURN = 6;
+
     @Column(name = "customer_id", nullable = false)
     private Long customerId;
 
@@ -32,13 +39,22 @@ public class MallPointsLog extends BaseTenantEntity {
     @Column(name = "balance_points", nullable = false)
     private Integer balancePoints;
 
-    /** 1-下单获得 2-兑换消耗 3-退款扣回 4-管理端手动调整 5-过期清零。 */
+    /** 1-确认收货发放 2-抵现消耗 3-退款扣回 4-管理端手动调整 5-过期清零 6-订单关闭退回。 */
     @Column(name = "biz_type", nullable = false)
     private Integer bizType;
 
-    /** 关联业务 ID(如订单 ID),管理端手动调整时为空。 */
+    /**
+     * 关联业务 ID(订单 ID),管理端手动调整与过期清零时为空。
+     *
+     * <p>退款扣回时这里是订单 ID,售后单 ID 见 {@link #bizRefId} —— 两者都要有,
+     * 扣回既要能按订单汇总(部分退款不超过发放值),又要能按售后单幂等。
+     */
     @Column(name = "biz_id")
     private Long bizId;
+
+    /** 关联售后单 ID,仅退款扣回有值。 */
+    @Column(name = "biz_ref_id")
+    private Long bizRefId;
 
     @Column(name = "remark", length = 255)
     private String remark;

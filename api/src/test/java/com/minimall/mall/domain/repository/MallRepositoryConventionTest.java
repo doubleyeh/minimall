@@ -72,9 +72,9 @@ class MallRepositoryConventionTest {
                 .filter(JavaClass::isInterface)
                 .filter(javaClass -> javaClass.getSimpleName().endsWith("Repository"))
                 .count();
-        // 28 张 mall_* 表对应 28 个仓储;数量变化时这条用例会提醒去核对(新建/删除表都要同步)
+        // 31 张 mall_* 表对应 31 个仓储;数量变化时这条用例会提醒去核对(新建/删除表都要同步)
         assertThat(repositoryCount)
-                .as("mall 仓储数量与 mall_* 表数量应当一致(当前 28 张表),新增表时同步建仓储")
-                .isEqualTo(28L);
+                .as("mall 仓储数量与 mall_* 表数量应当一致(当前 31 张表),新增表时同步建仓储")
+                .isEqualTo(31L);
     }
 }
