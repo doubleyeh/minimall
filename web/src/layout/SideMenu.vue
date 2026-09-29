@@ -12,6 +12,7 @@
 
 <script setup lang="ts">
 import {
+  AlertCircleOutline,
   AppsOutline,
   BagHandleOutline,
   BookOutline,
@@ -74,6 +75,7 @@ const icons: Record<string, Component> = {
   car: CarOutline,
   crown: RibbonOutline,
   star: StarOutline,
+  alert: AlertCircleOutline,
   // 平台管理 · 定时任务
   time: TimeOutline,
 }

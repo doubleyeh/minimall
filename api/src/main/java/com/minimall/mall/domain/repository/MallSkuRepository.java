@@ -2,6 +2,8 @@ package com.minimall.mall.domain.repository;
 
 import com.minimall.mall.domain.MallSku;
 import com.minimall.mall.domain.QMallSku;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -107,4 +109,19 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
     @Query("select coalesce(sum(s.stock), 0) from MallSku s "
             + "where s.goodsId = :goodsId and s.tenantId = :tenantId and s.status = 1")
     long sumStockByGoodsId(@Param("goodsId") Long goodsId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 低库存规格:{@code stock - lockedStock <= threshold}。
+     *
+     * <p>判据是**可售库存**而不是 {@code stock}:只看 stock 会把"挂着一堆待付款订单"的规格漏掉,
+     * 那正是最该处理的。带上商品一起查并限定**上架**({@code g.status = 1})与**在售 SKU**:
+     * 下架商品的低库存不是问题,列出来只会让人觉得预警不准。
+     *
+     * <p>按可售库存升序 —— 最该处理的排在最前面。
+     */
+    @Query("select s from MallSku s, MallGoods g "
+            + "where g.id = s.goodsId and g.status = 1 and s.status = 1 "
+            + "and (s.stock - s.lockedStock) <= :threshold "
+            + "order by (s.stock - s.lockedStock) asc, s.id asc")
+    Page<MallSku> findLowStock(@Param("threshold") int threshold, Pageable pageable);
 }

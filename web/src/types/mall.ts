@@ -1,4 +1,4 @@
-import type { Id } from '@/types/api'
+import type { Id, PageResult } from '@/types/api'
 
 /**
  * 商城(后端 /mall/admin/**)的类型定义。
@@ -328,4 +328,24 @@ export interface ReviewView {
   replyTime?: string | null
   status: number
   createTime: string
+}
+
+// ---------------------------------------------------------------- 库存预警
+
+export interface StockWarnView {
+  skuId: Id
+  goodsId: Id
+  goodsName?: string | null
+  mainImage?: string | null
+  skuCode: string
+  skuName: string
+  stock: number
+  lockedStock: number
+  availableStock: number
+}
+
+/** 预警行 + 本次用的阈值(阈值在字典里,页面不自己再读一次) */
+export interface StockWarnReport {
+  threshold: number
+  page: PageResult<StockWarnView>
 }
