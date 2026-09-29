@@ -90,7 +90,7 @@ public class MallScheduledTasks {
                             log.info("租户 {} 关闭超时未支付订单 {} 笔", tenantId, closed);
                         }
                     });
-            logIfFailed("关闭超时未支付订单", result);
+            failIfPartial("关闭超时未支付订单", result);
         });
     }
 
@@ -107,7 +107,7 @@ public class MallScheduledTasks {
                             log.info("租户 {} 自动确认收货 {} 笔", tenantId, finished);
                         }
                     });
-            logIfFailed("订单自动确认收货", result);
+            failIfPartial("订单自动确认收货", result);
         });
     }
 
@@ -135,7 +135,7 @@ public class MallScheduledTasks {
                             tenantId, autoApproved, closed, autoReceived);
                 }
             });
-            logIfFailed("售后超时处理", result);
+            failIfPartial("售后超时处理", result);
         });
     }
 
@@ -150,7 +150,7 @@ public class MallScheduledTasks {
                             log.info("租户 {} 过期优惠券清理 {} 条", tenantId, expired);
                         }
                     });
-            logIfFailed("优惠券过期清理", result);
+            failIfPartial("优惠券过期清理", result);
         });
     }
 
@@ -171,7 +171,7 @@ public class MallScheduledTasks {
                             log.info("租户 {} 积分过期清零涉及 {} 个客户", tenantId, handled);
                         }
                     });
-            logIfFailed("积分过期清零", result);
+            failIfPartial("积分过期清零", result);
         });
     }
 
@@ -191,13 +191,19 @@ public class MallScheduledTasks {
                             log.info("租户 {} 会员等级重算 {} 个客户", tenantId, count);
                         }
                     });
-            logIfFailed("会员等级重算", result);
+            failIfPartial("会员等级重算", result);
         });
     }
 
-    private void logIfFailed(String taskName, TenantTaskRunner.RunResult result) {
-        if (result.failedTenantIds() != null && !result.failedTenantIds().isEmpty()) {
-            log.warn("任务「{}」部分租户执行失败: {}", taskName, result.failedTenantIds());
+    /**
+     * 有租户失败就抛出:执行历史按"任务有没有抛异常"记结果,只 warn 会把"部分租户没处理"记成成功。
+     *
+     * <p>{@link TenantTaskRunner#runForEachTenant} 把单租户异常吞在循环里(6.2),到这里只剩一串失败租户 ID。
+     */
+    private void failIfPartial(String taskName, TenantTaskRunner.RunResult result) {
+        if (result.failedTenantIds() == null || result.failedTenantIds().isEmpty()) {
+            return;
         }
+        throw new IllegalStateException("任务「" + taskName + "」部分租户执行失败,该批次需重跑:" + result.failedTenantIds());
     }
 }
