@@ -68,6 +68,9 @@ public class PayServiceImpl implements PayService {
     /** 单轮查单的订单上限:余下的下一轮继续,与其它批量任务同口径。 */
     private static final int RECONCILE_BATCH_SIZE = 200;
 
+    /** 单轮退款重投的上限。 */
+    private static final int RETRY_BATCH_SIZE = 200;
+
     private static final String EVENT_TRANSACTION_SUCCESS = "TRANSACTION.SUCCESS";
     private static final String EVENT_REFUND_SUCCESS = "REFUND.SUCCESS";
     private static final String EVENT_REFUND_ABNORMAL = "REFUND.ABNORMAL";
@@ -311,6 +314,22 @@ public class PayServiceImpl implements PayService {
             candidates.add(new ClosedUnpaidOrder(order.getTenantId(), order.getId(), payment.getOutTradeNo()));
         }
         return candidates;
+    }
+
+    @Override
+    public List<RetryableRefund> listRetryableRefunds(LocalDateTime staleBefore) {
+        List<MallWxRefund> rows = new ArrayList<>();
+        rows.addAll(refundRepository.findByRefundStatusOrderByIdAsc(
+                MallWxRefund.REFUND_STATUS_SUBMIT_FAILED, PageRequest.of(0, RETRY_BATCH_SIZE)));
+        rows.addAll(refundRepository.findByRefundStatusAndWxRefundIdIsNullAndCreateTimeBeforeOrderByIdAsc(
+                MallWxRefund.REFUND_STATUS_APPLYING, staleBefore, PageRequest.of(0, RETRY_BATCH_SIZE)));
+
+        List<RetryableRefund> refunds = new ArrayList<>();
+        for (MallWxRefund refund : rows) {
+            refunds.add(new RetryableRefund(refund.getTenantId(), refund.getOrderId(),
+                    refund.getId(), refund.getRefundAmount()));
+        }
+        return refunds;
     }
 
     /**

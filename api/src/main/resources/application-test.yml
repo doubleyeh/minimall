@@ -24,6 +24,7 @@ minimall:
     cron:
       close-timeout-orders: "-"
       reconcile-closed-paid-orders: "-"
+      retry-refund-submit: "-"
       auto-receive-orders: "-"
       after-sale-timeout: "-"
       expire-coupon-records: "-"

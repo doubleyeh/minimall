@@ -24,12 +24,14 @@ import java.time.LocalDateTime;
 @Setter
 public class MallWxRefund extends BaseTenantEntity {
 
-    /** 申请中。 */
+    /** 申请中:已提交(或待提交),最终态由退款回调落定。 */
     public static final int REFUND_STATUS_APPLYING = 0;
     /** 退款成功。 */
     public static final int REFUND_STATUS_SUCCESS = 1;
-    /** 退款失败。 */
+    /** 渠道明确拒绝(如可退余额不足),终态,不再重投。 */
     public static final int REFUND_STATUS_FAILED = 2;
+    /** 提交失败:请求没送到微信(网络异常、没拿到退款单号)—— 可重投,由重试任务捡起来。 */
+    public static final int REFUND_STATUS_SUBMIT_FAILED = 3;
 
     @Column(name = "order_id", nullable = false)
     private Long orderId;
@@ -37,7 +39,7 @@ public class MallWxRefund extends BaseTenantEntity {
     @Column(name = "after_sale_id", nullable = false)
     private Long afterSaleId;
 
-    /** 微信退款单号,回调后写入。 */
+    /** 微信退款单号:提交受理成功或回调时写入,非空即表示渠道已经受理。 */
     @Column(name = "wx_refund_id", length = 64)
     private String wxRefundId;
 
@@ -48,7 +50,7 @@ public class MallWxRefund extends BaseTenantEntity {
     @Column(name = "refund_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal refundAmount;
 
-    /** 0-申请中 1-退款成功 2-退款失败。 */
+    /** 0-申请中 1-退款成功 2-退款失败(终态) 3-提交失败(可重投)。 */
     @Column(name = "refund_status", nullable = false)
     private Integer refundStatus;
 

@@ -230,6 +230,7 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 
 **终态触发的下游动作**:
 - status=4(退货退款/仅退款场景):触发 `mall_wx_refund` 记录创建,发起微信退款
+  - 退款申请在**事务提交后**才发给微信(出网调用不占事务,3.3)。结果写回退款单:拿到微信退款单号 = 渠道已受理(状态仍是"申请中",最终态由退款回调落定);没拿到 = `refund_status=3 提交失败`,由定时任务重投 —— 微信按 `out_refund_no` 幂等,重投不会重复退款
 - status=4(换货场景):不产生退款记录,更新 `reship_logistics_*` 字段,原SKU库存回补(`mall_stock_log change_type=4`),新SKU库存扣减
 - status=8:与 status=4 的退款/换货动作相同,由客服仲裁触发
 - status=9/10:不产生任何库存/资金变动
@@ -291,6 +292,7 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 | 优惠券过期清理 | 每天 | 扫描过期未使用的 `mall_coupon_record`,置 `status=3` |
 | 积分过期清零 | 每天 4:00 | 把 `mall_points_batch` 里已到期且还有剩余的批次清零,同步扣减 `mall_customer.points` 并写流水(只兜底不活跃客户,活跃客户在下单时已懒过期) |
 | 会员等级重算 | 每天 4:20 | 按近 12 个月滚动成长值重算,够不着门槛的**降级**。这是降级的唯一来源(发放/扣回/手动调整都是即时重算) |
+| 退款提交重试 | 每 10 分钟 | 扫 `refund_status=3 提交失败`,以及卡在"申请中"却始终没有微信退款单号(超过 10 分钟)的退款单重投 —— 这类单不会有回调来收尾,不重投买家就收不到钱。微信按 `out_refund_no` 幂等 |
 
 ---
 

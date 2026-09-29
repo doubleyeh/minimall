@@ -2,6 +2,7 @@ package com.minimall.mall.service;
 
 import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.mall.infra.pay.WxPayClient;
+import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.sys.service.support.DictIntReader;
 import com.minimall.sys.service.support.TenantTaskRunner;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +43,7 @@ class MallScheduledTasksTest {
                 mock(MemberPointsService.class),
                 mock(PayService.class),
                 mock(WxPayClient.class),
+                mock(WxPayRefundSubmitter.class),
                 taskLock);
         // 让锁永远抢得到、并真的执行任务体
         when(taskLock.runIfNotLocked(anyString(), any(Runnable.class))).thenAnswer(invocation -> {

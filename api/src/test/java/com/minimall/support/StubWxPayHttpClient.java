@@ -26,8 +26,22 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
     /** 查单返回的 {@code trade_state};用例按需设成 SUCCESS / NOTPAY / CLOSED。 */
     private String queryTradeState = "NOTPAY";
 
+    /** 让退款接口返回非 200(模拟网络/渠道故障)。 */
+    private boolean refundRejected;
+
+    /** 让退款接口返回 200 但不带 refund_id(渠道没受理)。 */
+    private boolean refundWithoutId;
+
     public void setQueryTradeState(String queryTradeState) {
         this.queryTradeState = queryTradeState;
+    }
+
+    public void setRefundRejected(boolean refundRejected) {
+        this.refundRejected = refundRejected;
+    }
+
+    public void setRefundWithoutId(boolean refundWithoutId) {
+        this.refundWithoutId = refundWithoutId;
     }
 
     @Override
@@ -37,6 +51,12 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
             return new WxPayHttpResult(200, "{\"prepay_id\":\"stub-prepay-" + requests.size() + "\"}");
         }
         if (url.contains("/v3/refund/domestic/refunds")) {
+            if (refundRejected) {
+                return new WxPayHttpResult(500, "{\"code\":\"SYSTEM_ERROR\"}");
+            }
+            if (refundWithoutId) {
+                return new WxPayHttpResult(200, "{}");
+            }
             return new WxPayHttpResult(200, "{\"refund_id\":\"stub-refund-" + requests.size() + "\"}");
         }
         return new WxPayHttpResult(200, "{}");
@@ -59,6 +79,8 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
     public void reset() {
         requests.clear();
         queryTradeState = "NOTPAY";
+        refundRejected = false;
+        refundWithoutId = false;
     }
 
     /** 一次出网请求的快照。 */

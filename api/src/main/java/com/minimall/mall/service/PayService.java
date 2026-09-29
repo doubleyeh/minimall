@@ -2,6 +2,7 @@ package com.minimall.mall.service;
 
 import com.minimall.mall.api.dto.OrderCreateResponse;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -55,5 +56,17 @@ public interface PayService {
 
     /** 查单候选:定位微信支付需要的几个值。 */
     record ClosedUnpaidOrder(Long tenantId, Long orderId, String outTradeNo) {
+    }
+
+    /**
+     * 需要重投的退款单:提交失败的,以及卡在"申请中"却始终没有微信退款单号的
+     * (提交那一步没走完,不会有回调来收尾)。
+     *
+     * <p>微信按 {@code out_refund_no} 幂等,重投不会重复退款。
+     */
+    List<RetryableRefund> listRetryableRefunds(LocalDateTime staleBefore);
+
+    /** 待重投的退款单:重投需要的几个值。 */
+    record RetryableRefund(Long tenantId, Long orderId, Long refundId, BigDecimal refundAmount) {
     }
 }

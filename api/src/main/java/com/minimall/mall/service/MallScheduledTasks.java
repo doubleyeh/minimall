@@ -4,6 +4,7 @@ import com.minimall.mall.service.MarketingMaintenanceService;
 import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
 import com.minimall.mall.infra.pay.WxPayClient;
+import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.sys.service.support.DictIntReader;
 import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.infra.tenant.TenantContext;
@@ -55,6 +56,9 @@ public class MallScheduledTasks {
     /** 关单后仍可能到账的窗口:买家在超时边缘付款,回调只会晚几秒到几分钟。 */
     private static final Duration RECONCILE_WINDOW = Duration.ofMinutes(15);
 
+    /** 退款多快没受理才算"没提交成功":太短会把正常在途的申请重投一遍。 */
+    private static final Duration REFUND_RETRY_STALE = Duration.ofMinutes(10);
+
     private static final String DICT_PAY_TIMEOUT = "order_pay_timeout_minutes";
     private static final String DICT_AUTO_RECEIVE = "order_auto_receive_days";
     private static final String DICT_AFTER_SALE_TIMEOUT = "after_sale_timeout";
@@ -67,6 +71,7 @@ public class MallScheduledTasks {
     private final MemberPointsService memberPointsService;
     private final PayService payService;
     private final WxPayClient wxPayClient;
+    private final WxPayRefundSubmitter refundSubmitter;
     private final ScheduledTaskLock taskLock;
 
     public MallScheduledTasks(TenantTaskRunner tenantTaskRunner,
@@ -77,6 +82,7 @@ public class MallScheduledTasks {
                               MemberPointsService memberPointsService,
                               PayService payService,
                               WxPayClient wxPayClient,
+                              WxPayRefundSubmitter refundSubmitter,
                               ScheduledTaskLock taskLock) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
@@ -86,6 +92,7 @@ public class MallScheduledTasks {
         this.memberPointsService = memberPointsService;
         this.payService = payService;
         this.wxPayClient = wxPayClient;
+        this.refundSubmitter = refundSubmitter;
         this.taskLock = taskLock;
     }
 
@@ -266,6 +273,34 @@ public class MallScheduledTasks {
         log.warn("订单已关闭但钱已收到,已置回待发货 orderId={} outTradeNo={}",
                 candidate.orderId(), candidate.outTradeNo());
         return true;
+    }
+
+    /**
+     * 退款提交重试(每 10 分钟)。
+     *
+     * <p>退款申请是事务提交后异步发的,那一步失败时退款单会停在"提交失败"、或者一直挂在"申请中"
+     * 却没有微信退款单号 —— 不重投就永远没人管,买家收不到钱也没有回调来收尾。
+     *
+     * <p>微信按 {@code out_refund_no} 幂等,重投不会重复退款。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.retry-refund-submit:0 */10 * * * ?}")
+    public void retryRefundSubmit() {
+        taskLock.runIfNotLocked("退款提交重试", () -> {
+            LocalDateTime staleBefore = LocalDateTime.now().minus(REFUND_RETRY_STALE);
+            List<PayService.RetryableRefund> refunds = new ArrayList<>();
+            var result = tenantTaskRunner.runForEachTenant("退款提交重试", SYSTEM_ACTOR_ID,
+                    tenantId -> refunds.addAll(payService.listRetryableRefunds(staleBefore)));
+            failIfPartial("退款提交重试", result);
+
+            for (PayService.RetryableRefund refund : refunds) {
+                // 提交本身把结果写回退款单(见 WxPayRefundSubmitter),这里不需要再判断成败
+                refundSubmitter.submitAfterCommit(refund.tenantId(), refund.orderId(),
+                        refund.refundId(), refund.refundAmount(), "退款提交重试");
+            }
+            if (!refunds.isEmpty()) {
+                log.info("重投退款申请 {} 笔", refunds.size());
+            }
+        });
     }
 
     /**

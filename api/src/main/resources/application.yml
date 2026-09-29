@@ -117,6 +117,7 @@ minimall:
     cron:
       close-timeout-orders: "0 * * * * ?"
       reconcile-closed-paid-orders: "0 */5 * * * ?"
+      retry-refund-submit: "0 */10 * * * ?"
       auto-receive-orders: "0 0 * * * ?"
       after-sale-timeout: "0 15 * * * ?"
       expire-coupon-records: "0 30 3 * * ?"
