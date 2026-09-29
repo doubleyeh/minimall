@@ -46,6 +46,7 @@ import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
 import com.minimall.mall.service.PayService;
 import com.minimall.mall.service.support.OrderAmountCalculator;
+import com.minimall.mall.service.support.SkuStockKeeper;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,6 +97,7 @@ public class OrderServiceImpl implements OrderService {
     private final MallOrderStatusLogRepository statusLogRepository;
     private final MallCartRepository cartRepository;
     private final MallSkuRepository skuRepository;
+    private final SkuStockKeeper stockKeeper;
     private final MallGoodsRepository goodsRepository;
     private final MallCustomerAddressRepository addressRepository;
     private final MallCouponRepository couponRepository;
@@ -116,6 +118,7 @@ public class OrderServiceImpl implements OrderService {
                             MallOrderStatusLogRepository statusLogRepository,
                             MallCartRepository cartRepository,
                             MallSkuRepository skuRepository,
+                            SkuStockKeeper stockKeeper,
                             MallGoodsRepository goodsRepository,
                             MallCustomerAddressRepository addressRepository,
                             MallCouponRepository couponRepository,
@@ -135,6 +138,7 @@ public class OrderServiceImpl implements OrderService {
         this.statusLogRepository = statusLogRepository;
         this.cartRepository = cartRepository;
         this.skuRepository = skuRepository;
+        this.stockKeeper = stockKeeper;
         this.goodsRepository = goodsRepository;
         this.addressRepository = addressRepository;
         this.couponRepository = couponRepository;
@@ -203,7 +207,8 @@ public class OrderServiceImpl implements OrderService {
 
             // 锁库存:条件更新受影响行数为 0 表示可售不足(并发下单抢最后一件),
             // 此时必须抛异常让整个事务回滚 —— 已经落库的订单与明细会一起撤销
-            int affected = skuRepository.lockStock(line.sku().getId(), tenantId, line.quantity());
+            int affected = stockKeeper.lockStock(line.sku().getId(), line.goods().getId(), tenantId,
+                    line.quantity());
             if (affected == 0) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID,
                         "「" + line.sku().getSkuName() + "」库存不足,请调整数量后重试");
@@ -452,7 +457,8 @@ public class OrderServiceImpl implements OrderService {
         orderRepository.updateStatusOnClose(order.getId(), tenantId, toStatus, closeReason, now);
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
-            int affected = skuRepository.releaseLockedStock(item.getSkuId(), tenantId, item.getQuantity());
+            int affected = stockKeeper.releaseLockedStock(item.getSkuId(), item.getGoodsId(), tenantId,
+                    item.getQuantity());
             if (affected == 0) {
                 // 已经释放过(重复关闭/人工干预):记日志即可,不要让异常把整批任务打断
                 log.warn("释放锁定库存时受影响行数为 0(可能已释放) orderId={} skuId={}",

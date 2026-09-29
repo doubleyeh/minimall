@@ -15,7 +15,7 @@ import java.math.BigDecimal;
  * <p><b>{@code salePriceMin}/{@code salePriceMax}/{@code totalStock}/{@code saleCount} 是冗余汇总字段</b>:
  * 它们是为了列表页不被 N 次 SKU 求和拖慢而存在的。凡是 SKU 的价格/库存/销量发生变动,
  * 都必须在**同一个事务**内把它们同步更新 —— 两边不一致时,列表页显示的价格与详情页对不上,
- * 用户点进去会觉得"标价骗人"。更新入口统一收敛在 SKU 服务里,不要让每个调用点各自算一遍。
+ * 用户点进去会觉得"标价骗人"。更新入口统一收敛在 {@code SkuStockKeeper},不要让每个调用点各自算一遍。
  *
  * <p>{@code totalStock} 统计的是 {@code stock}(实际库存),而**列表页展示的应是可售库存**:
  * 可售 = {@code stock - locked_stock}(见 3.2 与 {@link MallSku})。所以这里只做"汇总缓存",

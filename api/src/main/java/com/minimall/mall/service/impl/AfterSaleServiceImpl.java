@@ -26,6 +26,7 @@ import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.infra.OrderNumberGenerator;
 import com.minimall.mall.infra.auth.ClientContext;
+import com.minimall.mall.service.support.SkuStockKeeper;
 import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.mall.service.AfterSaleService;
 import com.minimall.mall.service.MemberPointsService;
@@ -73,6 +74,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final MallOrderItemRepository orderItemRepository;
     private final MallOrderStatusLogRepository orderStatusLogRepository;
     private final MallSkuRepository skuRepository;
+    private final SkuStockKeeper stockKeeper;
     private final MallStockLogRepository stockLogRepository;
     private final MallWxRefundRepository refundRepository;
     private final OrderNumberGenerator numberGenerator;
@@ -86,6 +88,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                                MallOrderItemRepository orderItemRepository,
                                MallOrderStatusLogRepository orderStatusLogRepository,
                                MallSkuRepository skuRepository,
+                               SkuStockKeeper stockKeeper,
                                MallStockLogRepository stockLogRepository,
                                MallWxRefundRepository refundRepository,
                                OrderNumberGenerator numberGenerator,
@@ -98,6 +101,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         this.orderItemRepository = orderItemRepository;
         this.orderStatusLogRepository = orderStatusLogRepository;
         this.skuRepository = skuRepository;
+        this.stockKeeper = stockKeeper;
         this.stockLogRepository = stockLogRepository;
         this.refundRepository = refundRepository;
         this.numberGenerator = numberGenerator;
@@ -461,7 +465,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
             }
             restoreStock(afterSale);
             // 换货的新 SKU 从库存直接扣减(不经过下单流程,所以直接扣 stock)
-            skuRepository.restoreStock(newSkuId, tenantId, -item.getQuantity());
+            stockKeeper.restoreStock(newSkuId, newSku.getGoodsId(), tenantId, -item.getQuantity());
             MallStockLog stockLog = new MallStockLog();
             stockLog.setSkuId(newSkuId);
             stockLog.setChangeType(5);
@@ -494,7 +498,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
             return;
         }
         Long tenantId = TenantContext.getTenantId();
-        skuRepository.restoreStock(item.getSkuId(), tenantId, item.getQuantity());
+        stockKeeper.restoreStock(item.getSkuId(), item.getGoodsId(), tenantId, item.getQuantity());
         MallStockLog stockLog = new MallStockLog();
         stockLog.setSkuId(item.getSkuId());
         stockLog.setChangeType(STOCK_RESTORE);

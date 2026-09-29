@@ -21,7 +21,6 @@ import com.minimall.mall.domain.repository.MallGoodsRepository;
 import com.minimall.mall.domain.repository.MallOrderItemRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallOrderStatusLogRepository;
-import com.minimall.mall.domain.repository.MallSkuRepository;
 import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxPaymentRepository;
 import com.minimall.mall.infra.auth.ClientContext;
@@ -30,6 +29,7 @@ import com.minimall.mall.infra.pay.WxPayNotify;
 import com.minimall.mall.infra.pay.WxPayOrderCommand;
 import com.minimall.mall.service.PayService;
 import com.minimall.mall.service.support.OrderAmountCalculator;
+import com.minimall.mall.service.support.SkuStockKeeper;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,7 +80,7 @@ public class PayServiceImpl implements PayService {
     private final MallOrderItemRepository orderItemRepository;
     private final MallOrderStatusLogRepository statusLogRepository;
     private final MallWxPaymentRepository paymentRepository;
-    private final MallSkuRepository skuRepository;
+    private final SkuStockKeeper stockKeeper;
     private final MallGoodsRepository goodsRepository;
     private final MallStockLogRepository stockLogRepository;
     private final WxPayClient wxPayClient;
@@ -95,7 +95,7 @@ public class PayServiceImpl implements PayService {
                           MallOrderItemRepository orderItemRepository,
                           MallOrderStatusLogRepository statusLogRepository,
                           MallWxPaymentRepository paymentRepository,
-                          MallSkuRepository skuRepository,
+                          SkuStockKeeper stockKeeper,
                           MallGoodsRepository goodsRepository,
                           MallStockLogRepository stockLogRepository,
                           WxPayClient wxPayClient,
@@ -109,7 +109,7 @@ public class PayServiceImpl implements PayService {
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
         this.paymentRepository = paymentRepository;
-        this.skuRepository = skuRepository;
+        this.stockKeeper = stockKeeper;
         this.goodsRepository = goodsRepository;
         this.stockLogRepository = stockLogRepository;
         this.wxPayClient = wxPayClient;
@@ -372,8 +372,10 @@ public class PayServiceImpl implements PayService {
             // 复活的订单不能再走 deductStockOnPaid:关单时 lockedStock 已经减过了,
             // 再减一次会扣到别的订单头上(见 MallSkuRepository#deductStockOnly)
             int affected = reopening
-                    ? skuRepository.deductStockOnly(item.getSkuId(), order.getTenantId(), item.getQuantity())
-                    : skuRepository.deductStockOnPaid(item.getSkuId(), order.getTenantId(), item.getQuantity());
+                    ? stockKeeper.deductStockOnly(item.getSkuId(), item.getGoodsId(), order.getTenantId(),
+                            item.getQuantity())
+                    : stockKeeper.deductStockOnPaid(item.getSkuId(), item.getGoodsId(), order.getTenantId(),
+                            item.getQuantity());
             if (affected == 0) {
                 log.error("{}扣减库存受影响行数为 0 orderNo={} skuId={} remark={}",
                         reopening ? "已关闭订单置为待发货" : "置为已支付",

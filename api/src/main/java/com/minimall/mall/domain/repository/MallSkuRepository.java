@@ -97,4 +97,14 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
             + "where s.id = :skuId and s.tenantId = :tenantId")
     int restoreStock(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
                      @Param("quantity") int quantity);
+
+    /**
+     * 某商品启用 SKU 的实际库存之和 —— {@code mall_goods.total_stock} 的汇总来源。
+     *
+     * <p>口径必须与商品保存时的重算一致(只算 {@code status = 1} 的 SKU,见
+     * {@code GoodsServiceImpl#recalcSummary}),否则两条路径算出的汇总值会互相打架。
+     */
+    @Query("select coalesce(sum(s.stock), 0) from MallSku s "
+            + "where s.goodsId = :goodsId and s.tenantId = :tenantId and s.status = 1")
+    long sumStockByGoodsId(@Param("goodsId") Long goodsId, @Param("tenantId") Long tenantId);
 }

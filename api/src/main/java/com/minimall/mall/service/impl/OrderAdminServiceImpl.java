@@ -15,10 +15,10 @@ import com.minimall.mall.domain.QMallOrder;
 import com.minimall.mall.domain.repository.MallOrderItemRepository;
 import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallOrderStatusLogRepository;
-import com.minimall.mall.domain.repository.MallSkuRepository;
 import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxRefundRepository;
 import com.minimall.mall.infra.OrderNumberGenerator;
+import com.minimall.mall.service.support.SkuStockKeeper;
 import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.mall.service.OrderAdminService;
 import com.querydsl.core.BooleanBuilder;
@@ -51,7 +51,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
     private final MallOrderRepository orderRepository;
     private final MallOrderItemRepository orderItemRepository;
     private final MallOrderStatusLogRepository statusLogRepository;
-    private final MallSkuRepository skuRepository;
+    private final SkuStockKeeper stockKeeper;
     private final MallStockLogRepository stockLogRepository;
     private final MallWxRefundRepository refundRepository;
     private final OrderNumberGenerator numberGenerator;
@@ -60,7 +60,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
     public OrderAdminServiceImpl(MallOrderRepository orderRepository,
                                  MallOrderItemRepository orderItemRepository,
                                  MallOrderStatusLogRepository statusLogRepository,
-                                 MallSkuRepository skuRepository,
+                                 SkuStockKeeper stockKeeper,
                                  MallStockLogRepository stockLogRepository,
                                  MallWxRefundRepository refundRepository,
                                  OrderNumberGenerator numberGenerator,
@@ -68,7 +68,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
-        this.skuRepository = skuRepository;
+        this.stockKeeper = stockKeeper;
         this.stockLogRepository = stockLogRepository;
         this.refundRepository = refundRepository;
         this.numberGenerator = numberGenerator;
@@ -139,7 +139,7 @@ public class OrderAdminServiceImpl implements OrderAdminService {
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(orderId)) {
             // 已支付订单的库存是"实扣"过的,取消要把货放回去(与未支付取消只解锁定的语义不同)
-            skuRepository.restoreStock(item.getSkuId(), tenantId, item.getQuantity());
+            stockKeeper.restoreStock(item.getSkuId(), item.getGoodsId(), tenantId, item.getQuantity());
             MallStockLog stockLog = new MallStockLog();
             stockLog.setSkuId(item.getSkuId());
             stockLog.setChangeType(STOCK_RESTORE);

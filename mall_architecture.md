@@ -90,7 +90,7 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 
 ### 3.2 商品与SKU
 
-- 商品的 `sale_price_min`/`sale_price_max`/`total_stock`/`sale_count` 是冗余汇总字段,任何 SKU 的价格/库存变动,必须在同一事务内同步更新到 `mall_goods` 对应字段
+- 商品的 `sale_price_min`/`sale_price_max`/`total_stock`/`sale_count` 是冗余汇总字段,任何 SKU 的价格/库存变动,必须在同一事务内同步更新到 `mall_goods` 对应字段。SKU 库存的变更入口统一收敛在 `SkuStockKeeper`,新增改库存的地方从它走,就不会漏刷 `total_stock`
 - 商品下架(`status = 0`)不物理删除 SKU 和历史订单关联,已下单的订单明细走快照字段展示,不受商品下架影响
 - SKU 的 `stock` 与 `locked_stock` 分离:**可售库存 = `stock - locked_stock`**,列表页/详情页展示的库存按可售库存计算,不能直接展示 `stock`
 
