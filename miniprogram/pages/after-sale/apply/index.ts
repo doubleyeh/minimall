@@ -1,5 +1,6 @@
 import { afterSaleApply } from '../../../api/client'
 import { toast, toastError } from '../../../utils/ui'
+import { chooseAndUploadImages } from '../../../utils/upload'
 
 Page({
   data: {
@@ -8,6 +9,9 @@ Page({
     refundAmount: '',
     applyReason: '',
     applyDesc: '',
+    images: [] as string[],
+    imageMax: 3,
+    uploading: false,
     submitting: false,
     /**
      * 三种类型都列出来,不做前置限制。
@@ -53,8 +57,42 @@ Page({
     this.setData({ applyDesc: e.detail.value })
   },
 
+  async onAddImage() {
+    if (this.data.uploading) {
+      return
+    }
+    const remaining = this.data.imageMax - this.data.images.length
+    if (remaining <= 0) {
+      toast(`最多 ${this.data.imageMax} 张`)
+      return
+    }
+    this.setData({ uploading: true })
+    try {
+      const urls = await chooseAndUploadImages(remaining)
+      if (urls.length > 0) {
+        this.setData({ images: this.data.images.concat(urls) })
+      }
+    } catch (err) {
+      toastError(err, '图片上传失败')
+    } finally {
+      this.setData({ uploading: false })
+    }
+  },
+
+  onRemoveImage(e: WechatMiniprogram.TouchEvent) {
+    const index = Number(e.currentTarget.dataset.index)
+    const images = this.data.images.slice()
+    images.splice(index, 1)
+    this.setData({ images })
+  },
+
+  onPreviewImage(e: WechatMiniprogram.TouchEvent) {
+    const index = Number(e.currentTarget.dataset.index)
+    wx.previewImage({ current: this.data.images[index], urls: this.data.images })
+  },
+
   async onSubmit() {
-    if (this.data.submitting) {
+    if (this.data.submitting || this.data.uploading) {
       return
     }
     const reason = this.data.applyReason.trim()
@@ -77,7 +115,7 @@ Page({
         applyReason: reason,
         applyDesc: this.data.applyDesc.trim() || undefined,
         refundAmount: amount,
-        // images 不传:后端没有上传接口(见页面提示)
+        images: this.data.images.length > 0 ? this.data.images : undefined,
       })
       toast('申请已提交')
       // 用 redirectTo 到列表:申请页不该留在栈里,回来时订单已经不能重复申请

@@ -29,8 +29,25 @@
     <switch checked="{{anonymous}}" color="#FF4D1C" bindchange="onAnonymousChange" />
   </view>
 
-  <view class="hint text-muted">
-    暂不支持上传图片:后端目前没有文件上传接口。传本地路径没有意义,提交后另一端打不开。
+  <view class="card">
+    <view class="section-title">晒图(选填,最多 {{imageMax}} 张)</view>
+    <view class="img-picker">
+      <view wx:for="{{images}}" wx:key="*this" class="img-picker__item">
+        <image
+          class="img-picker__img"
+          src="{{item}}"
+          mode="aspectFill"
+          data-index="{{index}}"
+          bindtap="onPreviewImage"
+        />
+        <view class="img-picker__del" data-index="{{index}}" catchtap="onRemoveImage">×</view>
+      </view>
+      <view
+        wx:if="{{images.length < imageMax}}"
+        class="img-picker__add"
+        bindtap="onAddImage"
+      >{{uploading ? '···' : '+'}}</view>
+    </view>
   </view>
 </view>
 

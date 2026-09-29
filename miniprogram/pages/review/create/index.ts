@@ -1,5 +1,6 @@
 import { createReview } from '../../../api/client'
 import { toast, toastError } from '../../../utils/ui'
+import { chooseAndUploadImages } from '../../../utils/upload'
 
 interface Star {
   value: number
@@ -14,6 +15,9 @@ Page({
     starList: buildStars(5),
     content: '',
     anonymous: false,
+    images: [] as string[],
+    imageMax: 3,
+    uploading: false,
     submitting: false,
   },
 
@@ -39,8 +43,42 @@ Page({
     this.setData({ anonymous: e.detail.value })
   },
 
+  async onAddImage() {
+    if (this.data.uploading) {
+      return
+    }
+    const remaining = this.data.imageMax - this.data.images.length
+    if (remaining <= 0) {
+      toast(`最多 ${this.data.imageMax} 张`)
+      return
+    }
+    this.setData({ uploading: true })
+    try {
+      const urls = await chooseAndUploadImages(remaining)
+      if (urls.length > 0) {
+        this.setData({ images: this.data.images.concat(urls) })
+      }
+    } catch (err) {
+      toastError(err, '图片上传失败')
+    } finally {
+      this.setData({ uploading: false })
+    }
+  },
+
+  onRemoveImage(e: WechatMiniprogram.TouchEvent) {
+    const index = Number(e.currentTarget.dataset.index)
+    const images = this.data.images.slice()
+    images.splice(index, 1)
+    this.setData({ images })
+  },
+
+  onPreviewImage(e: WechatMiniprogram.TouchEvent) {
+    const index = Number(e.currentTarget.dataset.index)
+    wx.previewImage({ current: this.data.images[index], urls: this.data.images })
+  },
+
   async onSubmit() {
-    if (this.data.submitting) {
+    if (this.data.submitting || this.data.uploading) {
       return
     }
     this.setData({ submitting: true })
@@ -49,6 +87,7 @@ Page({
         orderItemId: this.data.orderItemId,
         rating: this.data.rating,
         content: this.data.content.trim() || undefined,
+        images: this.data.images.length > 0 ? this.data.images : undefined,
         anonymous: this.data.anonymous,
       })
       toast('评价成功')
