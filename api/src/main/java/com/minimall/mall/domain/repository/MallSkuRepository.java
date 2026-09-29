@@ -77,6 +77,20 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
     int deductStockOnPaid(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
                           @Param("quantity") int quantity);
 
+    /**
+     * 只扣实际库存,不动锁定(3.8):把"已关闭但钱已收"的订单置回待发货时用。
+     *
+     * <p>不能复用 {@link #deductStockOnPaid}:关单时已经 {@code releaseLockedStock} 把锁定退回去了,
+     * 这里再减一次 lockedStock 会把**别的订单**的锁定扣掉。条件 {@code stock >= quantity} 防负库存。
+     *
+     * @return 受影响行数;0 表示库存不足,调用方需要提示而不是硬发
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.stock = s.stock - :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId and s.stock >= :quantity")
+    int deductStockOnly(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                        @Param("quantity") int quantity);
+
     /** 退款/退货回库(3.9 终态动作):{@code stock += quantity}。 */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update MallSku s set s.stock = s.stock + :quantity "

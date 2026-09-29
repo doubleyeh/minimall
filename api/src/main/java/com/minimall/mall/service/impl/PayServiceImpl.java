@@ -33,6 +33,7 @@ import com.minimall.mall.service.support.OrderAmountCalculator;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -62,6 +64,9 @@ public class PayServiceImpl implements PayService {
     private static final Logger log = LoggerFactory.getLogger(PayServiceImpl.class);
 
     private static final int STOCK_DEDUCT = 3;
+
+    /** 单轮查单的订单上限:余下的下一轮继续,与其它批量任务同口径。 */
+    private static final int RECONCILE_BATCH_SIZE = 200;
 
     private static final String EVENT_TRANSACTION_SUCCESS = "TRANSACTION.SUCCESS";
     private static final String EVENT_REFUND_SUCCESS = "REFUND.SUCCESS";
@@ -278,13 +283,42 @@ public class PayServiceImpl implements PayService {
         markPaid(payment, null, "{\"auto\":\"0 元订单,无需支付渠道\"}", "0 元订单自动支付");
     }
 
+    @Override
+    public void settleClosedPaidOrder(Long orderId, String wxTransactionId, String remark) {
+        MallWxPayment payment = paymentRepository.findFirstByOrderIdOrderByIdDesc(orderId).orElse(null);
+        if (payment == null) {
+            log.error("查单确认已支付但找不到支付流水,无法处理 orderId={}", orderId);
+            return;
+        }
+        markPaid(payment, wxTransactionId, "{\"source\":\"定时查单\"}", remark);
+    }
+
+    @Override
+    public List<ClosedUnpaidOrder> listRecentlyClosedUnpaid(LocalDateTime closedAfter) {
+        List<MallOrder> orders = orderRepository.findRecentlyClosed(MallOrder.STATUS_CANCELLED, closedAfter,
+                PageRequest.of(0, RECONCILE_BATCH_SIZE));
+        List<ClosedUnpaidOrder> candidates = new ArrayList<>();
+        for (MallOrder order : orders) {
+            MallWxPayment payment = paymentRepository.findFirstByOrderIdOrderByIdDesc(order.getId()).orElse(null);
+            if (payment == null || payment.getPayStatus() == null
+                    || payment.getPayStatus() != MallWxPayment.PAY_STATUS_PENDING) {
+                continue;
+            }
+            // 没拉起过支付就不可能付过,查单是白跑一趟(而且量会大很多)
+            if (payment.getPrepayId() == null || payment.getPrepayId().isEmpty()) {
+                continue;
+            }
+            candidates.add(new ClosedUnpaidOrder(order.getTenantId(), order.getId(), payment.getOutTradeNo()));
+        }
+        return candidates;
+    }
+
     /**
-     * 把订单置为已支付并做后续动作:扣减实际库存、累计销量、写状态日志。
+     * 把订单置为已支付并做后续动作:扣减库存、累计销量、写状态日志。
      *
-     * <p>两个调用方:微信支付成功回调,与**0 元订单** —— 满减/券把实付打到 0 时不需要走支付渠道,
-     * 但订单不能停在"待支付":那条路径对它是死的(`prepay` 会直接拒绝),用户永远付不掉也取消不掉。
-     * 放在下单事务里做,而不是让客户端调一个"确认免支付"的接口 —— 否则任何客户端忘了调,
-     * 订单就永远卡住。
+     * <p>两个调用方:微信支付成功回调,与**0 元订单**(见 {@link #settleFreeOrder})。起点有两种:
+     * 待支付、以及**已被关闭**(迟到的回调——钱收都收了,只打日志就是钱货两空,所以置回待发货)。
+     * 后者的锁定库存在关单时已经退回,所以只扣实库存。
      *
      * <p>幂等:流水已是成功时直接返回,所以重复调用不会重复扣库存或重复累计销量。
      */
@@ -304,28 +338,33 @@ public class PayServiceImpl implements PayService {
             log.error("置为已支付时找不到订单: orderId={}", payment.getOrderId());
             return;
         }
-        if (order.getStatus() != MallOrder.STATUS_PENDING_PAY) {
-            // 订单可能已被超时任务关闭:支付成功了但货已释放,这是"需要退款"的场景,
-            // 先记录,交给售后退款流程处理(不在这里静默改订单状态)
-            log.error("订单状态不是待支付,无法置为已支付: orderNo={} status={}",
-                    order.getOrderNo(), order.getStatus());
+        int from = order.getStatus();
+        // 订单已被超时任务关闭、或买家取消:钱却收成功了。锁定库存那时已经退回去,
+        // 但钱收都收了,只打一条日志就是钱货两空 —— 所以把它置回待发货,而不是停在已取消
+        boolean reopening = from == MallOrder.STATUS_CANCELLED;
+        if (!reopening && from != MallOrder.STATUS_PENDING_PAY) {
+            log.error("订单状态无法置为已支付: orderNo={} status={}", order.getOrderNo(), from);
             return;
         }
-        int from = order.getStatus();
         order.setStatus(MallOrder.STATUS_PENDING_SHIP);
         order.setPayTime(LocalDateTime.now());
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
-            int affected = skuRepository.deductStockOnPaid(item.getSkuId(), order.getTenantId(), item.getQuantity());
+            // 复活的订单不能再走 deductStockOnPaid:关单时 lockedStock 已经减过了,
+            // 再减一次会扣到别的订单头上(见 MallSkuRepository#deductStockOnly)
+            int affected = reopening
+                    ? skuRepository.deductStockOnly(item.getSkuId(), order.getTenantId(), item.getQuantity())
+                    : skuRepository.deductStockOnPaid(item.getSkuId(), order.getTenantId(), item.getQuantity());
             if (affected == 0) {
-                log.warn("置为已支付时扣减库存受影响行数为 0(可能已处理) orderNo={} skuId={}",
-                        order.getOrderNo(), item.getSkuId());
+                log.error("{}扣减库存受影响行数为 0 orderNo={} skuId={} remark={}",
+                        reopening ? "已关闭订单置为待发货" : "置为已支付",
+                        order.getOrderNo(), item.getSkuId(), remark);
             }
             MallStockLog stockLog = new MallStockLog();
             stockLog.setSkuId(item.getSkuId());
             stockLog.setChangeType(STOCK_DEDUCT);
             stockLog.setChangeStock(-item.getQuantity());
-            stockLog.setChangeLocked(-item.getQuantity());
+            stockLog.setChangeLocked(reopening ? 0 : -item.getQuantity());
             stockLog.setBizId(order.getId());
             stockLog.setRemark(remark + "扣减库存");
             stockLogRepository.save(stockLog);

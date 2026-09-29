@@ -175,7 +175,9 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 - `mall_wx_payment.wx_transaction_id` 唯一约束,回调处理前先按 `wx_transaction_id` 查是否已存在成功记录,存在则直接返回成功(不重复处理业务逻辑),防止微信重复推送导致重复触发发货前置状态变更
 - 回调处理顺序:验签 → 查 `mall_wx_payment` 幂等判断 → 更新 `pay_status=1` 及 `callback_time` → 更新 `mall_order.status=2` 及 `pay_time` → 各 SKU `stock -= 数量, locked_stock -= 数量`(写 `mall_stock_log change_type=3`)→ 增加 `mall_goods.sale_count`
 - 支付失败/超时关闭的回调:`pay_status=2`,不改订单状态(订单状态由超时任务或用户取消驱动,不依赖支付失败回调)
-- **两个调用方共用同一段"置为已支付"**(`PayServiceImpl#markPaid`):微信回调与 0 元订单(见 3.3)。共用是必要的 —— 扣减实际库存、累计销量、写状态日志这三件事漏一件,表现都是"订单看着付了但数据不对"。幂等也在这段里(流水已是成功就返回),所以重复调用不会重复扣库存或重复累计销量
+- **三个调用方共用同一段"置为已支付"**(`PayServiceImpl#markPaid`):微信回调、0 元订单(见 3.3)、定时查单。共用是必要的 —— 扣减库存、累计销量、写状态日志这三件事漏一件,表现都是"订单看着付了但数据不对"。幂等也在这段里(流水已是成功就返回),所以重复调用不会重复扣库存或重复累计销量
+- **订单已被关闭时也要能复活**:买家卡在支付页、订单被超时任务关掉、然后付成功了 —— 钱收都收了,只打日志就是钱货两空,所以 `markPaid` 把订单从 `status=5` 置回 `status=2`。与待支付起点的唯一差别在库存:关单时 `release_locked_stock` 已经退过锁定,所以复活只扣 `stock`(`MallSkuRepository#deductStockOnly`),再动 `locked_stock` 会扣到别的订单头上
+- **回调丢了也有兜底**:另有一个任务(每 5 分钟,见第 4 节)扫刚关闭的订单主动调微信查单,确认已支付就走同一条复活路径
 
 ### 3.9 售后完整流程
 
@@ -281,6 +283,7 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 | 任务 | 频率 | 动作 |
 |---|---|---|
 | 订单超时关闭 | 每分钟 | 扫描 `status=1` 且超过 `order_pay_timeout_minutes` 的订单,置 `status=5, close_reason=1`,释放 `locked_stock` |
+| 已关闭订单支付核对 | 每 5 分钟 | 扫描最近关闭(`cancel_time` 在 15 分钟内)、支付流水仍为待支付且已拉起过支付的订单,按商户订单号调微信查单;确认已支付的把订单置回 `status=2` 并扣实库存(兜底回调丢失,见 3.8) |
 | 订单自动确认收货 | 每小时 | 扫描 `status=3` 且发货超过 `order_auto_receive_days` 的订单,置 `status=4`,触发积分/成长值增加 |
 | 售后商家超时处理 | 每小时 | 扫描 `status=1` 超过72小时的售后单,按类型自动流转到 4 或 2 |
 | 售后买家超时退货 | 每小时 | 扫描 `status=2` 超过7天的售后单,置 `status=10` |

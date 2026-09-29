@@ -47,6 +47,13 @@ public interface MallOrderRepository extends JpaRepository<MallOrder, Long>,
                                           @Param("deadline") LocalDateTime deadline,
                                           Pageable pageable);
 
+    /** 最近关闭的订单(定时查单的候选,3.8):只关心刚关闭这一小段时间。 */
+    @Query("select o from MallOrder o where o.status = :status and o.cancelTime >= :closedAfter "
+            + "order by o.id asc")
+    List<MallOrder> findRecentlyClosed(@Param("status") int status,
+                                       @Param("closedAfter") LocalDateTime closedAfter,
+                                       Pageable pageable);
+
     long countByCustomerIdAndStatus(Long customerId, Integer status);
 
     /**

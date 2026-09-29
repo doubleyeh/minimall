@@ -3,15 +3,19 @@ package com.minimall.mall.service;
 import com.minimall.mall.service.MarketingMaintenanceService;
 import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
+import com.minimall.mall.infra.pay.WxPayClient;
 import com.minimall.sys.service.support.DictIntReader;
 import com.minimall.infra.schedule.ScheduledTaskLock;
+import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.support.TenantTaskRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -48,6 +52,9 @@ public class MallScheduledTasks {
     /** 积分过期单轮上限。剩余的下轮继续 —— 扫描条件是 remain>0 且已过期,天然推进。 */
     private static final int EXPIRE_BATCH_LIMIT = 500;
 
+    /** 关单后仍可能到账的窗口:买家在超时边缘付款,回调只会晚几秒到几分钟。 */
+    private static final Duration RECONCILE_WINDOW = Duration.ofMinutes(15);
+
     private static final String DICT_PAY_TIMEOUT = "order_pay_timeout_minutes";
     private static final String DICT_AUTO_RECEIVE = "order_auto_receive_days";
     private static final String DICT_AFTER_SALE_TIMEOUT = "after_sale_timeout";
@@ -58,6 +65,8 @@ public class MallScheduledTasks {
     private final MarketingMaintenanceService marketingMaintenanceService;
     private final DictIntReader dictIntReader;
     private final MemberPointsService memberPointsService;
+    private final PayService payService;
+    private final WxPayClient wxPayClient;
     private final ScheduledTaskLock taskLock;
 
     public MallScheduledTasks(TenantTaskRunner tenantTaskRunner,
@@ -66,6 +75,8 @@ public class MallScheduledTasks {
                               MarketingMaintenanceService marketingMaintenanceService,
                               DictIntReader dictIntReader,
                               MemberPointsService memberPointsService,
+                              PayService payService,
+                              WxPayClient wxPayClient,
                               ScheduledTaskLock taskLock) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
@@ -73,6 +84,8 @@ public class MallScheduledTasks {
         this.marketingMaintenanceService = marketingMaintenanceService;
         this.dictIntReader = dictIntReader;
         this.memberPointsService = memberPointsService;
+        this.payService = payService;
+        this.wxPayClient = wxPayClient;
         this.taskLock = taskLock;
     }
 
@@ -193,6 +206,66 @@ public class MallScheduledTasks {
                     });
             failIfPartial("会员等级重算", result);
         });
+    }
+
+    /**
+     * 核对已关闭订单的支付状态(每 5 分钟)。
+     *
+     * <p>迟到的回调会把订单置回待发货(见 PayServiceImpl.markPaid),但**回调丢了**时没有第二个人知道:
+     * 钱收了、单还关着。这里扫刚关闭的订单主动查单,查到已支付就补上。
+     *
+     * <p>查单是出网调用,所以拆成"事务内取候选 → 事务外逐笔查单 → 事务内落库"三步,不在事务里等网络(3.3)。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.reconcile-closed-paid-orders:0 */5 * * * ?}")
+    public void reconcileClosedPaidOrders() {
+        taskLock.runIfNotLocked("核对已关闭订单支付状态", () -> {
+            LocalDateTime closedAfter = LocalDateTime.now().minus(RECONCILE_WINDOW);
+            List<PayService.ClosedUnpaidOrder> candidates = new ArrayList<>();
+            var result = tenantTaskRunner.runForEachTenant("核对已关闭订单支付状态", SYSTEM_ACTOR_ID,
+                    tenantId -> candidates.addAll(payService.listRecentlyClosedUnpaid(closedAfter)));
+            failIfPartial("核对已关闭订单支付状态", result);
+
+            int settled = 0;
+            for (PayService.ClosedUnpaidOrder candidate : candidates) {
+                if (settleIfPaid(candidate)) {
+                    settled++;
+                }
+            }
+            if (settled > 0) {
+                log.warn("查单补回 {} 笔「已关闭但已支付」的订单", settled);
+            }
+        });
+    }
+
+    /**
+     * 事务外查单;确认已支付才进租户上下文落库(每笔各自一个事务)。
+     *
+     * <p>单笔失败只记日志、不进 failed 租户:它下一轮还会被扫到,不会丢。
+     */
+    private boolean settleIfPaid(PayService.ClosedUnpaidOrder candidate) {
+        WxPayClient.QueryResult query;
+        try {
+            query = wxPayClient.queryOrder(candidate.tenantId(), candidate.outTradeNo()).orElse(null);
+        } catch (RuntimeException ex) {
+            log.error("查单失败,本轮跳过 outTradeNo={}", candidate.outTradeNo(), ex);
+            return false;
+        }
+        if (query == null || !WxPayClient.TRADE_STATE_SUCCESS.equals(query.tradeState())) {
+            return false;
+        }
+        try {
+            TenantContext.callAsTenant(candidate.tenantId(), false, () -> {
+                payService.settleClosedPaidOrder(candidate.orderId(), query.transactionId(),
+                        "定时查单:订单已关闭但支付成功");
+                return null;
+            });
+        } catch (RuntimeException ex) {
+            log.error("补回已支付订单失败 orderId={}", candidate.orderId(), ex);
+            return false;
+        }
+        log.warn("订单已关闭但钱已收到,已置回待发货 orderId={} outTradeNo={}",
+                candidate.orderId(), candidate.outTradeNo());
+        return true;
     }
 
     /**

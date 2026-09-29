@@ -23,6 +23,7 @@ minimall:
   schedule:
     cron:
       close-timeout-orders: "-"
+      reconcile-closed-paid-orders: "-"
       auto-receive-orders: "-"
       after-sale-timeout: "-"
       expire-coupon-records: "-"

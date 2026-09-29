@@ -1075,12 +1075,12 @@ class MallHttpFlowIntegrationTest {
      * 迟到的支付回调:订单已经被关闭了,钱却收成功了。
      *
      * <p>这是真实会发生的场景(买家卡在支付页、订单被超时任务关掉、然后支付完成)。
-     * 处理方式是**不在这里静默改订单状态** —— 货已经释放了,改回去会造成超卖;
-     * 这笔钱要走退款流程退给买家,所以回调只记日志并返回成功。
+     * 钱既然收了就必须给货,所以这里把订单**置回待发货**并扣减实际库存 ——
+     * 关单时退的是锁定库存,所以不能再走一遍 deductStockOnPaid(那会把别人的锁定扣掉)。
      */
     @Test
-    @DisplayName("支付回调:订单已关闭时不能置为已支付(钱已收、货已释放,留给退款流程)")
-    void payCallbackIgnoresClosedOrder() {
+    @DisplayName("支付回调:订单已关闭但钱已收,置回待发货")
+    void payCallbackRevivesClosedOrder() {
         login();
         Long addressId = createAddress("e2e关闭订单回调", "13900000043");
 
@@ -1094,11 +1094,24 @@ class MallHttpFlowIntegrationTest {
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
                 .as("取消后不再是待付款").isNotEqualTo("1");
 
+        // 关单已经把锁定退回去了,记录当前值:复活只该动 stock,不该再动 lockedStock
+        int[] before = inTenant(() -> {
+            MallSku sku = skuRepository.findById(skuId).orElseThrow();
+            return new int[]{sku.getStock(), sku.getLockedStock()};
+        });
+
         Response lateCallback = wxPaySuccess(orderNo, new BigDecimal("60.00"));
         assertThat(lateCallback.status())
                 .as("迟到的回调不能报错(报错会让微信一直重推),响应=%s", lateCallback.body()).isEqualTo(200);
         assertThat(get("/mall/api/orders/" + orderId, token).text("status"))
-                .as("已关闭的订单不能被回调复活").isNotEqualTo("2");
+                .as("钱已收,订单要回到待发货").isEqualTo("2");
+        inTenant(() -> {
+            MallSku sku = skuRepository.findById(skuId).orElseThrow();
+            assertThat(sku.getStock()).as("复活的订单要重新扣掉实库存").isEqualTo(before[0] - 1);
+            assertThat(sku.getLockedStock())
+                    .as("锁定在关单时已经退过,再减一次会扣到别的订单头上").isEqualTo(before[1]);
+            return null;
+        });
     }
 
     /**

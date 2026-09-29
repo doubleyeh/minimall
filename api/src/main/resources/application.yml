@@ -116,6 +116,7 @@ minimall:
     # 否则测试进程里的调度器会与用例的直接调用抢同一把锁)
     cron:
       close-timeout-orders: "0 * * * * ?"
+      reconcile-closed-paid-orders: "0 */5 * * * ?"
       auto-receive-orders: "0 0 * * * ?"
       after-sale-timeout: "0 15 * * * ?"
       expire-coupon-records: "0 30 3 * * ?"
