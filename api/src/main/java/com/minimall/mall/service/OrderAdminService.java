@@ -1,7 +1,10 @@
 package com.minimall.mall.service;
 
+import com.minimall.mall.api.dto.AdminOrderQuery;
 import com.minimall.mall.api.dto.AdminOrderView;
 import com.minimall.common.PageResult;
+
+import java.util.List;
 
 /**
  * 商家管理端订单(商城设计文档 3.4)。
@@ -11,7 +14,13 @@ import com.minimall.common.PageResult;
  */
 public interface OrderAdminService {
 
-    PageResult<AdminOrderView> page(String orderNo, Integer status, int pageNo, int pageSize);
+    PageResult<AdminOrderView> page(AdminOrderQuery query, int pageNo, int pageSize);
+
+    /**
+     * 导出用的列表。超过 {@code limit} 条直接抛错,**不静默截断** ——
+     * 拿到半份数据的人从文件上看不出少了,拿去对账就是错的。
+     */
+    List<AdminOrderView> listForExport(AdminOrderQuery query, int limit);
 
     AdminOrderView detail(Long orderId);
 

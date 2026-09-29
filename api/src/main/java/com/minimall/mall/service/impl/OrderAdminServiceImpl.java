@@ -1,5 +1,6 @@
 package com.minimall.mall.service.impl;
 
+import com.minimall.mall.api.dto.AdminOrderQuery;
 import com.minimall.mall.api.dto.AdminOrderView;
 import com.minimall.mall.api.dto.ClientOrderView;
 import com.minimall.common.BusinessException;
@@ -76,14 +77,21 @@ public class OrderAdminServiceImpl implements OrderAdminService {
     }
 
     @Override
-    public PageResult<AdminOrderView> page(String orderNo, Integer status, int pageNo, int pageSize) {
+    public PageResult<AdminOrderView> page(AdminOrderQuery query, int pageNo, int pageSize) {
         QMallOrder qOrder = QMallOrder.mallOrder;
         BooleanBuilder where = new BooleanBuilder();
-        if (orderNo != null && !orderNo.isBlank()) {
-            where.and(qOrder.orderNo.contains(orderNo));
+        if (query.orderNo() != null && !query.orderNo().isBlank()) {
+            where.and(qOrder.orderNo.contains(query.orderNo()));
         }
-        if (status != null) {
-            where.and(qOrder.status.eq(status));
+        if (query.status() != null) {
+            where.and(qOrder.status.eq(query.status()));
+        }
+        // 下单时间区间两端都含:商家对账按"某天到某天"说,少算端点会被当成丢单
+        if (query.startTime() != null) {
+            where.and(qOrder.createTime.goe(query.startTime()));
+        }
+        if (query.endTime() != null) {
+            where.and(qOrder.createTime.loe(query.endTime()));
         }
         // 按创建时间倒序:商家最先关心的是最新订单
         Page<MallOrder> page = orderRepository.findAll(where,
@@ -93,6 +101,17 @@ public class OrderAdminServiceImpl implements OrderAdminService {
                 .map(order -> toView(order, null))
                 .toList();
         return PageResult.of(page.getTotalElements(), views);
+    }
+
+    @Override
+    public List<AdminOrderView> listForExport(AdminOrderQuery query, int limit) {
+        // 多取一条判断是否超上限:够不够比看总数更直接(与操作日志导出同一手法)
+        PageResult<AdminOrderView> page = page(query, 1, limit + 1);
+        if (page.list().size() > limit) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "结果超过 " + limit + " 条,请缩小时间范围后再导出");
+        }
+        return page.list();
     }
 
     @Override

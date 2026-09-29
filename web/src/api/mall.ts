@@ -90,6 +90,9 @@ export function deleteGoods(goodsId: Id): Promise<void> {
 export interface OrderPageQuery {
   orderNo?: string
   status?: number | null
+  /** 下单时间区间(ISO 本地时间),列表与导出共用 */
+  startTime?: string
+  endTime?: string
   pageNo?: number
   pageSize?: number
 }

@@ -14,10 +14,14 @@
             style="width: 160px"
           />
         </n-form-item>
+        <n-form-item label="下单时间">
+          <n-date-picker v-model:value="timeRange" type="datetimerange" clearable style="width: 340px" />
+        </n-form-item>
         <n-form-item>
           <n-space>
             <n-button type="primary" @click="search">查询</n-button>
             <n-button @click="resetQuery">重置</n-button>
+            <n-button :loading="exporting" @click="onExport">导出 CSV</n-button>
           </n-space>
         </n-form-item>
       </n-form>
@@ -106,7 +110,10 @@ import { NButton, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, h, onMounted, reactive, ref } from 'vue'
 
 import { cancelOrder, getOrder, pageOrders, shipOrder } from '@/api/mall'
+import type { OrderPageQuery } from '@/api/mall'
 import { usePermissionStore } from '@/stores/permission'
+import { toLocalDateTime } from '@/utils/datetime'
+import { download } from '@/utils/request'
 import type { Id, PageResult } from '@/types/api'
 import type { AdminOrderView } from '@/types/mall'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
@@ -127,6 +134,19 @@ const query = reactive<{ orderNo?: string; status?: number | null; pageNo: numbe
   pageNo: 1,
   pageSize: 10,
 })
+
+/** 下单时间区间。与订单号/状态一起构成"当前筛选条件",列表与导出共用 */
+const timeRange = ref<[number, number] | null>(null)
+const exporting = ref(false)
+
+function currentFilter(): Omit<OrderPageQuery, 'pageNo' | 'pageSize'> {
+  return {
+    orderNo: query.orderNo || undefined,
+    status: query.status,
+    startTime: timeRange.value ? toLocalDateTime(timeRange.value[0]) : undefined,
+    endTime: timeRange.value ? toLocalDateTime(timeRange.value[1]) : undefined,
+  }
+}
 
 /** 与后端 MallOrder 的常量保持一致(3.4 的状态机) */
 const statusOptions: SelectOption[] = [
@@ -195,7 +215,11 @@ const columns: DataTableColumns<AdminOrderView> = [
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const result: PageResult<AdminOrderView> = await pageOrders({ ...query })
+    const result: PageResult<AdminOrderView> = await pageOrders({
+      ...currentFilter(),
+      pageNo: query.pageNo,
+      pageSize: query.pageSize,
+    })
     rows.value = result.list
     total.value = result.total
   } finally {
@@ -211,7 +235,33 @@ function search(): void {
 function resetQuery(): void {
   query.orderNo = ''
   query.status = null
+  timeRange.value = null
   search()
+}
+
+/**
+ * 导出当前条件下的订单。
+ *
+ * 后端超过上限会返回业务错误(提示缩小时间范围),由 download 统一弹提示 ——
+ * 这里不自己判断,免得两边规则不一致。
+ */
+async function onExport(): Promise<void> {
+  exporting.value = true
+  try {
+    await download(`/mall/admin/orders/export?${toQueryString(currentFilter())}`, undefined, 'orders.csv')
+  } finally {
+    exporting.value = false
+  }
+}
+
+function toQueryString(filter: Omit<OrderPageQuery, 'pageNo' | 'pageSize'>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.append(key, String(value))
+    }
+  }
+  return params.toString()
 }
 
 function onPageChange(page: number): void {

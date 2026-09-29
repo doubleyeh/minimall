@@ -3,6 +3,7 @@ package com.minimall.mall.service;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;
+import com.minimall.mall.api.dto.AdminOrderQuery;
 import com.minimall.mall.api.dto.AdminOrderView;
 import com.minimall.mall.api.dto.OrderCreateResponse;
 import com.minimall.mall.domain.MallOrder;
@@ -195,20 +196,22 @@ class OrderAdminServiceIntegrationTest extends MallClientServiceTestBase {
         OrderCreateResponse paid = paidOrder(1);
         OrderCreateResponse unpaid = createOrder(customerId, addressId, 1);
 
-        PageResult<AdminOrderView> all = inTenant(() -> orderAdminService.page(null, null, 1, 50));
+        PageResult<AdminOrderView> all = inTenant(() -> orderAdminService.page(
+                new AdminOrderQuery(null, null, null, null), 1, 50));
         assertThat(all.total()).isGreaterThanOrEqualTo(2);
 
-        PageResult<AdminOrderView> onlyPaid =
-                inTenant(() -> orderAdminService.page(null, MallOrder.STATUS_PENDING_SHIP, 1, 50));
+        PageResult<AdminOrderView> onlyPaid = inTenant(() -> orderAdminService.page(
+                new AdminOrderQuery(null, MallOrder.STATUS_PENDING_SHIP, null, null), 1, 50));
         assertThat(onlyPaid.list()).extracting(AdminOrderView::id)
                 .contains(paid.orderId())
                 .doesNotContain(unpaid.orderId());
 
-        PageResult<AdminOrderView> byOrderNo =
-                inTenant(() -> orderAdminService.page(paid.orderNo(), null, 1, 50));
+        PageResult<AdminOrderView> byOrderNo = inTenant(() -> orderAdminService.page(
+                new AdminOrderQuery(paid.orderNo(), null, null, null), 1, 50));
         assertThat(byOrderNo.list()).extracting(AdminOrderView::orderNo).containsExactly(paid.orderNo());
 
-        PageResult<AdminOrderView> notFound = inTenant(() -> orderAdminService.page("不存在的订单号", null, 1, 50));
+        PageResult<AdminOrderView> notFound = inTenant(() -> orderAdminService.page(
+                new AdminOrderQuery("不存在的订单号", null, null, null), 1, 50));
         assertThat(notFound.list()).isEmpty();
         assertThat(notFound.total()).isZero();
     }
