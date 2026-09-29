@@ -167,6 +167,26 @@ class WxPayCallbackHttpIntegrationTest {
     }
 
     @Test
+    @DisplayName("解密失败这类非业务异常必须回非 2xx —— 回 200 微信当成成功、永不重推")
+    void decryptFailureIsNotReportedAsSuccess() throws Exception {
+        // 验签用的公钥不动,只把 APIv3 密钥配错:这样会跳过所有业务校验、直接死在解密上
+        callback.breakApiV3Key(TENANT_CODE);
+        WxPayCallbackFixture.Payload payload = callback.payload("TRANSACTION.SUCCESS", Map.of(
+                "out_trade_no", outTradeNo,
+                "transaction_id", "cbk-dec-" + System.nanoTime(),
+                "amount", Map.of("total", WxPayCallbackFixture.toCents(AMOUNT), "currency", "CNY")),
+                "transaction");
+
+        HttpResponse<String> response = post("/pay/callback/wx/" + TENANT_CODE, payload, payload.body());
+
+        assertThat(response.statusCode())
+                .as("非 2xx 微信才会重推;落到全局异常处理器会变成 200,微信当成成功")
+                .isNotEqualTo(200);
+        assertThat(response.body()).contains("\"code\":\"FAIL\"");
+        assertThat(statusOf(orderId)).isEqualTo(MallOrder.STATUS_PENDING_PAY);
+    }
+
+    @Test
     @DisplayName("未知租户返回 404")
     void unknownTenantIsRejected() throws Exception {
         WxPayCallbackFixture.Payload payload = callback.payload("TRANSACTION.SUCCESS", Map.of(

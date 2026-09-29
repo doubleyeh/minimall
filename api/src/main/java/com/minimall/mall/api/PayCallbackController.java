@@ -4,6 +4,8 @@ import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.mall.api.dto.WxPayCallbackResponse;
 import com.minimall.mall.service.PayService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,6 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/pay/callback")
 public class PayCallbackController {
 
+    private static final Logger log = LoggerFactory.getLogger(PayCallbackController.class);
+
     private final PayService payService;
 
     public PayCallbackController(PayService payService) {
@@ -47,6 +51,8 @@ public class PayCallbackController {
             return ResponseEntity.ok(WxPayCallbackResponse.success());
         } catch (BusinessException ex) {
             return fail(ex);
+        } catch (RuntimeException ex) {
+            return failWithServerError(ex);
         }
     }
 
@@ -62,6 +68,8 @@ public class PayCallbackController {
             return ResponseEntity.ok(WxPayCallbackResponse.success());
         } catch (BusinessException ex) {
             return fail(ex);
+        } catch (RuntimeException ex) {
+            return failWithServerError(ex);
         }
     }
 
@@ -79,5 +87,15 @@ public class PayCallbackController {
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
         return ResponseEntity.status(status).body(WxPayCallbackResponse.fail(ex.getMessage()));
+    }
+
+    /**
+     * 非业务异常(解密失败、写库异常等)同样要回非 2xx:落到全局异常处理器会变成 HTTP 200,
+     * 微信当成成功就不再重推,已付款订单永久停在待支付。
+     */
+    private ResponseEntity<WxPayCallbackResponse> failWithServerError(RuntimeException ex) {
+        log.error("微信回调处理异常,回 500 让微信重推", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(WxPayCallbackResponse.fail("处理失败,请重试"));
     }
 }

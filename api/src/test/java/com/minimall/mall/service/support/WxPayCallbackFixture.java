@@ -97,6 +97,16 @@ public class WxPayCallbackFixture {
                 payload.serial(), payload.signature(), payload.body());
     }
 
+    /** 把该租户的 APIv3 密钥改成错的:验签仍通过,解密必然失败。 */
+    public void breakApiV3Key(String tenantCode) {
+        ensureConfig(tenantCode);
+        Tenant tenant = tenantRepository.findByTenantCode(tenantCode).orElseThrow();
+        SysWxPayConfig config = configRepository.findByTenantId(tenant.getId()).orElseThrow();
+        config.setApiV3KeyEnc(cipher.encrypt("00000000000000000000000000000000"));
+        configRepository.save(config);
+        configProvider.evict(tenant.getId());
+    }
+
     /** 退款回调;{@code success} 为假时投递 {@code REFUND.CLOSED}。 */
     public void refund(String tenantCode, String outRefundNo, String wxRefundId, boolean success) {
         ensureConfig(tenantCode);
