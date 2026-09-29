@@ -374,19 +374,19 @@ class MallAdminApiCrudHttpIntegrationTest {
     }
 
     @Test
-    @DisplayName("会员等级:新建 → 改名改折扣")
+    @DisplayName("会员等级:新建 → 改名改门槛")
     void memberLevelCrudCycle() throws Exception {
         String name = "CRUD 等级" + suffix();
         Response created = post("/mall/admin/member-levels",
                 "{\"levelName\":\"" + name + "\",\"levelSort\":9,\"growthThreshold\":1000,"
-                        + "\"discountRate\":0.95,\"status\":1}");
+                        + "\"status\":1}");
         assertThat(created.code()).as("新建会员等级:%s", created.body()).isEqualTo("0");
         Long levelId = created.dataAsNumber();
 
         assertThat(get("/mall/admin/member-levels", token).body()).contains(name);
         assertThat(put("/mall/admin/member-levels/" + levelId,
                 "{\"levelName\":\"" + name + "改\",\"levelSort\":8,\"growthThreshold\":2000,"
-                        + "\"discountRate\":0.9,\"status\":1}").code()).isEqualTo("0");
+                        + "\"status\":1}").code()).isEqualTo("0");
     }
 
     @Test

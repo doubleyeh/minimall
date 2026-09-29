@@ -7,16 +7,14 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.math.BigDecimal;
-
 /**
  * 会员等级定义(商城设计文档 3.11)。
  *
  * <p>等级由**近 N 个月滚动成长值**(字典 {@code growth_roll_months})与 {@code growthThreshold}
  * 比对得出,窗口滚出老值时**会降级**。判定取门槛降序里第一个够得着的等级。
  *
- * <p>{@code discountRate} 仍然**只存不用**:等级折扣与优惠券/满减的叠加顺序尚未确定,
- * 而"半实现的折扣"会真实地少收钱(开放项 2)。
+ * <p>等级目前**不带折扣权益**:折扣率与优惠券/满减的叠加顺序没定,半实现会真实地少收钱,
+ * 所以不做这个字段 —— 要做的时候连同叠加规则一起加。
  */
 @Entity
 @Table(name = "mall_member_level")
@@ -42,10 +40,6 @@ public class MallMemberLevel extends BaseTenantEntity {
     /** 达到该成长值自动晋升到此等级。 */
     @Column(name = "growth_threshold", nullable = false)
     private Integer growthThreshold;
-
-    /** 等级折扣率,如 0.95 表示 9.5 折;**只存不用**,不参与结算(见类注释)。 */
-    @Column(name = "discount_rate", precision = 3, scale = 2)
-    private BigDecimal discountRate;
 
     @Column(name = "status", nullable = false)
     private Integer status;

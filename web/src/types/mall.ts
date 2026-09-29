@@ -257,7 +257,6 @@ export interface MemberLevelSaveRequest {
   levelName: string
   levelSort: number
   growthThreshold: number
-  discountRate?: number | null
   status?: number | null
 }
 
@@ -266,7 +265,6 @@ export interface MemberLevelView {
   levelName: string
   levelSort: number
   growthThreshold: number
-  discountRate?: number | null
   status: number
 }
 

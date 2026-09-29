@@ -12,7 +12,6 @@ import com.minimall.mall.service.MemberLevelService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -64,7 +63,7 @@ public class MemberLevelServiceImpl implements MemberLevelService {
     public List<MemberLevelView> list() {
         return levelRepository.findByOrderByLevelSortAsc().stream()
                 .map(level -> new MemberLevelView(level.getId(), level.getLevelName(), level.getLevelSort(),
-                        level.getGrowthThreshold(), level.getDiscountRate(), level.getStatus()))
+                        level.getGrowthThreshold(), level.getStatus()))
                 .toList();
     }
 
@@ -101,12 +100,6 @@ public class MemberLevelServiceImpl implements MemberLevelService {
         level.setLevelName(request.levelName());
         level.setLevelSort(request.levelSort());
         level.setGrowthThreshold(request.growthThreshold());
-        // 折扣率本期不参与计算,但仍然校验取值范围,避免库里留下"不可能正确"的配置
-        BigDecimal rate = request.discountRate();
-        if (rate != null && (rate.signum() <= 0 || rate.compareTo(BigDecimal.ONE) > 0)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "折扣率必须在 0 与 1 之间(如 0.95 表示 9.5 折)");
-        }
-        level.setDiscountRate(rate);
         level.setStatus(request.status() == null ? STATUS_ENABLED : request.status());
     }
 }

@@ -369,16 +369,15 @@ class MallAdminServiceIntegrationTest {
     }
 
     @Test
-    @DisplayName("会员等级:重名被拒,折扣率取值被校验")
+    @DisplayName("会员等级:重名被拒")
     void memberLevelRules() {
         inTenant(() -> {
-            Long levelId = memberLevelService.create(new MemberLevelSaveRequest("用例等级" + System.nanoTime(),
-                    1, 100, new BigDecimal("0.95"), 1));
+            String name = "用例等级" + System.nanoTime();
+            memberLevelService.create(new MemberLevelSaveRequest(name, 1, 100, 1));
             assertThat(memberLevelService.list()).isNotEmpty();
-            assertThatThrownBy(() -> memberLevelService.update(levelId, new MemberLevelSaveRequest("改名",
-                    1, 100, new BigDecimal("2"), 1)))
+            assertThatThrownBy(() -> memberLevelService.create(new MemberLevelSaveRequest(name, 2, 200, 1)))
                     .isInstanceOf(BusinessException.class)
-                    .hasMessageContaining("折扣率");
+                    .hasMessageContaining("已存在");
             return null;
         });
     }

@@ -30,9 +30,6 @@
         <n-form-item label="成长值门槛" path="growthThreshold">
           <n-input-number v-model:value="form.growthThreshold" :min="0" />
         </n-form-item>
-        <n-form-item label="折扣率">
-          <n-input-number v-model:value="form.discountRate" :min="0.01" :max="1" :step="0.01" placeholder="如 0.95" />
-        </n-form-item>
         <n-form-item label="状态">
           <n-radio-group v-model:value="form.status">
             <n-radio :value="1">启用</n-radio>
@@ -74,7 +71,6 @@ const form = reactive<MemberLevelSaveRequest>({
   levelName: '',
   levelSort: 0,
   growthThreshold: 0,
-  discountRate: null,
   status: 1,
 })
 
@@ -86,12 +82,6 @@ const columns: DataTableColumns<MemberLevelView> = [
   { title: '等级名称', key: 'levelName' },
   { title: '顺序', key: 'levelSort', width: 90 },
   { title: '成长值门槛', key: 'growthThreshold', width: 130 },
-  {
-    title: '折扣率',
-    key: 'discountRate',
-    width: 110,
-    render: (row) => (row.discountRate == null ? '-' : `${Number(row.discountRate) * 10} 折`),
-  },
   {
     title: '状态',
     key: 'status',
@@ -128,7 +118,6 @@ function openCreate(): void {
   form.levelName = ''
   form.levelSort = 0
   form.growthThreshold = 0
-  form.discountRate = null
   form.status = 1
   formVisible.value = true
 }
@@ -138,7 +127,6 @@ function openEdit(row: MemberLevelView): void {
   form.levelName = row.levelName
   form.levelSort = row.levelSort
   form.growthThreshold = row.growthThreshold
-  form.discountRate = row.discountRate == null ? null : Number(row.discountRate)
   form.status = row.status
   formVisible.value = true
 }

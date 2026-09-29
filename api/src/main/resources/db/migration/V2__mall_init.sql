@@ -79,7 +79,6 @@ CREATE TABLE mall_member_level (
     level_name      VARCHAR(32)  NOT NULL,
     level_sort      INT          NOT NULL DEFAULT 0 COMMENT '等级顺序,数字越大等级越高',
     growth_threshold INT         NOT NULL COMMENT '达到该成长值自动晋升到此等级',
-    discount_rate   DECIMAL(3,2) NULL COMMENT '等级折扣率,如0.95表示9.5折;字段先建,晋升/折扣计算逻辑后续实现',
     status          INT          NOT NULL DEFAULT 1,
     create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
