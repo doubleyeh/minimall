@@ -55,6 +55,20 @@ public class RestClientWxPayHttpClient implements WxPayHttpClient {
         }
     }
 
+    @Override
+    public WxPayHttpResult get(String url, Map<String, String> headers) {
+        try {
+            return restClient.get()
+                    .uri(URI.create(url))
+                    .headers(target -> headers.forEach(target::add))
+                    .exchange((request, response) -> new WxPayHttpResult(
+                            response.getStatusCode().value(), readBody(response)), true);
+        } catch (RuntimeException ex) {
+            log.error("调用微信支付失败 url={}", url, ex);
+            return new WxPayHttpResult(0, "");
+        }
+    }
+
     private String readBody(org.springframework.http.client.ClientHttpResponse response) {
         try {
             byte[] bytes = response.getBody().readAllBytes();

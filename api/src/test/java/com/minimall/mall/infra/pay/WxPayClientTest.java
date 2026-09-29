@@ -182,6 +182,47 @@ class WxPayClientTest {
                 .isEqualTo(ErrorCode.PAY_CHANNEL_NOT_CONFIGURED);
     }
 
+    @Test
+    @DisplayName("查单:GET 到商户订单号 URL,带 mchid,签名串里 body 段为空")
+    void queryOrderUsesGetWithMchid() throws Exception {
+        StubHttpClient http = new StubHttpClient(new WxPayHttpClient.WxPayHttpResult(
+                200, "{\"trade_state\":\"SUCCESS\",\"transaction_id\":\"4200001\"}"));
+        KeyPair keyPair = keyPair();
+        WxPayClient client = client(http, credentials(keyPair, false, null), properties("https://pay.test"));
+
+        assertThat(client.queryOrder(TENANT_ID, "O1")).contains(
+                new WxPayClient.QueryResult("SUCCESS", "4200001"));
+
+        assertThat(http.method).isEqualTo("GET");
+        assertThat(http.url)
+                .isEqualTo("https://api.mch.weixin.qq.com/v3/pay/transactions/out-trade-no/O1?mchid=1900000001");
+        assertThat(http.body).as("查单没有请求体").isNull();
+        assertThat(http.headers.get("Authorization")).startsWith("WECHATPAY2-SHA256-RSA2048 mchid=\"1900000001\"");
+    }
+
+    @Test
+    @DisplayName("查单:非 200、或缺 trade_state,都返回空而不是抛异常")
+    void queryOrderFailureBecomesEmpty() throws Exception {
+        assertThat(client(new StubHttpClient(new WxPayHttpClient.WxPayHttpResult(404, "{\"code\":\"ORDER_NOT_EXIST\"}")),
+                credentials(keyPair(), false, null), properties("https://pay.test")).queryOrder(TENANT_ID, "O2"))
+                .isEmpty();
+
+        assertThat(client(new StubHttpClient(new WxPayHttpClient.WxPayHttpResult(200, "{}")),
+                credentials(keyPair(), false, null), properties("https://pay.test")).queryOrder(TENANT_ID, "O3"))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("查单:未支付也要回结果(调用方按 trade_state 判断,不能当成查询失败)")
+    void queryOrderReturnsNotPayState() throws Exception {
+        StubHttpClient http = new StubHttpClient(new WxPayHttpClient.WxPayHttpResult(
+                200, "{\"trade_state\":\"NOTPAY\"}"));
+
+        assertThat(client(http, credentials(keyPair(), false, null), properties("https://pay.test"))
+                .queryOrder(TENANT_ID, "O4"))
+                .contains(new WxPayClient.QueryResult("NOTPAY", ""));
+    }
+
     private WxPayClient client(StubHttpClient http, WxPayCredentials credentials, WxPayProperties properties) {
         WxPayConfigProvider provider = new WxPayConfigProvider() {
             @Override
@@ -249,6 +290,7 @@ class WxPayClientTest {
     private static final class StubHttpClient implements WxPayHttpClient {
 
         private final WxPayHttpResult result;
+        private String method;
         private String url;
         private Map<String, String> headers;
         private String body;
@@ -259,6 +301,16 @@ class WxPayClientTest {
 
         @Override
         public WxPayHttpResult post(String url, Map<String, String> headers, String body) {
+            return record("POST", url, headers, body);
+        }
+
+        @Override
+        public WxPayHttpResult get(String url, Map<String, String> headers) {
+            return record("GET", url, headers, null);
+        }
+
+        private WxPayHttpResult record(String method, String url, Map<String, String> headers, String body) {
+            this.method = method;
             this.url = url;
             this.headers = headers;
             this.body = body;

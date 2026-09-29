@@ -23,6 +23,13 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
 
     private final List<Request> requests = new ArrayList<>();
 
+    /** 查单返回的 {@code trade_state};用例按需设成 SUCCESS / NOTPAY / CLOSED。 */
+    private String queryTradeState = "NOTPAY";
+
+    public void setQueryTradeState(String queryTradeState) {
+        this.queryTradeState = queryTradeState;
+    }
+
     @Override
     public WxPayHttpResult post(String url, Map<String, String> headers, String body) {
         requests.add(new Request(url, headers, body));
@@ -35,12 +42,23 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
         return new WxPayHttpResult(200, "{}");
     }
 
+    @Override
+    public WxPayHttpResult get(String url, Map<String, String> headers) {
+        requests.add(new Request(url, headers, null));
+        if (url.contains("/v3/pay/transactions/out-trade-no/")) {
+            return new WxPayHttpResult(200, "{\"trade_state\":\"" + queryTradeState
+                    + "\",\"transaction_id\":\"stub-txn-" + requests.size() + "\"}");
+        }
+        return new WxPayHttpResult(200, "{}");
+    }
+
     public List<Request> requests() {
         return List.copyOf(requests);
     }
 
     public void reset() {
         requests.clear();
+        queryTradeState = "NOTPAY";
     }
 
     /** 一次出网请求的快照。 */

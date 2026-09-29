@@ -33,6 +33,10 @@ public class WxPayClient {
     private static final String BASE_URL = "https://api.mch.weixin.qq.com";
     private static final String JSAPI_PATH = "/v3/pay/transactions/jsapi";
     private static final String REFUND_PATH = "/v3/refund/domestic/refunds";
+    private static final String QUERY_PATH = "/v3/pay/transactions/out-trade-no/";
+
+    /** 查单返回的 {@code trade_state}:只有它表示钱真的收到了。 */
+    public static final String TRADE_STATE_SUCCESS = "SUCCESS";
 
     private final WxPayConfigProvider configProvider;
     private final WxPayHttpClient httpClient;
@@ -134,6 +138,33 @@ public class WxPayClient {
             return Optional.empty();
         }
         return Optional.of(refundId);
+    }
+
+    /**
+     * 主动查单:按商户订单号问微信"这笔到底付了没有"(3.8)。
+     *
+     * <p>给"支付成功了、回调却迟到或丢了、订单已被超时关闭"这条路径兜底 —— 只靠回调判断不了钱收没收到。
+     * 失败一律返回空,与其它出网方法同约定:查不到就当没付,不做任何状态变更(宁可漏、不可错)。
+     */
+    public Optional<QueryResult> queryOrder(Long tenantId, String outTradeNo) {
+        WxPayCredentials credentials = credentialsOf(tenantId);
+        String path = QUERY_PATH + outTradeNo + "?mchid=" + credentials.mchId();
+        String timestamp = nowSeconds();
+        String nonce = randomHex(16);
+
+        WxPayHttpClient.WxPayHttpResult result = httpClient.get(BASE_URL + path,
+                signedHeaders("GET", path, null, credentials, timestamp, nonce));
+        if (result.status() != 200) {
+            log.warn("微信查单失败 outTradeNo={} status={} body={}", outTradeNo, result.status(), result.body());
+            return Optional.empty();
+        }
+        JsonNode root = readTree(result.body());
+        String tradeState = text(root, "trade_state");
+        if (tradeState.isEmpty()) {
+            log.warn("微信查单未返回 trade_state outTradeNo={} body={}", outTradeNo, result.body());
+            return Optional.empty();
+        }
+        return Optional.of(new QueryResult(tradeState, text(root, "transaction_id")));
     }
 
     /** direct 用 appid/mchid,partner 用 sp_appid/sp_mchid/sub_appid/sub_mchid。 */
@@ -276,5 +307,14 @@ public class WxPayClient {
         public record PayParams(String timeStamp, String nonceStr, String packageValue, String signType,
                                 String paySign) {
         }
+    }
+
+    /**
+     * 查单结果。
+     *
+     * @param tradeState    微信的 {@code trade_state},只有 {@link #TRADE_STATE_SUCCESS} 表示已收款
+     * @param transactionId 微信支付单号;未支付时为空串
+     */
+    public record QueryResult(String tradeState, String transactionId) {
     }
 }

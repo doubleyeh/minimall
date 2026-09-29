@@ -16,6 +16,12 @@ public interface WxPayHttpClient {
      */
     WxPayHttpResult post(String url, Map<String, String> headers, String body);
 
+    /**
+     * GET 请求(查单用)。单独一个方法而不是给 {@code post} 传空 body:
+     * 微信的查单接口只接受 GET,用 POST 会直接 405。
+     */
+    WxPayHttpResult get(String url, Map<String, String> headers);
+
     record WxPayHttpResult(int status, String body) {
     }
 }
