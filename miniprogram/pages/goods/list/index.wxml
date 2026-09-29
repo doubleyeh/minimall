@@ -1,0 +1,57 @@
+<view class="page">
+  <view class="searchbar">
+    <view class="searchbar__box">
+      <text class="searchbar__icon">⌕</text>
+      <input
+        class="searchbar__input"
+        value="{{inputValue}}"
+        focus="{{focus}}"
+        confirm-type="search"
+        placeholder="搜索商品名称"
+        bindinput="onInput"
+        bindconfirm="onSearch"
+      />
+      <text wx:if="{{inputValue}}" class="searchbar__clear" bindtap="onClearKeyword">×</text>
+    </view>
+    <view class="searchbar__btn" bindtap="onSearch">搜索</view>
+  </view>
+
+  <!-- 一级分类筛选。横向滚动而不是折行:分类多的时候折行会把商品挤到首屏之外 -->
+  <scroll-view wx:if="{{chips.length > 1}}" class="cats" scroll-x scroll-with-animation>
+    <view
+      wx:for="{{chips}}"
+      wx:key="label"
+      class="cats__chip {{activeCategoryId === item.id ? 'cats__chip--on' : ''}}"
+      bindtap="onCategoryTap"
+      data-id="{{item.id}}"
+    >{{item.label}}</view>
+  </scroll-view>
+
+  <view class="goods">
+    <view
+      wx:for="{{cards}}"
+      wx:key="id"
+      class="gcard"
+      bindtap="onGoodsTap"
+      data-id="{{item.id}}"
+    >
+      <image class="gcard__img" src="{{item.image}}" mode="aspectFill" lazy-load></image>
+      <view class="gcard__body">
+        <view class="gcard__name ellipsis-2">{{item.name}}</view>
+        <view class="gcard__sub ellipsis-1">{{item.subtitle}}</view>
+        <view class="gcard__foot">
+          <view class="price">
+            <text class="price__symbol">¥</text>
+            <text class="price__value">{{item.priceText}}</text>
+            <text wx:if="{{item.priceSuffix}}" class="gcard__suffix">{{item.priceSuffix}}</text>
+          </view>
+          <text class="gcard__sold">{{item.saleCountText}} 人已购</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="tip">正在加载…</view>
+  <view wx:elif="{{cards.length === 0}}" class="empty">{{keyword ? '没有找到相关商品' : '这里还没有商品'}}</view>
+  <view wx:elif="{{finished}}" class="tip">— 到底了 —</view>
+</view>

@@ -1,0 +1,73 @@
+/* 搜索条吸顶:翻到第 5 屏想换关键词时,不用先滚回去 */
+.searchbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  padding: 20rpx 24rpx;
+  background: var(--card);
+}
+
+.searchbar__box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 72rpx;
+  padding: 0 24rpx;
+  background: var(--bg-soft);
+  border-radius: var(--r-pill);
+}
+
+.searchbar__icon {
+  margin-right: 12rpx;
+  font-size: 34rpx;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.searchbar__input {
+  flex: 1;
+  font-size: 27rpx;
+}
+
+.searchbar__clear {
+  width: 44rpx;
+  text-align: center;
+  font-size: 34rpx;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.searchbar__btn {
+  margin-left: 20rpx;
+  font-size: 28rpx;
+  color: var(--brand);
+}
+
+/* 分类筛选条:横向滚动而不是折行,分类多的时候不会把商品挤出首屏 */
+.cats {
+  white-space: nowrap;
+  padding: 4rpx 24rpx 8rpx;
+  background: var(--card);
+}
+
+.cats__chip {
+  display: inline-block;
+  margin-right: 16rpx;
+  padding: 10rpx 28rpx;
+  font-size: 25rpx;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  border-radius: var(--r-pill);
+}
+
+.cats__chip--on {
+  color: #ffffff;
+  background: var(--brand);
+}
+
+.goods {
+  margin-top: 20rpx;
+  padding-bottom: 24rpx;
+}
