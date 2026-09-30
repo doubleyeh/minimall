@@ -20,6 +20,7 @@ import com.minimall.infra.security.CaptchaService;
 import com.minimall.infra.security.LoginRateLimiter;
 import com.minimall.infra.security.PasswordPolicy;
 import com.minimall.infra.security.PermissionProvider;
+import com.minimall.infra.security.PermissionRateLimiter;
 import com.minimall.infra.security.RefreshTokenPayload;
 import com.minimall.infra.security.RefreshTokenService;
 import com.minimall.infra.security.SessionKeys;
@@ -60,6 +61,7 @@ public class AuthServiceImpl implements AuthService {
     private final RefreshTokenService refreshTokenService;
     private final PermissionProvider permissionProvider;
     private final LoginRateLimiter loginRateLimiter;
+    private final PermissionRateLimiter permissionRateLimiter;
     private final LoginProperties loginProperties;
     private final CaptchaService captchaService;
     private final PasswordPolicy passwordPolicy;
@@ -74,6 +76,7 @@ public class AuthServiceImpl implements AuthService {
                            RefreshTokenService refreshTokenService,
                            PermissionProvider permissionProvider,
                            LoginRateLimiter loginRateLimiter,
+                           PermissionRateLimiter permissionRateLimiter,
                            LoginProperties loginProperties,
                            CaptchaService captchaService,
                            PasswordPolicy passwordPolicy,
@@ -84,6 +87,7 @@ public class AuthServiceImpl implements AuthService {
         this.refreshTokenService = refreshTokenService;
         this.permissionProvider = permissionProvider;
         this.loginRateLimiter = loginRateLimiter;
+        this.permissionRateLimiter = permissionRateLimiter;
         this.loginProperties = loginProperties;
         this.captchaService = captchaService;
         this.passwordPolicy = passwordPolicy;
@@ -251,7 +255,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public PermissionSnapshot currentPermissions() {
-        PermissionProvider.PermissionData data = permissionProvider.load(currentUserId());
+        Long userId = currentUserId();
+        // 限流放在算权限之前:超限就该直接挡掉,而不是先花几次查库再拒。
+        // 未命中缓存时这一次调用要查用户、角色、菜单,所以它是"最划算"的回源入口
+        permissionRateLimiter.checkAndCount(userId);
+        PermissionProvider.PermissionData data = permissionProvider.load(userId);
         return new PermissionSnapshot(List.copyOf(data.menuTree()), List.copyOf(data.permCodes()));
     }
 

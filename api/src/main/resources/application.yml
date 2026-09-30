@@ -87,6 +87,9 @@ minimall:
   # 权限缓存(架构文档 5.5):key 带租户级版本号,失效只需 INCR 版本号
   permission:
     cache-ttl-seconds: 7200
+    # 权限刷新接口(/auth/permissions)每人每分钟上限。前端只在登录后与收到 403 之后拉,
+    # 而且已经做了 10 秒限频 —— 这个阈值只用来挡"拿有效令牌反复回源算权限"
+    refresh-limit-per-minute: 30
   # 刷新令牌(架构文档 7.1.3)
   auth:
     refresh-token:

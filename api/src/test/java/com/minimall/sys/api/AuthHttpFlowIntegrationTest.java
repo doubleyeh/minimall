@@ -9,6 +9,7 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.infra.audit.AuditContext;
 import com.minimall.infra.security.LoginProperties;
+import com.minimall.infra.security.PermissionProperties;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.RoleService;
 import com.minimall.sys.service.TenantService;
@@ -101,11 +102,16 @@ class AuthHttpFlowIntegrationTest {
     /** 锁定阈值与锁定时长不写死在用例里:它们是可配的,写死会让改配置后用例失去意义。 */
     @Autowired
     private LoginProperties loginProperties;
+    /** 同理:权限刷新接口的阈值也是可配的。 */
+    @Autowired
+    private PermissionProperties permissionProperties;
 
     @BeforeEach
     void prepareSeedState() {
         // 登录 IP 限流(10 次/分钟)按 IP 计数;跨用例累计会让断言莫名其妙地拿到 429
         redis.delete(redis.keys("*127.0.0.1*"));
+        // 权限刷新限流按用户计数,同理要清
+        redis.delete(redis.keys("perm:refresh:*"));
         restoreSeedUser();
     }
 
@@ -257,6 +263,29 @@ class AuthHttpFlowIntegrationTest {
         assertThat(deniedByRoleListUser.status())
                 .as("没有「用户列表」权限 → 403,响应体=%s", deniedByRoleListUser.body())
                 .isEqualTo(403);
+    }
+
+    @Test
+    @DisplayName("权限刷新接口按用户限流:阈值内正常,超一点回 429")
+    void permissionRefreshIsRateLimitedPerUser() throws Exception {
+        String tenantCode = "limit-" + suffix();
+        String adminUsername = "admin" + suffix();
+        TenantCreateResponse tenant = asSuperUser(() -> tenantService.create(new TenantCreateRequest(
+                tenantCode, "限流用例租户", FULL_PACKAGE_ID, null, adminUsername, "用例管理员", null)));
+        long roleId = createRoleInTenant(tenant.tenantId(), tenant.adminUserId(), List.of(1L, 2L, 11L));
+        String username = createUserInTenant(tenant.tenantId(), tenant.adminUserId(), "limituser", roleId);
+        String token = loginAndGetToken(tenantCode, username);
+
+        // 阈值从配置读:改了配置这条用例跟着变,不会悄悄失效
+        int limit = permissionProperties.refreshLimitPerMinute();
+        for (int i = 0; i < limit; i++) {
+            assertThat(get("/auth/permissions", token).status())
+                    .as("第 %d 次调用仍在阈值内", i + 1).isEqualTo(200);
+        }
+
+        Response blocked = get("/auth/permissions", token);
+        assertThat(blocked.status()).as("超过阈值必须被挡,而不是无限次回源算权限").isEqualTo(429);
+        assertThat(blocked.code()).as("要带上限流错误码,前端才能给出正确提示").isEqualTo("42900");
     }
 
     @Test

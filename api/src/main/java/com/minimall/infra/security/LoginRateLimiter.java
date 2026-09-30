@@ -1,8 +1,6 @@
 package com.minimall.infra.security;
 
-import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -16,9 +14,6 @@ import java.time.Duration;
  *
  * <p>超过阈值直接抛 429,**请求根本不进入账号级校验逻辑**(连租户都不查),这样限流的开销最小,
  * 也不会因为限流逻辑本身去查库而被放大成放大攻击面。
- *
- * <p>为什么用 Redis 而不是本地计数:多实例部署时本地计数等于把阈值乘以实例数,
- * 攻击者只要换实例打就能绕开。
  */
 @Component
 public class LoginRateLimiter {
@@ -26,32 +21,20 @@ public class LoginRateLimiter {
     private static final String KEY_PREFIX = "login:ip:";
     private static final Duration WINDOW = Duration.ofMinutes(1);
 
-    private final StringRedisTemplate redis;
+    private final RedisRateLimiter rateLimiter;
     private final LoginProperties properties;
 
-    public LoginRateLimiter(StringRedisTemplate redis, LoginProperties properties) {
-        this.redis = redis;
+    public LoginRateLimiter(RedisRateLimiter rateLimiter, LoginProperties properties) {
+        this.rateLimiter = rateLimiter;
         this.properties = properties;
     }
 
-    /**
-     * 计数并判断,超限抛 {@link ErrorCode#IP_RATE_LIMITED}。
-     *
-     * <p>用 {@code INCR} + 首次设置过期时间实现固定窗口:实现简单、原子,不需要额外的清理任务;
-     * 代价是窗口边界上最多可能放过 2 倍流量——对"防脚本"这个目标来说完全可以接受,
-     * 不值得为此上滑动窗口。
-     */
+    /** 取不到 IP 时不计数:宁可漏限一次,也不要让所有请求共用同一个空 key 互相挤掉。 */
     public void checkAndCount(String clientIp) {
         if (clientIp == null || clientIp.isBlank()) {
             return;
         }
-        String key = KEY_PREFIX + clientIp;
-        Long count = redis.opsForValue().increment(key);
-        if (count != null && count == 1L) {
-            redis.expire(key, WINDOW);
-        }
-        if (count != null && count > properties.ipLimitPerMinute()) {
-            throw new BusinessException(ErrorCode.IP_RATE_LIMITED);
-        }
+        rateLimiter.checkAndCount(KEY_PREFIX + clientIp, properties.ipLimitPerMinute(), WINDOW,
+                ErrorCode.IP_RATE_LIMITED);
     }
 }
