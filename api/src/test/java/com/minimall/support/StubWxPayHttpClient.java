@@ -25,14 +25,17 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
     private final List<Request> requests = new ArrayList<>();
 
     /**
-     * 出网应答里的单号序列:**只增不减,{@link #reset()} 不能碰它**。
+     * 出网应答里的单号序列:**只增不减、且是类级的**,{@link #reset()} 不能碰它。
      *
      * <p>以前按 {@code requests.size()} 发号,而 reset 会清空请求列表 —— 下一个用例又从 1 开始,
      * 撞上库里前一个用例留下的行。单号在库上有唯一键(payment 的 {@code uk_wx_transaction}、
      * refund 的 {@code uk_wx_refund}),撞了就是"写回微信单号失败",表现成随机失败的用例。
+     *
+     * <p>必须是 {@code static}:跑 HTTP 用例的那些类用了另一套 webEnvironment,Spring 会再建一个
+     * 上下文,于是本桩有两个实例 —— 实例级序列会各自从 1 数起,照样撞。
      * 每次运行开始时会重置数据库(见 {@code TestDatabaseReset}),所以只增序列在一个运行内足够唯一。
      */
-    private final AtomicLong sequence = new AtomicLong();
+    private static final AtomicLong SEQUENCE = new AtomicLong();
 
     /** 查单返回的 {@code trade_state};用例按需设成 SUCCESS / NOTPAY / CLOSED。 */
     private String queryTradeState = "NOTPAY";
@@ -59,7 +62,7 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
     public WxPayHttpResult post(String url, Map<String, String> headers, String body) {
         requests.add(new Request(url, headers, body));
         if (url.contains("/v3/pay/transactions/jsapi")) {
-            return new WxPayHttpResult(200, "{\"prepay_id\":\"stub-prepay-" + sequence.incrementAndGet() + "\"}");
+            return new WxPayHttpResult(200, "{\"prepay_id\":\"stub-prepay-" + SEQUENCE.incrementAndGet() + "\"}");
         }
         if (url.contains("/v3/refund/domestic/refunds")) {
             if (refundRejected) {
@@ -68,7 +71,7 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
             if (refundWithoutId) {
                 return new WxPayHttpResult(200, "{}");
             }
-            return new WxPayHttpResult(200, "{\"refund_id\":\"stub-refund-" + sequence.incrementAndGet() + "\"}");
+            return new WxPayHttpResult(200, "{\"refund_id\":\"stub-refund-" + SEQUENCE.incrementAndGet() + "\"}");
         }
         return new WxPayHttpResult(200, "{}");
     }
@@ -78,7 +81,7 @@ public class StubWxPayHttpClient implements WxPayHttpClient {
         requests.add(new Request(url, headers, null));
         if (url.contains("/v3/pay/transactions/out-trade-no/")) {
             return new WxPayHttpResult(200, "{\"trade_state\":\"" + queryTradeState
-                    + "\",\"transaction_id\":\"stub-txn-" + sequence.incrementAndGet() + "\"}");
+                    + "\",\"transaction_id\":\"stub-txn-" + SEQUENCE.incrementAndGet() + "\"}");
         }
         return new WxPayHttpResult(200, "{}");
     }
