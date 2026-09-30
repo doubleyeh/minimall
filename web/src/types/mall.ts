@@ -349,3 +349,25 @@ export interface StockWarnReport {
   threshold: number
   page: PageResult<StockWarnView>
 }
+
+// ---------------------------------------------------------------- 销售统计
+
+export interface SalesSummaryView {
+  orderCount: number
+  paidAmount: number
+  refundAmount: number
+  netAmount: number
+  avgOrderAmount: number
+}
+
+export interface TopGoodsView {
+  goodsId: Id
+  goodsName?: string | null
+  quantity: number
+  amount: number
+}
+
+export interface SalesStatReport {
+  summary: SalesSummaryView
+  topGoods: TopGoodsView[]
+}

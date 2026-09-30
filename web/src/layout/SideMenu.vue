@@ -15,6 +15,7 @@ import {
   AlertCircleOutline,
   AppsOutline,
   BagHandleOutline,
+  BarChartOutline,
   BookOutline,
   BuildOutline,
   BusinessOutline,
@@ -76,6 +77,7 @@ const icons: Record<string, Component> = {
   crown: RibbonOutline,
   star: StarOutline,
   alert: AlertCircleOutline,
+  chart: BarChartOutline,
   // 平台管理 · 定时任务
   time: TimeOutline,
 }

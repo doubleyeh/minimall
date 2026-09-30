@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.querydsl.QuerydslPredicateExecutor;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +56,20 @@ public interface MallOrderRepository extends JpaRepository<MallOrder, Long>,
                                        Pageable pageable);
 
     long countByCustomerIdAndStatus(Long customerId, Integer status);
+
+    /**
+     * 已支付订单数(销售统计用):按**下单时间**落区间,{@code payTime} 非空即算付过钱。
+     *
+     * <p>用下单时间而不是支付时间,是为了与"商品排行"用同一条时间轴 —— 两个数字放在一张页面上,
+     * 口径不一致的话谁也解释不清为什么对不上。
+     */
+    long countByPayTimeIsNotNullAndCreateTimeBetween(LocalDateTime startTime, LocalDateTime endTime);
+
+    /** 已支付订单的实付额之和。区间内没有订单时返回 {@code null},由调用方折算成 0。 */
+    @Query("select sum(o.payAmount) from MallOrder o "
+            + "where o.payTime is not null and o.createTime >= :startTime and o.createTime <= :endTime")
+    BigDecimal sumPaidAmount(@Param("startTime") LocalDateTime startTime,
+                             @Param("endTime") LocalDateTime endTime);
 
     /**
      * 关闭/取消订单时把状态落库。
