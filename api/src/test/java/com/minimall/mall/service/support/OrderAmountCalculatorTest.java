@@ -23,9 +23,9 @@ class OrderAmountCalculatorTest {
 
     private final OrderAmountCalculator calculator = new OrderAmountCalculator();
 
-    private static final String RULE_NORMAL = "[{\"amount\":100,\"reduce\":10},{\"amount\":200,\"reduce\":30}]";
+    private static final String RULE_NORMAL = "[{\"sort\":1,\"amount\":100,\"reduce\":10},{\"sort\":2,\"amount\":200,\"reduce\":30}]";
     /** 运营把阶梯顺序写反的版本(常见笔误)。 */
-    private static final String RULE_REVERSED = "[{\"amount\":200,\"reduce\":30},{\"amount\":100,\"reduce\":10}]";
+    private static final String RULE_REVERSED = "[{\"sort\":1,\"amount\":200,\"reduce\":30},{\"sort\":2,\"amount\":100,\"reduce\":10}]";
 
     // ---------------------------------------------------------------- 满减
 
@@ -56,15 +56,79 @@ class OrderAmountCalculatorTest {
     }
 
     @Test
+    @DisplayName("满减规则保存校验:正常阶梯通过")
+    void acceptsValidRule() {
+        calculator.validateReductionRule(RULE_NORMAL);
+    }
+
+    @Test
+    @DisplayName("满减规则保存校验:减得比满的还多必须拒绝")
+    void rejectsReduceNotLessThanAmount() {
+        // 这一档能过"减免大于 0"那一关,但会让 100 元的订单变成负数 —— 结算时 payable 会抛错,
+        // 活动范围是全部商品时等于整个店铺下不了单,所以要在保存时就拦住
+        assertThatThrownBy(() -> calculator.validateReductionRule("[{\"sort\":1,\"amount\":100,\"reduce\":500}]"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("第 1 档")
+                .hasMessageContaining("减的金额必须小于满的金额");
+        assertThatThrownBy(() -> calculator.validateReductionRule("[{\"sort\":1,\"amount\":100,\"reduce\":100}]"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("减的金额必须小于满的金额");
+    }
+
+    @Test
+    @DisplayName("满减规则保存校验:门槛与减免都要比上一档大")
+    void rejectsTiersNotIncreasing() {
+        assertThatThrownBy(() -> calculator.validateReductionRule(RULE_REVERSED))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("满的金额必须大于上一档");
+        // 门槛递增但减免没跟着变大:第二档还不如第一档划算,属于填错
+        assertThatThrownBy(() -> calculator.validateReductionRule(
+                "[{\"sort\":1,\"amount\":100,\"reduce\":30},{\"sort\":2,\"amount\":200,\"reduce\":10}]"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("减的金额必须大于上一档");
+    }
+
+    @Test
+    @DisplayName("满减规则保存校验:形状不对、档位缺字段、空数组都要拒绝")
+    void rejectsMalformedRule() {
+        assertThatThrownBy(() -> calculator.validateReductionRule("not-a-json"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("必须是 JSON 数组");
+        assertThatThrownBy(() -> calculator.validateReductionRule("{\"amount\":100,\"reduce\":10}"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("必须是 JSON 数组");
+        assertThatThrownBy(() -> calculator.validateReductionRule("[]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("至少要有一个档位");
+        assertThatThrownBy(() -> calculator.validateReductionRule("[{\"sort\":1,\"amount\":100}]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("缺少 amount 或 reduce");
+        assertThatThrownBy(() -> calculator.validateReductionRule("[{\"sort\":1,\"amount\":0,\"reduce\":10}]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("满的金额必须大于 0");
+        assertThatThrownBy(() -> calculator.validateReductionRule(null))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("不能为空");
+    }
+
+    @Test
+    @DisplayName("满减规则保存校验:每档必须带顺序 sort,且顺序从 1 起连续不重复")
+    void rejectsMissingOrBrokenSort() {
+        // 顺序是这份配置的语义之一,不能只靠数组下标表达 —— 缺了就拒绝保存
+        assertThatThrownBy(() -> calculator.validateReductionRule("[{\"amount\":100,\"reduce\":10}]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("都要带 sort");
+        assertThatThrownBy(() -> calculator.validateReductionRule(
+                "[{\"sort\":1,\"amount\":100,\"reduce\":10},{\"sort\":3,\"amount\":200,\"reduce\":30}]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("档位顺序必须是 1 到 2");
+        assertThatThrownBy(() -> calculator.validateReductionRule(
+                "[{\"sort\":1,\"amount\":100,\"reduce\":10},{\"sort\":1,\"amount\":200,\"reduce\":30}]"))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("档位顺序必须是 1 到 2");
+    }
+
+    @Test
     @DisplayName("多个满减活动只取减免最大的一个(活动之间不叠加)")
     void onlyBestPromotionApplies() {
         var candidates = List.of(
                 new OrderAmountCalculator.PromotionCandidate(1L, "满100减10",
-                        "[{\"amount\":100,\"reduce\":10}]", new BigDecimal("300")),
+                        "[{\"sort\":1,\"amount\":100,\"reduce\":10}]", new BigDecimal("300")),
                 new OrderAmountCalculator.PromotionCandidate(2L, "满200减30",
-                        "[{\"amount\":200,\"reduce\":30}]", new BigDecimal("300")),
+                        "[{\"sort\":1,\"amount\":200,\"reduce\":30}]", new BigDecimal("300")),
                 new OrderAmountCalculator.PromotionCandidate(3L, "满500减80",
-                        "[{\"amount\":500,\"reduce\":80}]", new BigDecimal("300")));
+                        "[{\"sort\":1,\"amount\":500,\"reduce\":80}]", new BigDecimal("300")));
 
         var hit = calculator.bestFullReduction(candidates).orElseThrow();
         assertThat(hit.activityId()).isEqualTo(2L);
@@ -75,7 +139,7 @@ class OrderAmountCalculatorTest {
     @DisplayName("没有任何活动满足门槛时不减免")
     void noPromotionMatched() {
         var candidates = List.of(new OrderAmountCalculator.PromotionCandidate(1L, "满500减80",
-                "[{\"amount\":500,\"reduce\":80}]", new BigDecimal("300")));
+                "[{\"sort\":1,\"amount\":500,\"reduce\":80}]", new BigDecimal("300")));
         assertThat(calculator.bestFullReduction(candidates)).isEmpty();
     }
 
@@ -282,7 +346,7 @@ class OrderAmountCalculatorTest {
         assertThat(calculator.reductionFor("{\"amount\":100,\"reduce\":10}", new BigDecimal("500")))
                 .isEqualByComparingTo("0");
         // 数组里缺 amount 或 reduce 的档位要跳过,而不是当成 0 门槛命中
-        assertThat(calculator.reductionFor("[{\"reduce\":10},{\"amount\":100,\"reduce\":20}]",
+        assertThat(calculator.reductionFor("[{\"reduce\":10},{\"sort\":2,\"amount\":100,\"reduce\":20}]",
                 new BigDecimal("500"))).isEqualByComparingTo("20");
     }
 

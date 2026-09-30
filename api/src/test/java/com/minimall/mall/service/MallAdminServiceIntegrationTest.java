@@ -354,12 +354,12 @@ class MallAdminServiceIntegrationTest {
                     .hasMessageContaining("满减规则");
             // 指定分类/商品时必须选范围
             assertThatThrownBy(() -> promotionService.create(new PromotionSaveRequest("用例活动-缺范围",
-                    "[{\"amount\":100,\"reduce\":10}]", 2, List.of(),
+                    "[{\"sort\":1,\"amount\":100,\"reduce\":10}]", 2, List.of(),
                     LocalDateTime.now(), LocalDateTime.now().plusDays(3), 1)))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("范围");
             Long activityId = promotionService.create(new PromotionSaveRequest("用例活动",
-                    "[{\"amount\":100,\"reduce\":10}]", 1, null,
+                    "[{\"sort\":1,\"amount\":100,\"reduce\":10}]", 1, null,
                     LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(3), 1));
             PageResult<?> page = promotionService.page("用例活动", null, 1, 10);
             assertThat(page.total()).isGreaterThanOrEqualTo(1);

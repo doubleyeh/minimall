@@ -37,6 +37,11 @@ public class OrderAmountCalculator {
     private static final int MONEY_SCALE = 2;
     private static final RoundingMode MONEY_ROUNDING = RoundingMode.HALF_UP;
 
+    /** 满减阶梯的 JSON 字段名,解析与校验共用一处,避免两边写法不一致。 */
+    private static final String SORT_FIELD = "sort";
+    private static final String AMOUNT_FIELD = "amount";
+    private static final String REDUCE_FIELD = "reduce";
+
     /** 积分抵现比例:100 积分 = 1 元,即 1 积分 = 1 分钱,任何整数积分都能精确到分。 */
     public static final int POINTS_PER_YUAN = 100;
 
@@ -90,32 +95,141 @@ public class OrderAmountCalculator {
         if (reductionRule == null || reductionRule.isBlank() || amount == null || amount.signum() <= 0) {
             return BigDecimal.ZERO;
         }
+        ParsedTiers parsed = parseTiers(reductionRule);
+        if (parsed == null) {
+            // 规则写坏时按"不减免"处理:宁可少减也不要把钱算错,同时把原文记进日志便于修正
+            log.error("满减规则无法解析(需要 JSON 数组),已按不减免处理: {}", reductionRule);
+            return BigDecimal.ZERO;
+        }
+        return parsed.tiers().stream()
+                .filter(tier -> amount.compareTo(tier.amount()) >= 0)
+                // 取满足门槛里**金额最大**的那一档,而不是"按顺序取最后一个":
+                // 历史数据可能没带 sort、甚至顺序是反的,按金额取才不受顺序影响
+                .max(Comparator.comparing(ParsedTier::amount))
+                .map(tier -> money(tier.reduce()))
+                .orElse(BigDecimal.ZERO);
+    }
+
+    /**
+     * 校验满减规则能否安全用来结算(保存时调用)。
+     *
+     * <p>约束:形状是 JSON 数组;每档 {@code sort}(顺序,从 1 开始且不重不漏)、
+     * {@code amount}/{@code reduce} 齐全且都大于 0;<b>每档减的金额小于满的金额</b>;
+     * 且按 {@code sort} 排好后,{@code amount} 与 {@code reduce} 都严格递增。
+     *
+     * <p>为什么顺序要显式存:档位顺序是这份配置的语义之一(阶梯怎么设计),靠数组下标表达的话,
+     * 复制、手改、跨系统搬运都可能悄悄把顺序弄丢。
+     *
+     * <p>为什么写入侧要这么严:规则是**人手填的**,而"减得比门槛还多"会让 {@link #payable}
+     * 在结算时抛错 —— 活动范围是全部商品时,等于整个店铺下不了单。坏数据挡在写入侧最省事。
+     *
+     * <p>读取侧({@link #reductionFor})仍然容错:库里的历史规则可能没有 {@code sort}、
+     * 顺序也可能不满足约束,而"取满足门槛的最高档"本身不依赖顺序。
+     *
+     * @throws BusinessException 规则不合法,消息里指明是第几档、哪里不对
+     */
+    public void validateReductionRule(String reductionRule) {
+        if (reductionRule == null || reductionRule.isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "满减规则不能为空");
+        }
+        ParsedTiers parsed = parseTiers(reductionRule);
+        if (parsed == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "满减规则必须是 JSON 数组,如 [{\"sort\":1,\"amount\":100,\"reduce\":10}]");
+        }
+        if (parsed.brokenTiers() > 0) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "满减规则有 " + parsed.brokenTiers() + " 个档位缺少 amount 或 reduce");
+        }
+        if (parsed.tiers().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "满减规则至少要有一个档位");
+        }
+        if (parsed.missingSortTiers() > 0) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "每个档位都要带 sort(档位顺序),从 1 开始依次递增");
+        }
+        List<ParsedTier> tiers = parsed.tiers().stream()
+                .sorted(Comparator.comparing(ParsedTier::sort))
+                .toList();
+        for (int i = 0; i < tiers.size(); i++) {
+            if (tiers.get(i).sort() != i + 1) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                        "档位顺序必须是 1 到 " + tiers.size() + " 且不重复");
+            }
+        }
+        BigDecimal prevAmount = null;
+        BigDecimal prevReduce = null;
+        for (int i = 0; i < tiers.size(); i++) {
+            ParsedTier tier = tiers.get(i);
+            BigDecimal amount = tier.amount();
+            BigDecimal reduce = tier.reduce();
+            int tierNo = i + 1;
+            if (amount.signum() <= 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "第 " + tierNo + " 档:满的金额必须大于 0");
+            }
+            if (reduce.signum() <= 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "第 " + tierNo + " 档:减的金额必须大于 0");
+            }
+            if (reduce.compareTo(amount) >= 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                        "第 " + tierNo + " 档:减的金额必须小于满的金额");
+            }
+            if (prevAmount != null && amount.compareTo(prevAmount) <= 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                        "第 " + tierNo + " 档:满的金额必须大于上一档");
+            }
+            if (prevReduce != null && reduce.compareTo(prevReduce) <= 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                        "第 " + tierNo + " 档:减的金额必须大于上一档");
+            }
+            prevAmount = amount;
+            prevReduce = reduce;
+        }
+    }
+
+    /**
+     * 解析 JSON 阶梯。
+     *
+     * @return {@code null} 表示 JSON 读不出来或根节点不是数组(调用方决定是忽略还是报错);
+     *         {@code brokenTiers} 是缺 {@code amount}/{@code reduce} 被跳过的档位数;
+     *         {@code missingSortTiers} 是没带 {@code sort} 的档位数(这些档位用数组下标兜底当顺序)
+     */
+    private ParsedTiers parseTiers(String reductionRule) {
         try {
             JsonNode root = objectMapper.readTree(reductionRule);
             if (!root.isArray()) {
-                log.warn("满减规则不是 JSON 数组,已忽略: {}", reductionRule);
-                return BigDecimal.ZERO;
+                return null;
             }
-            List<BigDecimal[]> tiers = new ArrayList<>();
-            for (JsonNode node : root) {
-                JsonNode amountNode = node.get("amount");
-                JsonNode reduceNode = node.get("reduce");
+            List<ParsedTier> tiers = new ArrayList<>();
+            int broken = 0;
+            int missingSort = 0;
+            for (int i = 0; i < root.size(); i++) {
+                JsonNode node = root.get(i);
+                JsonNode amountNode = node.get(AMOUNT_FIELD);
+                JsonNode reduceNode = node.get(REDUCE_FIELD);
                 if (amountNode == null || reduceNode == null) {
+                    broken++;
                     continue;
                 }
-                tiers.add(new BigDecimal[]{amountNode.decimalValue(), reduceNode.decimalValue()});
+                JsonNode sortNode = node.get(SORT_FIELD);
+                if (sortNode == null) {
+                    missingSort++;
+                }
+                tiers.add(new ParsedTier(sortNode == null ? i + 1 : sortNode.intValue(),
+                        amountNode.decimalValue(), reduceNode.decimalValue()));
             }
-            return tiers.stream()
-                    .filter(tier -> amount.compareTo(tier[0]) >= 0)
-                    // 按门槛降序取第一个命中的,等价于"取减免最大的那一档"
-                    .max(Comparator.comparing(tier -> tier[0]))
-                    .map(tier -> money(tier[1]))
-                    .orElse(BigDecimal.ZERO);
+            return new ParsedTiers(tiers, broken, missingSort);
         } catch (Exception ex) {
-            // 规则写坏时按"不减免"处理:宁可少减也不要把钱算错,同时把原文记进日志便于修正
-            log.error("满减规则解析失败,已按不减免处理: {}", reductionRule, ex);
-            return BigDecimal.ZERO;
+            return null;
         }
+    }
+
+    /** 一档:{@code sort} 是显式顺序(从 1 开始),历史数据缺它时用数组下标兜底。 */
+    private record ParsedTier(int sort, BigDecimal amount, BigDecimal reduce) {
+    }
+
+    /** 解析结果:{@code brokenTiers}/{@code missingSortTiers} 用来区分"形状坏"与"只是没带顺序"。 */
+    private record ParsedTiers(List<ParsedTier> tiers, int brokenTiers, int missingSortTiers) {
     }
 
     /**

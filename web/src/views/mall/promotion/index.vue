@@ -32,18 +32,36 @@
     <n-modal v-model:show="formVisible" preset="card" :title="editingId ? '编辑满减活动' : '新增满减活动'" style="width: 640px">
       <n-form ref="formRef" :model="form" :rules="formRules" label-placement="top">
         <n-form-item label="活动名称" path="activityName"><n-input v-model:value="form.activityName" /></n-form-item>
-        <n-form-item label="减免规则(JSON)" path="reductionRule">
-          <n-input
-            :value="form.reductionRule"
-            type="textarea"
-            :rows="3"
-            placeholder='[{"amount":100,"reduce":10},{"amount":200,"reduce":30}]'
-            @update:value="(value: string) => (form.reductionRule = value)"
-          />
+        <n-form-item label="减免阶梯">
+          <n-space vertical :size="8" style="width: 100%">
+            <n-space v-for="(tier, index) in tiers" :key="index" align="center" :size="8">
+              <n-text depth="3" style="width: 56px">第 {{ index + 1 }} 档</n-text>
+              <n-text>满</n-text>
+              <n-input-number
+                v-model:value="tier.amount"
+                :min="0.01"
+                :precision="2"
+                placeholder="门槛金额"
+                style="width: 150px"
+              />
+              <n-text>减</n-text>
+              <n-input-number
+                v-model:value="tier.reduce"
+                :min="0.01"
+                :precision="2"
+                placeholder="减免金额"
+                style="width: 150px"
+              />
+              <n-button v-if="tiers.length > 1" size="small" type="error" ghost @click="removeTier(index)">
+                删除
+              </n-button>
+            </n-space>
+            <n-button size="small" dashed @click="addTier">添加阶梯</n-button>
+          </n-space>
         </n-form-item>
         <n-alert type="info" :bordered="false" style="margin-bottom: 12px">
-          匹配时按门槛取满足条件的最高档,所以书写顺序不影响结果。保存时后端会试算一次,
-          规则写坏会直接拒绝保存(而不是等下单时才发现活动从未生效)。
+          每一档的「减」必须小于「满」;下一档的「满」与「减」都要大于上一档;顺序按表格行序写进
+          sort 字段。保存时前后端都会校验 —— 规则写坏的表现是活动看着启用中、用户却下不了单。
         </n-alert>
         <n-grid :cols="2" :x-gap="16">
           <n-form-item-gi label="适用范围" path="scopeType">
@@ -195,9 +213,18 @@ const formVisible = ref(false)
 const editingId = ref<Id | null>(null)
 const formRef = ref<FormInst | null>(null)
 const validRange = ref<[number, number] | null>(null)
+
+/** 阶梯表格的一行。提交时序列化成后端要的 JSON(`PromotionSaveRequest.reductionRule`) */
+interface Tier {
+  amount: number | null
+  reduce: number | null
+}
+
+const tiers = ref<Tier[]>([{ amount: 100, reduce: 10 }])
+
 const form = reactive<PromotionSaveRequest>({
   activityName: '',
-  reductionRule: '[{"amount":100,"reduce":10}]',
+  reductionRule: '',
   scopeType: 1,
   scopeIds: [],
   validStartTime: '',
@@ -207,7 +234,80 @@ const form = reactive<PromotionSaveRequest>({
 
 const formRules: FormRules = {
   activityName: { required: true, message: '请输入活动名称', trigger: ['blur', 'input'] },
-  reductionRule: { required: true, message: '请填写减免规则', trigger: ['blur', 'input'] },
+}
+
+/** 新档预填成"比上一档大一点":最常见的填法,省掉两次输入 */
+function addTier(): void {
+  const last = tiers.value[tiers.value.length - 1]
+  tiers.value.push({
+    amount: last?.amount ? Number(last.amount) + 100 : 100,
+    reduce: last?.reduce ? Number(last.reduce) + 10 : 10,
+  })
+}
+
+function removeTier(index: number): void {
+  tiers.value.splice(index, 1)
+}
+
+/**
+ * 阶梯校验,返回第一条不满足的说明;{@code null} 表示合法。
+ *
+ * <p>与后端 {@code OrderAmountCalculator#validateReductionRule} 的约束一一对应。
+ * 前端校验是为了让运营当场看到哪里不对,真正的门在服务端(端上可以改请求体)。
+ */
+function tierRuleError(): string | null {
+  if (tiers.value.length === 0) {
+    return '至少要有一个阶梯'
+  }
+  let prevAmount: number | null = null
+  let prevReduce: number | null = null
+  for (let i = 0; i < tiers.value.length; i++) {
+    const no = i + 1
+    const { amount, reduce } = tiers.value[i]
+    if (amount == null || reduce == null || amount <= 0 || reduce <= 0) {
+      return `第 ${no} 档:满和减都要填大于 0 的金额`
+    }
+    if (reduce >= amount) {
+      return `第 ${no} 档:减的金额必须小于满的金额`
+    }
+    if (prevAmount != null && amount <= prevAmount) {
+      return `第 ${no} 档:满的金额必须大于上一档`
+    }
+    if (prevReduce != null && reduce <= prevReduce) {
+      return `第 ${no} 档:减的金额必须大于上一档`
+    }
+    prevAmount = amount
+    prevReduce = reduce
+  }
+  return null
+}
+
+/** 把库里存的 JSON 还原成表格行;解析不出来就返回空数组,由调用方兜底成一行空档 */
+function parseTiers(rule: string): Tier[] {
+  try {
+    const parsed = JSON.parse(rule) as { sort?: number; amount?: number; reduce?: number }[]
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    // 按 sort 回显:顺序存在数据里,不依赖数组位置。历史数据没有 sort 时按原顺序兜底
+    return parsed
+      .map((item, index) => ({
+        sort: item?.sort == null ? index + 1 : Number(item.sort),
+        amount: item?.amount == null ? null : Number(item.amount),
+        reduce: item?.reduce == null ? null : Number(item.reduce),
+      }))
+      .sort((left, right) => left.sort - right.sort)
+      .map((tier) => ({ amount: tier.amount, reduce: tier.reduce }))
+  } catch {
+    return []
+  }
+}
+
+/** 顺序写进每一档的 sort(从 1 开始):档位顺序是这份配置的语义,不能只靠数组下标表达 */
+function serializeTiers(): string {
+  return JSON.stringify(
+    tiers.value.map((tier, index) => ({ sort: index + 1, amount: tier.amount, reduce: tier.reduce })),
+  )
 }
 
 function splitIds(value: string): Id[] {
@@ -220,7 +320,7 @@ function splitIds(value: string): Id[] {
 function openCreate(): void {
   editingId.value = null
   form.activityName = ''
-  form.reductionRule = '[{"amount":100,"reduce":10}]'
+  tiers.value = [{ amount: 100, reduce: 10 }]
   form.scopeType = 1
   form.scopeIds = []
   form.status = 1
@@ -231,16 +331,28 @@ function openCreate(): void {
 function openEdit(row: PromotionView): void {
   editingId.value = row.id
   form.activityName = row.activityName
-  form.reductionRule = row.reductionRule
   form.scopeType = row.scopeType
   form.scopeIds = row.scopeIds ?? []
   form.status = row.status
   validRange.value = [new Date(row.validStartTime).getTime(), new Date(row.validEndTime).getTime()]
+  const restored = parseTiers(row.reductionRule)
+  if (restored.length === 0) {
+    // 库里这条规则解析不出来(多半是历史坏数据):给一行空档让运营重填,而不是显示一片空白让人猜
+    message.warning('这条活动的减免规则无法解析,请重新填写阶梯')
+    tiers.value = [{ amount: null, reduce: null }]
+  } else {
+    tiers.value = restored
+  }
   formVisible.value = true
 }
 
 async function onSubmit(): Promise<void> {
   await formRef.value?.validate()
+  const ruleError = tierRuleError()
+  if (ruleError) {
+    message.warning(ruleError)
+    return
+  }
   if (!validRange.value) {
     message.warning('请选择活动时间')
     return
@@ -253,6 +365,7 @@ async function onSubmit(): Promise<void> {
   try {
     const payload: PromotionSaveRequest = {
       ...form,
+      reductionRule: serializeTiers(),
       scopeIds: form.scopeType === 1 ? [] : (form.scopeIds ?? []),
       validStartTime: toLocalDateTime(validRange.value[0]),
       validEndTime: toLocalDateTime(validRange.value[1]),

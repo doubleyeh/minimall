@@ -568,7 +568,8 @@ class MallAdminApiCrudHttpIntegrationTest {
     }
 
     private String promotionBody(String name) {
-        return "{\"activityName\":\"" + name + "\",\"reductionRule\":\"[{\\\"amount\\\":100,\\\"reduce\\\":10}]\","
+        return "{\"activityName\":\"" + name
+                + "\",\"reductionRule\":\"[{\\\"sort\\\":1,\\\"amount\\\":100,\\\"reduce\\\":10}]\","
                 + "\"scopeType\":1,\"scopeIds\":null,\"validStartTime\":\"" + VALID_FROM
                 + "\",\"validEndTime\":\"" + VALID_TO + "\",\"status\":1}";
     }

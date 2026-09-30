@@ -157,6 +157,8 @@ mall_promotion_full_reduction ─── mall_promotion_full_reduction_scope
 
 同一订单**最多使用一张优惠券**,满减活动可与优惠券叠加,但满减活动之间不叠加(取满足条件里减免金额最大的一个活动)。
 
+**满减阶梯的保存约束**(`OrderAmountCalculator#validateReductionRule`,管理端用阶梯表格填,不再让人手写 JSON):规则存成 `[{"sort":1,"amount":100,"reduce":10},{"sort":2,"amount":200,"reduce":30}]` —— **顺序显式写进 `sort`**(从 1 起不重不漏),不靠数组下标表达;每档 `reduce` 必须**小于** `amount`;按 `sort` 排好后档位 `amount` 与 `reduce` **双递增**。双递增让"取满足门槛的最高档"等价于"取减免最大的档";`reduce < amount` 挡住的是"减得比门槛还多"——那种规则会让 `payable` 在结算时抛错,活动范围是全部商品时等于整个店铺下不了单。读取侧仍然容错(历史规则可能没有 `sort`、顺序也可能不满足约束,取档按金额而不是按顺序,所以照样算对),坏规则按"不减免"处理并打 ERROR 日志。
+
 **积分抵现的基数与上限都在商品金额上,运费既不参与抵扣也不抬高上限** —— 否则运费也能用积分付,等于免运费。
 
 **这段编排只有一个实现**:`OrderServiceImpl#prepare`,结算试算与真实下单共用(`POST /mall/api/orders/preview` 与 `POST /mall/api/orders`)。端上自己算一遍的话,运费(模板/区域/包邮)、满减(活动+范围+阶梯)、券门槛、积分上限任何一处漂移,方向都是少收钱。

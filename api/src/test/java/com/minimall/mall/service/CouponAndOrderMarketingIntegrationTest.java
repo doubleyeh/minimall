@@ -408,10 +408,40 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
     }
 
     @Test
+    @DisplayName("满减保存:减得比满的还多要拒绝 —— 否则 payable 抛错,全店下不了单")
+    void rejectsPromotionWithReduceOverAmount() {
+        assertThatThrownBy(() -> createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":500}]",
+                MallPromotionFullReduction.SCOPE_ALL, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("减的金额必须小于满的金额");
+    }
+
+    @Test
+    @DisplayName("满减保存:档位不递增要拒绝,且修改也要挡(不能只挡新建)")
+    void rejectsNonIncreasingTiersOnCreateAndUpdate() {
+        assertThatThrownBy(() -> createPromotion("[{\"sort\":1,\"amount\":200,\"reduce\":30},{\"sort\":2,\"amount\":100,\"reduce\":10}]",
+                MallPromotionFullReduction.SCOPE_ALL, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("满的金额必须大于上一档");
+
+        Long activityId = createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":10}]",
+                MallPromotionFullReduction.SCOPE_ALL, null);
+        assertThatThrownBy(() -> inTenant(() -> {
+            promotionService.update(activityId, new PromotionSaveRequest(NAME_PREFIX + "改",
+                    "[{\"sort\":1,\"amount\":100,\"reduce\":30},{\"sort\":2,\"amount\":200,\"reduce\":10}]",
+                    MallPromotionFullReduction.SCOPE_ALL, null,
+                    LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(30), 1));
+            return null;
+        }))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("减的金额必须大于上一档");
+    }
+
+    @Test
     @DisplayName("下单:满减取门槛最高的命中档,而不是 JSON 里写的第一个")
     void orderAppliesBestPromotionTier() {
         // 阶梯故意写成"低门槛在前":按书写顺序取第一个满足的,买 200 只会减 10
-        createPromotion("[{\"amount\":100,\"reduce\":10},{\"amount\":200,\"reduce\":30}]",
+        createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":10},{\"sort\":2,\"amount\":200,\"reduce\":30}]",
                 MallPromotionFullReduction.SCOPE_ALL, null);
 
         OrderCreateResponse twoUnits = createOrder(customerId, addressId, 2);
@@ -428,7 +458,7 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
     @Test
     @DisplayName("下单:按商品范围的满减,范围不含该商品时不抵扣;按分类范围同理")
     void orderAppliesScopedPromotionOnlyWhenMatched() {
-        createPromotion("[{\"amount\":100,\"reduce\":15}]",
+        createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":15}]",
                 MallPromotionFullReduction.SCOPE_GOODS, List.of(goodsId));
         assertThat(createOrder(customerId, addressId, 2).promotionDiscountAmount())
                 .as("范围包含该商品")
@@ -439,7 +469,7 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
             jdbcTemplate.update("DELETE FROM mall_promotion_full_reduction WHERE activity_name LIKE ?", NAME_PREFIX + "%");
             return null;
         });
-        createPromotion("[{\"amount\":100,\"reduce\":15}]",
+        createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":15}]",
                 MallPromotionFullReduction.SCOPE_GOODS, List.of(999999L));
         assertThat(createOrder(customerId, addressId, 2).promotionDiscountAmount())
                 .as("范围不含该商品,覆盖金额为 0,不该计入候选")
@@ -451,7 +481,7 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
             jdbcTemplate.update("DELETE FROM mall_promotion_full_reduction WHERE activity_name LIKE ?", NAME_PREFIX + "%");
             return null;
         });
-        createPromotion("[{\"amount\":100,\"reduce\":20}]",
+        createPromotion("[{\"sort\":1,\"amount\":100,\"reduce\":20}]",
                 MallPromotionFullReduction.SCOPE_CATEGORY, List.of(0L));
         assertThat(createOrder(customerId, addressId, 2).promotionDiscountAmount())
                 .as("夹具商品挂在分类 0 下")
@@ -461,7 +491,7 @@ class CouponAndOrderMarketingIntegrationTest extends MallClientServiceTestBase {
     @Test
     @DisplayName("下单:范围活动没有任何范围行时跳过它(而不是把全店金额都算进去)")
     void orderSkipsPromotionWithoutScopes() {
-        createPromotion("[{\"amount\":50,\"reduce\":10}]",
+        createPromotion("[{\"sort\":1,\"amount\":50,\"reduce\":10}]",
                 MallPromotionFullReduction.SCOPE_GOODS, List.of(goodsId));
         // 删掉范围行:活动还在、范围没了。若不跳过,就会退化成"全场满 50 减 10"
         inTenant(() -> {

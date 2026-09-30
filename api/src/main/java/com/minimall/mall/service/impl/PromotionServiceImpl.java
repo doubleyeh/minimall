@@ -19,7 +19,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -117,12 +116,8 @@ public class PromotionServiceImpl implements PromotionService {
         if (request.validEndTime().isBefore(request.validStartTime())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "结束时间不能早于开始时间");
         }
-        // 试算:任意一个门槛都能命中,说明 JSON 至少是"可用"的
-        BigDecimal probe = calculator.reductionFor(request.reductionRule(), new BigDecimal("1000000"));
-        if (probe.signum() <= 0) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "满减规则无法解析出任何有效档位,请检查 JSON 格式(如 [{\"amount\":100,\"reduce\":10}])");
-        }
+        // 规则校验交给计算器(它才是解析这份 JSON 的地方):形状、每档减免要小于门槛、档位双递增
+        calculator.validateReductionRule(request.reductionRule());
         boolean scoped = request.scopeType() != null && request.scopeType() != SCOPE_ALL;
         if (scoped && (request.scopeIds() == null || request.scopeIds().isEmpty())) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "指定分类/商品时至少需要选择一个范围");
