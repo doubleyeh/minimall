@@ -831,7 +831,7 @@ class SysAdminServiceBranchIntegrationTest {
         // 本类共用租户的套餐就是全量套餐;再"换"成它是空操作 ——
         // 不挡这一下的话,每次保存租户表单都会对全部角色做一次全量差异同步
         asPlatformAdmin(() -> {
-            tenantService.changePackage(tenantId, new com.minimall.sys.api.dto.TenantPackageChangeRequest(FULL_PACKAGE_ID));
+            tenantService.changePackage(tenantId, new com.minimall.sys.api.dto.TenantPackageChangeRequest(FULL_PACKAGE_ID, null));
             return null;
         });
         assertThat(asPlatformAdmin(() -> tenantService.page(null, null, 1, 100)).list())

@@ -27,6 +27,7 @@ public class SysScheduledTasks {
     private static final String DICT_EXPIRE_NOTICE_DAYS = "tenant_expire_notice_days";
 
     private final TenantService tenantService;
+    private final PackageChangeService packageChangeService;
     private final DictService dictService;
     private final ScheduledTaskLock taskLock;
     private final TaskRunLogService taskRunLogService;
@@ -34,12 +35,14 @@ public class SysScheduledTasks {
     private final com.minimall.sys.service.support.OperLogArchiver operLogArchiver;
     private final com.minimall.infra.audit.AuditProperties auditProperties;
 
-    public SysScheduledTasks(TenantService tenantService, DictService dictService, ScheduledTaskLock taskLock,
+    public SysScheduledTasks(TenantService tenantService, PackageChangeService packageChangeService,
+                             DictService dictService, ScheduledTaskLock taskLock,
                              TaskRunLogService taskRunLogService,
                              com.minimall.infra.schedule.TaskLogProperties taskLogProperties,
                              com.minimall.sys.service.support.OperLogArchiver operLogArchiver,
                              com.minimall.infra.audit.AuditProperties auditProperties) {
         this.tenantService = tenantService;
+        this.packageChangeService = packageChangeService;
         this.dictService = dictService;
         this.taskLock = taskLock;
         this.taskRunLogService = taskRunLogService;
@@ -122,6 +125,17 @@ public class SysScheduledTasks {
                 log.info("任务历史清理:删除 {} 条(保留 {} 天)", deleted, taskLogProperties.retainDays());
             }
         });
+    }
+
+    /**
+     * 套餐变更到点生效(每天 0:05)。
+     *
+     * <p>生效粒度到"日",所以每天跑一次就够 —— 选当天生效的在变更那一刻就立即应用了,不走这里。
+     * 当前套餐 = 已生效记录里 id 最大的那条;已经是目标套餐的租户会被跳过,所以重复跑安全。
+     */
+    @Scheduled(cron = "${minimall.schedule.cron.apply-package-changes:0 5 0 * * ?}")
+    public void applyPackageChanges() {
+        taskLock.runIfNotLocked("套餐变更生效", () -> packageChangeService.applyDue());
     }
 
     /** 提醒阈值取字典;取不到或不是整数就用默认值 —— 配置问题不该让任务整体卡住。 */

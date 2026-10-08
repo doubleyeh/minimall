@@ -11,17 +11,13 @@ import com.minimall.sys.domain.QTenant;
 import com.minimall.sys.domain.SysDept;
 import com.minimall.sys.domain.SysPackage;
 import com.minimall.sys.domain.SysRole;
-import com.minimall.sys.domain.SysTenantPackageChange;
 import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.Tenant;
 import com.minimall.sys.domain.repository.SysDeptRepository;
-import com.minimall.sys.domain.repository.SysMenuRepository;
 import com.minimall.sys.domain.repository.SysPackageRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
-import com.minimall.sys.domain.repository.SysTenantPackageChangeRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.sys.domain.repository.TenantRepository;
-import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.infra.security.RefreshTokenService;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.infra.tenant.TenantFilterService;
@@ -29,6 +25,7 @@ import com.minimall.infra.tenant.TenantLookup;
 import com.minimall.infra.tenant.TenantProperties;
 import com.minimall.sys.service.support.TenantDataPurger;
 import com.minimall.infra.tenant.TenantSnapshot;
+import com.minimall.sys.service.PackageChangeService;
 import com.minimall.sys.service.TenantService;
 import com.minimall.sys.service.support.PasswordGenerator;
 import com.querydsl.core.BooleanBuilder;
@@ -46,8 +43,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -72,16 +67,15 @@ public class TenantServiceImpl implements TenantService {
     private static final Logger log = LoggerFactory.getLogger(TenantServiceImpl.class);
     // 初始密码的生成统一走 PasswordGenerator(建租户、新增用户、重置密码三处必须一致,7.1.2)
 
+    /** 套餐变更的登记与应用(4.8):立即生效、预约登记、到点应用都在这里。 */
+    private final PackageChangeService packageChangeService;
     private final TenantRepository tenantRepository;
     private final SysPackageRepository packageRepository;
     private final SysRoleRepository roleRepository;
     private final SysUserRepository userRepository;
     private final SysDeptRepository deptRepository;
-    private final SysMenuRepository menuRepository;
-    private final SysTenantPackageChangeRepository changeRepository;
     private final PasswordEncoder passwordEncoder;
     private final TenantLookup tenantLookup;
-    private final PermissionCacheService permissionCacheService;
     private final RefreshTokenService refreshTokenService;
     private final TenantFilterService tenantFilterService;
     private final TenantProperties tenantProperties;
@@ -95,11 +89,9 @@ public class TenantServiceImpl implements TenantService {
                              SysRoleRepository roleRepository,
                              SysUserRepository userRepository,
                              SysDeptRepository deptRepository,
-                             SysMenuRepository menuRepository,
-                             SysTenantPackageChangeRepository changeRepository,
+                             PackageChangeService packageChangeService,
                              PasswordEncoder passwordEncoder,
                              TenantLookup tenantLookup,
-                             PermissionCacheService permissionCacheService,
                              RefreshTokenService refreshTokenService,
                              TenantFilterService tenantFilterService,
                              TenantProperties tenantProperties,
@@ -109,11 +101,9 @@ public class TenantServiceImpl implements TenantService {
         this.roleRepository = roleRepository;
         this.userRepository = userRepository;
         this.deptRepository = deptRepository;
-        this.menuRepository = menuRepository;
-        this.changeRepository = changeRepository;
+        this.packageChangeService = packageChangeService;
         this.passwordEncoder = passwordEncoder;
         this.tenantLookup = tenantLookup;
-        this.permissionCacheService = permissionCacheService;
         this.refreshTokenService = refreshTokenService;
         this.tenantFilterService = tenantFilterService;
         this.tenantProperties = tenantProperties;
@@ -226,49 +216,12 @@ public class TenantServiceImpl implements TenantService {
     }
 
     /**
-     * 4.8 套餐变更:新增只同步默认管理员角色,收回对**该租户全部角色**立即生效。
+     * 4.8 套餐变更:生效日 {@code <= 当天} 立即生效(同步角色菜单 + 换套餐 + 失效缓存),
+     * 选未来日期则只登记一条变更记录,等定时任务到点应用。两条路径都在 {@link PackageChangeService} 里。
      */
     @Override
     public void changePackage(Long tenantId, TenantPackageChangeRequest request) {
-        Tenant tenant = tenantRepository.findById(tenantId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        Long oldPackageId = tenant.getPackageId();
-        if (Objects.equals(oldPackageId, request.packageId())) {
-            return;
-        }
-        SysPackage newPackage = packageRepository.findById(request.packageId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "目标套餐不存在"));
-
-        Set<Long> oldMenus = menuIdsOfPackage(oldPackageId);
-        Set<Long> newMenus = new HashSet<>(newPackage.getMenuIds());
-        Set<Long> added = new LinkedHashSet<>(newMenus);
-        added.removeAll(oldMenus);
-        Set<Long> revoked = new LinkedHashSet<>(oldMenus);
-        revoked.removeAll(newMenus);
-
-        List<SysRole> roles = roleRepository.findByTenantId(tenantId);
-
-        // 新增:只给默认管理员角色。自定义角色不动 —— 新增权限是"锦上添花",
-        // 不主动帮自定义角色加不会有安全风险(4.8)
-        if (!added.isEmpty()) {
-            roles.stream().filter(SysRole::isDefaultRole).findFirst().ifPresent(defaultRole -> {
-                defaultRole.getMenuIds().addAll(added);
-                roleRepository.save(defaultRole);
-            });
-        }
-        // 收回:全租户所有角色(含自定义角色)。只收默认角色等于降级没生效 ——
-        // 任何一个绕过默认角色的自定义角色都还能访问(4.8 的核心判断)
-        if (!revoked.isEmpty()) {
-            roleRepository.revokeMenusFromTenant(revoked, tenantId);
-        }
-
-        recordChange(tenantId, SysTenantPackageChange.TRIGGER_TENANT_SWITCH, oldPackageId, newPackage.getId(), added, revoked);
-        tenant.setPackageId(newPackage.getId());
-
-        // 5.5:权限已变,INCR 该租户的权限版本号,新权限在下一个请求生效
-        permissionCacheService.invalidateTenant(tenantId);
-        log.info("租户套餐已变更 tenantId={} {} -> {} 新增={} 收回={}",
-                tenantId, oldPackageId, newPackage.getId(), added.size(), revoked.size());
+        packageChangeService.changePackage(tenantId, request.packageId(), request.effectiveDate());
     }
 
     @Override
@@ -404,37 +357,4 @@ public class TenantServiceImpl implements TenantService {
         return new TenantSnapshot(tenant.getId(), tenant.getTenantCode(), tenant.getStatus(),
                 tenant.getExpireTime(), tenant.getPackageId());
     }
-
-    /** 套餐对应的菜单集合;{@code packageId} 为空表示"不限",按全部非平台菜单处理(4.8 步骤 1)。 */
-    private Set<Long> menuIdsOfPackage(Long packageId) {
-        if (packageId == null) {
-            return menuRepository.findAllNonPlatform().stream()
-                    .map(menu -> menu.getId())
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
-        }
-        return packageRepository.findById(packageId)
-                .map(pkg -> new LinkedHashSet<>(pkg.getMenuIds()))
-                .orElseGet(LinkedHashSet::new);
-    }
-
-    /**
-     * 写审计记录(4.8 步骤 5)。菜单 ID 列表按建表脚本的约定存 JSON 数组;
-     * 这里手工拼字符串,不为一个审计字段引入序列化依赖。
-     */
-    private void recordChange(Long tenantId, int triggerType, Long oldPackageId, Long newPackageId,
-                              Collection<Long> added, Collection<Long> revoked) {
-        SysTenantPackageChange change = new SysTenantPackageChange();
-        change.setTenantId(tenantId);
-        change.setTriggerType(triggerType);
-        change.setOldPackageId(oldPackageId);
-        change.setNewPackageId(newPackageId);
-        change.setAddedMenuIds(toJsonArray(added));
-        change.setRevokedMenuIds(toJsonArray(revoked));
-        changeRepository.save(change);
-    }
-
-    private String toJsonArray(Collection<Long> ids) {
-        return ids.stream().map(String::valueOf).collect(Collectors.joining(",", "[", "]"));
-    }
-
 }

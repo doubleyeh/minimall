@@ -215,6 +215,13 @@ common/    统一响应、全局异常、工具类、常量
 
 **触发时机**:超管在管理端修改 `tenant.package_id`(升级或降级)。
 
+**生效日期(只到"日")**:**选当天 = 立即生效**;**选未来日期 = 只登记一条变更记录,到那天由定时任务生效**(`SysScheduledTasks.applyPackageChanges`,默认每天 0:05)。
+
+- **当前套餐 = 已生效记录里 `id` 最大的那条**:`where effective_date <= 当天 order by id desc limit 1`。必须**先按生效日过滤、再按写入顺序取最新**;写成"按 `effective_date` 排序取第一条"会让一条未来记录把今天该生效的挡住。同一生效日、后写的胜出,这就是"发现写错再补一条"的纠错手段;补录一条生效日在过去的记录会立刻成为当前套餐
+- 任何一次**立即变更也写记录**(生效日 = 当天、id 更大),所以它会压住更早的预约 —— "预约被后写的即时变更取代"是预期行为,页面上要提示
+- `tenant.package_id` 是"当前生效套餐"的**冗余列**,由立即变更与到点任务共同维护(反查"谁在用这个套餐"靠它,不加的话要按租户逐个算 argmax)
+- 定时任务没跑之前,`tenant.package_id` 仍是旧套餐 —— 这是"任务触发"而非"读取时算"的必然结果
+
 **新增授权 vs 收回授权,处理方式不对称,这是有意为之**
 
 - **新增(升级,套餐里多了菜单)**:只自动同步到该租户 `is_default = 1` 的默认管理员角色(建表脚本 `sys_role` 新增该字段,作为不受业务改名影响的机器标识)。自定义角色不动,需要租户管理员自己手动分配——理由:新增权限是"锦上添花",不主动帮自定义角色加,顶多是少了点便利,不会有安全风险
@@ -226,8 +233,10 @@ common/    统一响应、全局异常、工具类、常量
 2. 计算差异:`added = M_new - M_old`(新增授权)、`revoked = M_old - M_new`(套餐收回的菜单)
 3. 找到该租户 `is_default = 1` 的角色,把 `added` 里的菜单ID写入 `sys_role_menu`(已存在的跳过,幂等)
 4. 收回:`DELETE FROM sys_role_menu WHERE menu_id IN (revoked) AND role_id IN (SELECT id FROM sys_role WHERE tenant_id = 当前租户)`——这一条 SQL 覆盖该租户下所有角色,不管是默认角色还是自定义角色,不做例外
-5. 写入 `sys_tenant_package_change` 审计记录:`old_package_id`、`new_package_id`、`added_menu_ids`、`revoked_menu_ids`——纯粹是审计留痕,不再需要"模式"字段,因为收回动作本身就是唯一确定的行为,没有分支
+5. 写入 `sys_tenant_package_change` 审计记录:`old_package_id`、`new_package_id`、`effective_date`(生效日)、`package_menu_ids`(生效时套餐的菜单快照,事后回溯"当时能用什么")、`added_menu_ids`、`revoked_menu_ids`
 6. 更新 `tenant.package_id`
+
+**选未来日期时只做第 5 步**:写一条 `effective_date` 为未来日期的记录,不动角色、不动 `tenant.package_id`、不失效缓存。到点由任务按第 1~4、6 步"重算差异并应用"(幂等:`tenant.package_id` 已经是目标套餐就跳过),并写一条 `trigger_type = 3` 的记录。注意记录里的 `added/revoked` 在**登记时**是预演差异,真正应用时按那一刻的实际套餐差重算
 
 **需要覆盖的测试用例**(补充到 8.1):
 - 用套餐 P1(菜单集合 M1)创建租户后,变更为套餐 P2(菜单集合 M2 ⊂ M1),断言:默认管理员角色和该租户下所有自定义角色的 `sys_role_menu` 里,都不再包含 `M1 - M2` 这部分菜单
@@ -243,7 +252,7 @@ common/    统一响应、全局异常、工具类、常量
 1. 修改 `sys_package_menu` 前,先把该套餐**旧的菜单 ID 列表读出来作为 `M_old`**(`tenant.package_id` 这次没变,`M_old` 只能靠这个快照);修改后的列表即 `M_new`
 2. 查 `SELECT id FROM tenant WHERE package_id = :该套餐`,得到受影响的租户列表
 3. 对列表里**每个租户各起一个事务**(不是一个覆盖全部租户的大事务),执行 4.8 的差异流程:新增菜单只写默认管理员角色(`is_default = 1`),收回菜单对该租户全部角色执行 delete,规则与 4.8 完全一致,不重新定义
-4. 每个租户写一条 `sys_tenant_package_change`(`trigger_type = 2`,`old_package_id = new_package_id = 该套餐`)
+4. 每个租户写一条 `sys_tenant_package_change`(`trigger_type = 2`,`old_package_id = new_package_id = 该套餐`,`effective_date = 当天`,因为平台改套餐菜单是立即生效)
 5. **单个租户失败不影响其他租户**:失败只记日志 + 告警(该租户停留在未同步状态),不中断循环、不回滚已成功的租户。这与 6.2 定时任务的处理哲学一致——多租户批量操作必须按租户切事务
 6. 全部处理完(含失败项)统一失效相关租户的权限缓存,见 5.5
 

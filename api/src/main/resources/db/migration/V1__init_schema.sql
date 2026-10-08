@@ -33,12 +33,13 @@ CREATE TABLE tenant (
     tenant_code     VARCHAR(32)  NOT NULL UNIQUE COMMENT '租户编码,登录时用来定位租户',
     tenant_name     VARCHAR(64)  NOT NULL,
     status          INT      NOT NULL DEFAULT 1 COMMENT '0-禁用 1-正常,禁用后在线会话按架构文档4.11失效',
-    package_id      BIGINT       NULL COMMENT '套餐ID。为空表示"不限"(全部非平台菜单),仅兼容历史数据;建租户接口要求必填,见架构文档4.8',
+    package_id      BIGINT       NULL COMMENT '套餐ID。为空表示"不限"(全部非平台菜单),仅兼容历史数据;建租户接口要求必填,见架构文档4.8。当前生效套餐,由套餐变更记录驱动(见该表注释)',
     expire_time     DATETIME     NULL COMMENT '为空表示不过期',
     create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     create_by       BIGINT       NULL,
-    update_by       BIGINT       NULL
+    update_by       BIGINT       NULL,
+    KEY idx_package (package_id)
 ) COMMENT '租户表。注意:这里没有 is_super——"跳过租户过滤"是用户级标志,在 sys_user.is_super,见架构文档4.1/4.10';
 
 -- ============================================================
@@ -66,24 +67,32 @@ CREATE TABLE sys_package_menu (
 
 -- ============================================================
 -- 套餐变更记录:见架构文档 4.8、4.8.1 节。
--- 每次套餐变更落一条记录(创建租户时的初始绑定除外),
--- 用于审计、支持"未同步租户"的排查与重跑、支持变更历史追溯。
+-- 每次套餐变更落一条记录(创建租户时的初始绑定除外),用于审计、变更历史追溯与"未同步租户"的排查重跑。
+--
+-- 生效日期:粒度到"日"。effective_date <= 当天 即视为已生效,选当天就是立即生效。
+-- **当前套餐 = 已生效记录里 id 最大的那条**(先按生效日过滤,再按写入顺序取最新):
+--   ① 不能按 effective_date 排序取第一条 —— 一条未来记录会把今天该生效的挡住;
+--   ② 同一生效日、后写的胜出,这就是"发现写错再补一条"的纠错手段;
+--   ③ 任何一次立即变更也写记录,所以它会压住更早的预约(预定被后写的即时变更取代,是预期行为)。
+-- tenant.package_id 是"当前生效套餐"的冗余列,由立即变更与到点任务共同维护。
 -- ============================================================
 CREATE TABLE sys_tenant_package_change (
     id              BIGINT PRIMARY KEY COMMENT '雪花ID,应用层生成',
     tenant_id       BIGINT       NOT NULL,
-    trigger_type    INT      NOT NULL DEFAULT 1 COMMENT '触发源:1-租户换套餐(4.8) 2-平台修改套餐菜单(4.8.1)',
+    trigger_type    INT      NOT NULL DEFAULT 1 COMMENT '触发源:1-租户换套餐(4.8) 2-平台修改套餐菜单(4.8.1) 3-预约到点自动生效',
     old_package_id  BIGINT       NULL COMMENT 'NULL 表示"变更前不限";首次绑定时也为 NULL,靠 trigger_type 区分',
-    new_package_id  BIGINT       NOT NULL COMMENT 'trigger_type=2 时与 old_package_id 相同',
+    new_package_id  BIGINT       NOT NULL COMMENT '本条记录生效后的套餐;trigger_type=2 时与 old_package_id 相同',
+    effective_date  DATE         NOT NULL COMMENT '生效日(只到日)。<=当天即已生效,选当天就是立即生效',
+    package_menu_ids TEXT        NULL COMMENT '生效时该套餐的菜单ID快照(JSON数组),用于事后回溯"当时这个租户能用什么"',
     added_menu_ids  TEXT         NULL COMMENT '本次新增授权的菜单ID列表(仅默认管理员角色),JSON数组',
     revoked_menu_ids TEXT        NULL COMMENT '本次收回的菜单ID列表(该租户全部角色一并生效),JSON数组',
     create_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     update_by       BIGINT       NULL,
     create_by       BIGINT       NULL,
-    KEY idx_tenant (tenant_id),
-    KEY idx_tenant_time (tenant_id, create_time)
-) COMMENT '套餐变更记录表,平台级审计数据,不分租户';
+    KEY idx_tenant_effective (tenant_id, effective_date, id),
+    KEY idx_effective (effective_date)
+) COMMENT '套餐变更记录表,平台级审计数据,不分租户;当前套餐见表头注释的判定规则';
 
 -- ============================================================
 -- 组织架构

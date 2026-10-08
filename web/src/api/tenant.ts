@@ -1,5 +1,10 @@
 import type { Id, PageResult } from '@/types/api'
-import type { TenantCreateRequest, TenantCreateResponse, TenantView } from '@/types/system'
+import type {
+  PackageChangeView,
+  TenantCreateRequest,
+  TenantCreateResponse,
+  TenantView,
+} from '@/types/system'
 import { request } from '@/utils/request'
 
 /** 租户管理(后端 SysTenantController,/system/tenants)。只有平台超管可用。 */
@@ -20,8 +25,18 @@ export function createTenant(data: TenantCreateRequest): Promise<TenantCreateRes
   return request.post<TenantCreateResponse>('/system/tenants', data)
 }
 
-export function changeTenantPackage(tenantId: Id, packageId: Id): Promise<void> {
-  return request.put<void>(`/system/tenants/${tenantId}/package`, { packageId })
+/**
+ * 变更租户套餐。
+ *
+ * `effectiveDate` 只到日(`yyyy-MM-dd`):不传或传今天 = 立即生效;传未来日期则只登记,到那天由定时任务生效。
+ */
+export function changeTenantPackage(tenantId: Id, packageId: Id, effectiveDate?: string): Promise<void> {
+  return request.put<void>(`/system/tenants/${tenantId}/package`, { packageId, effectiveDate })
+}
+
+/** 套餐变更历史(含预约未生效的登记记录),按登记时间倒序。 */
+export function tenantPackageChanges(tenantId: Id, limit = 20): Promise<PackageChangeView[]> {
+  return request.get<PackageChangeView[]>(`/system/tenants/${tenantId}/package-changes`, { params: { limit } })
 }
 
 /**

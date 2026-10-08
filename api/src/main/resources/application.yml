@@ -130,6 +130,8 @@ minimall:
       recompute-growth-levels: "0 20 4 * * ?"
       oper-log-archive: "0 40 4 * * ?"
       prune-task-run-logs: "0 0 5 * * ?"
+      # 生效粒度到"日",每天跑一次就够;选当天生效的在变更那一刻就立即应用了
+      apply-package-changes: "0 5 0 * * ?"
   # 幂等键(架构文档 7.7):写请求带 Idempotency-Key 头时,同样的键在 TTL 内只写一次
   idempotency:
     ttl-seconds: 600

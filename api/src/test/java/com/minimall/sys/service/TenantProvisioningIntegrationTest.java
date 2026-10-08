@@ -1,5 +1,6 @@
 package com.minimall.sys.service;
 
+import com.minimall.sys.api.dto.PackageChangeView;
 import com.minimall.sys.api.dto.PackageMenuSaveRequest;
 import com.minimall.sys.api.dto.PackageSaveRequest;
 import com.minimall.sys.api.dto.RoleCreateRequest;
@@ -13,7 +14,9 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.SysTenantPackageChangeRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
+import com.minimall.sys.domain.repository.TenantRepository;
 import com.minimall.infra.audit.AuditContext;
+import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.infra.tenant.TenantContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -22,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -82,6 +86,12 @@ class TenantProvisioningIntegrationTest {
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     @Autowired
     private SysTenantPackageChangeRepository packageChangeRepository;
+    @Autowired
+    private TenantRepository tenantRepository;
+    @Autowired
+    private PackageChangeService packageChangeService;
+    @Autowired
+    private PermissionCacheService permissionCacheService;
 
     @Test
     @DisplayName("用例12:建租户六步——默认角色恰好拥有套餐菜单,管理员用户绑定根部门且强制改密")
@@ -145,7 +155,7 @@ class TenantProvisioningIntegrationTest {
         assertThat(roleRepository.findMenuIdsOfRole(customRoleId)).contains(13L);
 
         asSuperUser(() -> {
-            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(afterPackageId));
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(afterPackageId, null));
             return null;
         });
 
@@ -223,7 +233,7 @@ class TenantProvisioningIntegrationTest {
         Set<Long> customBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(customRoleId));
 
         asSuperUser(() -> {
-            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(narrowPackageId));
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(narrowPackageId, null));
             return null;
         });
 
@@ -260,7 +270,7 @@ class TenantProvisioningIntegrationTest {
         Set<Long> customBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(customRoleId));
 
         asSuperUser(() -> {
-            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(widePackageId));
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(widePackageId, null));
             return null;
         });
 
@@ -281,11 +291,188 @@ class TenantProvisioningIntegrationTest {
                 .containsExactlyInAnyOrderElementsOf(customBefore);
     }
 
+    @Test
+    @DisplayName("生效日:选当天立即生效(换套餐 + 同步默认角色 + 递增权限版本号)")
+    void changePackageWithTodayEffectiveDateAppliesImmediately() {
+        Long narrowPackageId = createPackage("即刻窄-" + suffix(), MINIMAL_MENUS);
+        Long widePackageId = createPackage("即刻宽-" + suffix(), USER_SUBTREE);
+        TenantCreateResponse created = createTenant(narrowPackageId);
+        long versionBefore = permissionCacheService.currentVersion(created.tenantId());
+
+        asSuperUser(() -> {
+            tenantService.changePackage(created.tenantId(),
+                    new TenantPackageChangeRequest(widePackageId, LocalDate.now()));
+            return null;
+        });
+
+        assertThat(packageIdOf(created.tenantId())).isEqualTo(widePackageId);
+        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
+                .containsExactlyInAnyOrderElementsOf(USER_SUBTREE);
+        assertThat(permissionCacheService.currentVersion(created.tenantId()))
+                .as("权限变了就必须让缓存失效,否则最长 2 小时还是旧权限").isGreaterThan(versionBefore);
+        SysTenantPackageChange record = changeRecordOf(created.tenantId());
+        assertThat(record.getEffectiveDate()).isEqualTo(LocalDate.now());
+        assertThat(record.getTriggerType()).isEqualTo(SysTenantPackageChange.TRIGGER_TENANT_SWITCH);
+    }
+
+    @Test
+    @DisplayName("生效日:选未来日期只登记,package_id / 角色菜单 / 权限缓存版本号都不动")
+    void futureEffectiveDateOnlyRegisters() {
+        Long narrowPackageId = createPackage("预约窄-" + suffix(), MINIMAL_MENUS);
+        Long widePackageId = createPackage("预约宽-" + suffix(), USER_SUBTREE);
+        TenantCreateResponse created = createTenant(narrowPackageId);
+        Set<Long> menusBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId()));
+        long versionBefore = permissionCacheService.currentVersion(created.tenantId());
+        LocalDate future = LocalDate.now().plusDays(5);
+
+        asSuperUser(() -> {
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(widePackageId, future));
+            return null;
+        });
+
+        assertThat(packageIdOf(created.tenantId())).as("预约不该立即生效").isEqualTo(narrowPackageId);
+        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
+                .containsExactlyInAnyOrderElementsOf(menusBefore);
+        assertThat(permissionCacheService.currentVersion(created.tenantId()))
+                .as("没生效就不该动缓存版本号(动了等于白让全租户回源)").isEqualTo(versionBefore);
+
+        SysTenantPackageChange record = changeRecordOf(created.tenantId());
+        assertThat(record.getEffectiveDate()).isEqualTo(future);
+        assertThat(record.getNewPackageId()).isEqualTo(widePackageId);
+
+        // 任务也不该提前应用:预约的核心语义就是"到点才生效"
+        // (这条同时钉住"先按生效日过滤、再取 id 最大"里的过滤那一半)
+        packageChangeService.applyDue();
+        assertThat(packageIdOf(created.tenantId())).as("没到生效日,任务不能提前切").isEqualTo(narrowPackageId);
+    }
+
+    @Test
+    @DisplayName("到点任务:把已到生效日的预约应用上,并且重复跑幂等")
+    void scheduledTaskAppliesDueChangeIdempotently() {
+        Long narrowPackageId = createPackage("到点窄-" + suffix(), MINIMAL_MENUS);
+        Long widePackageId = createPackage("到点宽-" + suffix(), USER_SUBTREE);
+        TenantCreateResponse created = createTenant(narrowPackageId);
+        LocalDate future = LocalDate.now().plusDays(3);
+        asSuperUser(() -> {
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(widePackageId, future));
+            return null;
+        });
+        assertThat(packageIdOf(created.tenantId())).isEqualTo(narrowPackageId);
+
+        // 模拟"时间到了":生效日改成昨天(业务不允许改这一列,只能直接改库)
+        moveEffectiveDate(created.tenantId(), future, LocalDate.now().minusDays(1));
+
+        assertThat(packageChangeService.applyDue()).as("该租户应当被应用").isGreaterThanOrEqualTo(1);
+        assertThat(packageIdOf(created.tenantId())).isEqualTo(widePackageId);
+        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
+                .containsExactlyInAnyOrderElementsOf(USER_SUBTREE);
+        long versionAfterApply = permissionCacheService.currentVersion(created.tenantId());
+
+        packageChangeService.applyDue();
+        assertThat(permissionCacheService.currentVersion(created.tenantId()))
+                .as("已经是目标套餐,重复跑不该再同步、也不该再推版本号").isEqualTo(versionAfterApply);
+    }
+
+    @Test
+    @DisplayName("同一生效日:后写的那条胜出(写错了就再补一条来纠错)")
+    void laterRecordWithSameEffectiveDateWins() {
+        Long packageA = createPackage("同日A-" + suffix(), MINIMAL_MENUS);
+        Long packageB = createPackage("同日B-" + suffix(), USER_SUBTREE);
+        Long packageC = createPackage("同日C-" + suffix(), List.of(1L, 2L, 11L, 12L));
+        TenantCreateResponse created = createTenant(packageA);
+        LocalDate due = LocalDate.now().plusDays(2);
+
+        asSuperUser(() -> {
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(packageB, due));
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(packageC, due));
+            return null;
+        });
+        moveEffectiveDate(created.tenantId(), due, LocalDate.now().minusDays(1));
+        packageChangeService.applyDue();
+
+        assertThat(packageIdOf(created.tenantId()))
+                .as("两条同生效日,id 更大的那条说了算").isEqualTo(packageC);
+    }
+
+    @Test
+    @DisplayName("立即变更压住更早的预约:到点任务不会把租户切回预约的套餐")
+    void immediateChangeSupersedesEarlierReservation() {
+        Long packageA = createPackage("压住A-" + suffix(), MINIMAL_MENUS);
+        Long reserved = createPackage("压住预约-" + suffix(), USER_SUBTREE);
+        Long immediate = createPackage("压住立即-" + suffix(), List.of(1L, 2L, 11L, 12L));
+        TenantCreateResponse created = createTenant(packageA);
+        LocalDate due = LocalDate.now().plusDays(2);
+
+        asSuperUser(() -> {
+            // 先预约,再立即换成另一个套餐:立即那条 id 更大,按规则它才是当前套餐
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(reserved, due));
+            tenantService.changePackage(created.tenantId(),
+                    new TenantPackageChangeRequest(immediate, LocalDate.now()));
+            return null;
+        });
+        assertThat(packageIdOf(created.tenantId())).isEqualTo(immediate);
+
+        // 让预约那条也变成"已生效",看任务会不会把租户翻回预约的套餐
+        moveEffectiveDate(created.tenantId(), due, LocalDate.now().minusDays(1));
+        packageChangeService.applyDue();
+
+        assertThat(packageIdOf(created.tenantId()))
+                .as("预约被后写的立即变更取代,到点也不该翻回去").isEqualTo(immediate);
+    }
+
+    @Test
+    @DisplayName("变更历史:预约那条标未生效,当前生效标记落在已生效里 id 最大的那条")
+    void historyMarksEffectiveAndCurrent() {
+        Long packageA = createPackage("历史A-" + suffix(), MINIMAL_MENUS);
+        Long reserved = createPackage("历史预约-" + suffix(), USER_SUBTREE);
+        Long immediate = createPackage("历史立即-" + suffix(), List.of(1L, 2L, 11L, 12L));
+        TenantCreateResponse created = createTenant(packageA);
+        LocalDate due = LocalDate.now().plusDays(2);
+
+        asSuperUser(() -> {
+            tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(reserved, due));
+            tenantService.changePackage(created.tenantId(),
+                    new TenantPackageChangeRequest(immediate, LocalDate.now()));
+            return null;
+        });
+
+        List<PackageChangeView> history = packageChangeService.history(created.tenantId(), 10);
+
+        assertThat(history).hasSize(2);
+        PackageChangeView latest = history.get(0);
+        assertThat(latest.newPackageId()).isEqualTo(immediate);
+        assertThat(latest.effective()).as("选当天生效 = 已生效").isTrue();
+        assertThat(latest.current()).as("已生效里 id 最大的那条才是当前套餐").isTrue();
+        assertThat(latest.oldPackageName()).isNotBlank();
+
+        PackageChangeView reservation = history.get(1);
+        assertThat(reservation.newPackageId()).isEqualTo(reserved);
+        assertThat(reservation.effective()).as("还没到生效日").isFalse();
+        assertThat(reservation.current()).isFalse();
+        assertThat(reservation.effectiveDate()).isEqualTo(due);
+    }
+
     // ——— 辅助方法 ———
 
     private SysTenantPackageChange changeRecordOf(Long tenantId) {
         return asSuperUser(() ->
                 packageChangeRepository.findFirstByTenantIdOrderByIdDesc(tenantId).orElseThrow());
+    }
+
+    /** 租户当前生效套餐(冗余列)。 */
+    private Long packageIdOf(Long tenantId) {
+        return asSuperUser(() -> tenantRepository.findById(tenantId).orElseThrow().getPackageId());
+    }
+
+    /**
+     * 模拟"生效日到了":把该租户某个生效日的记录整体挪到另一个日期。
+     *
+     * <p>业务代码不允许改这一列(它是记录的语义),所以只能直接改库 —— 与商城侧"模拟时间流逝"的用例同一手法。
+     */
+    private void moveEffectiveDate(Long tenantId, LocalDate from, LocalDate to) {
+        jdbcTemplate.update("update sys_tenant_package_change set effective_date = ? "
+                        + "where tenant_id = ? and effective_date = ?",
+                java.sql.Date.valueOf(to), tenantId, java.sql.Date.valueOf(from));
     }
 
     /** 记录里的菜单 ID 是 JSON 数组文本;断言只关心其中的数字,抽出来即可(不引入额外界列表依赖)。 */

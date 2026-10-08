@@ -172,6 +172,27 @@ export interface TenantCreateResponse {
   mustChangePassword: boolean
 }
 
+/** 一条套餐变更记录(含预约未生效的登记记录)。 */
+export interface PackageChangeView {
+  id: Id
+  /** 登记时间 */
+  createTime: string | null
+  triggerType: number
+  triggerText: string
+  oldPackageId: Id | null
+  oldPackageName: string | null
+  newPackageId: Id
+  newPackageName: string | null
+  /** 生效日,只到日(yyyy-MM-dd) */
+  effectiveDate: string
+  /** 是否已生效(生效日 <= 今天) */
+  effective: boolean
+  /** 是否当前生效的那条(已生效记录里 id 最大) */
+  current: boolean
+  addedMenuIds: Id[]
+  revokedMenuIds: Id[]
+}
+
 // ——— 字典 ———
 
 export interface DictTypeView {

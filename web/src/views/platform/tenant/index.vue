@@ -78,6 +78,13 @@
         升级只给默认管理员角色补菜单;降级会立即收回该租户全部角色里套餐外的菜单。
       </n-alert>
       <n-select v-model:value="targetPackageId" :options="packageOptions" placeholder="选择目标套餐" />
+      <n-form-item label="生效日期" :show-feedback="false" style="margin-top: 12px">
+        <n-date-picker v-model:value="targetEffectiveDate" type="date" clearable style="width: 100%" />
+      </n-form-item>
+      <n-text depth="3" style="font-size: 12px">
+        选今天(或留空)= 立即生效;选未来日期则只登记,到那天由定时任务生效。
+        之后再发生的立即变更会压住这次预约。
+      </n-text>
       <template #footer>
         <n-space justify="end">
           <n-button @click="packageVisible = false">取消</n-button>
@@ -85,6 +92,45 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 套餐变更历史 -->
+    <n-drawer v-model:show="historyVisible" :width="560">
+      <n-drawer-content :title="`套餐变更历史 · ${historyTenantName}`" closable>
+        <n-empty v-if="historyRows.length === 0" description="还没有变更记录" />
+        <n-timeline v-else>
+          <n-timeline-item
+            v-for="item in historyRows"
+            :key="item.id"
+            :type="item.current ? 'success' : item.effective ? 'info' : 'warning'"
+            :title="`${item.oldPackageName ?? '不限'} → ${item.newPackageName ?? '-'}`"
+          >
+            <n-space :size="6" align="center" style="margin-bottom: 4px">
+              <n-tag size="tiny" :type="item.current ? 'success' : 'default'" :bordered="false">
+                {{ item.current ? '当前生效' : item.effective ? '已生效' : '预约中' }}
+              </n-tag>
+              <n-text depth="3" style="font-size: 12px">{{ item.triggerText }}</n-text>
+            </n-space>
+            <n-text depth="3" style="font-size: 12px">
+              登记 {{ item.createTime ?? '-' }};生效日 {{ item.effectiveDate }}
+            </n-text>
+            <n-text
+              v-if="item.addedMenuIds.length"
+              depth="3"
+              style="display: block; font-size: 12px; margin-top: 6px"
+            >
+              新增:{{ menuNames(item.addedMenuIds) }}
+            </n-text>
+            <n-text
+              v-if="item.revokedMenuIds.length"
+              depth="3"
+              style="display: block; font-size: 12px"
+            >
+              收回:{{ menuNames(item.revokedMenuIds) }}
+            </n-text>
+          </n-timeline-item>
+        </n-timeline>
+      </n-drawer-content>
+    </n-drawer>
 
     <!-- 改有效期 -->
     <n-modal v-model:show="expireVisible" preset="card" title="修改有效期" style="width: 480px">
@@ -125,6 +171,7 @@ import { NButton, NDropdown, NTag, useDialog, useMessage } from 'naive-ui'
 import { h, onMounted, reactive, ref } from 'vue'
 
 import { pagePackages } from '@/api/package'
+import { menuTree } from '@/api/menu'
 import {
   cancelCloseTenant,
   changeTenantExpireTime,
@@ -133,13 +180,14 @@ import {
   closeTenant,
   createTenant,
   pageTenants,
+  tenantPackageChanges,
 } from '@/api/tenant'
 import { download } from '@/utils/request'
 import { usePermissionStore } from '@/stores/permission'
 import type { Id } from '@/types/api'
 import type { DataTableColumns, FormInst, FormRules, SelectOption } from 'naive-ui'
-import type { PackageView, TenantCreateRequest, TenantView } from '@/types/system'
-import { toLocalDateTime } from '@/utils/datetime'
+import type { MenuTreeNode, PackageChangeView, PackageView, TenantCreateRequest, TenantView } from '@/types/system'
+import { toLocalDate, toLocalDateTime } from '@/utils/datetime'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -226,6 +274,7 @@ const columns: DataTableColumns<TenantView> = [
         permission.hasPerm('system:tenant:package')
           ? h(NButton, { size: 'tiny', onClick: () => openChangePackage(row) }, { default: () => '换套餐' })
           : null,
+        h(NButton, { size: 'tiny', onClick: () => openHistory(row) }, { default: () => '变更历史' }),
         permission.hasPerm('system:tenant:expire')
           ? h(NButton, { size: 'tiny', onClick: () => openChangeExpireTime(row) }, { default: () => '改有效期' })
           : null,
@@ -336,10 +385,13 @@ async function onSubmit(): Promise<void> {
 const packageVisible = ref(false)
 const targetPackageId = ref<Id | null>(null)
 const targetTenantId = ref<Id | null>(null)
+/** 生效日期(时间戳,只取到日);默认今天 = 立即生效 */
+const targetEffectiveDate = ref<number | null>(Date.now())
 
 function openChangePackage(row: TenantView): void {
   targetTenantId.value = row.id
   targetPackageId.value = row.packageId
+  targetEffectiveDate.value = Date.now()
   packageVisible.value = true
 }
 
@@ -350,13 +402,55 @@ async function onChangePackage(): Promise<void> {
   }
   submitting.value = true
   try {
-    await changeTenantPackage(targetTenantId.value, targetPackageId.value)
-    message.success('已变更,权限变更在用户下一次请求生效')
+    const effectiveDate = targetEffectiveDate.value == null ? undefined : toLocalDate(targetEffectiveDate.value)
+    await changeTenantPackage(targetTenantId.value, targetPackageId.value, effectiveDate)
+    message.success(
+      !effectiveDate || effectiveDate <= toLocalDate(Date.now())
+        ? '已变更,权限变更在该租户用户下一次请求生效'
+        : `已登记预约,将于 ${effectiveDate} 生效`,
+    )
     packageVisible.value = false
     await load()
   } finally {
     submitting.value = false
   }
+}
+
+// ——— 套餐变更历史 ———
+
+const historyVisible = ref(false)
+const historyTenantName = ref('')
+const historyRows = ref<PackageChangeView[]>([])
+const menuNameById = ref<Map<string, string>>(new Map())
+
+async function openHistory(row: TenantView): Promise<void> {
+  historyTenantName.value = row.tenantName
+  historyRows.value = await tenantPackageChanges(row.id)
+  historyVisible.value = true
+  void ensureMenuNames()
+}
+
+/** 菜单名称表只拉一次:历史里存的是菜单 ID 列表,没有名称根本看不懂。 */
+async function ensureMenuNames(): Promise<void> {
+  if (menuNameById.value.size > 0) {
+    return
+  }
+  const tree = await menuTree()
+  const map = new Map<string, string>()
+  const walk = (nodes: MenuTreeNode[]): void => {
+    for (const node of nodes) {
+      map.set(String(node.id), node.menuName)
+      if (node.children?.length) {
+        walk(node.children)
+      }
+    }
+  }
+  walk(tree)
+  menuNameById.value = map
+}
+
+function menuNames(ids: Id[]): string {
+  return ids.map((id) => menuNameById.value.get(String(id)) ?? `#${id}`).join('、')
 }
 
 // ——— 注销 / 取消注销 / 导出存档 ———

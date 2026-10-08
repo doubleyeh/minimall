@@ -6,7 +6,20 @@
  */
 export function toLocalDateTime(timestamp: number): string {
   const date = new Date(timestamp)
-  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${toLocalDate(timestamp)}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * 后端要的 `LocalDate` 字符串:`yyyy-MM-dd`。
+ *
+ * 同样不能用 `toISOString()`:它按 UTC 输出,东八区的凌晨会被算成前一天 ——
+ * 用在"套餐生效日"上就是"选今天却写成昨天"。
+ */
+export function toLocalDate(timestamp: number): string {
+  const date = new Date(timestamp)
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-    + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
 }

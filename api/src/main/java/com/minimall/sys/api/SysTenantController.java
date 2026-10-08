@@ -1,6 +1,7 @@
 package com.minimall.sys.api;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
+import com.minimall.sys.api.dto.PackageChangeView;
 import com.minimall.sys.api.dto.TenantCreateRequest;
 import com.minimall.sys.api.dto.TenantCreateResponse;
 import com.minimall.sys.api.dto.TenantExpireTimeRequest;
@@ -8,6 +9,7 @@ import com.minimall.sys.api.dto.TenantPackageChangeRequest;
 import com.minimall.sys.api.dto.TenantView;
 import com.minimall.common.ApiResponse;
 import com.minimall.common.PageResult;
+import com.minimall.sys.service.PackageChangeService;
 import com.minimall.sys.service.TenantService;
 import com.minimall.sys.service.support.TenantDataExporter;
 import jakarta.validation.Valid;
@@ -24,6 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import java.time.LocalDate;
+import java.util.List;
 import com.minimall.infra.audit.AuditLog;
 
 /**
@@ -38,10 +41,13 @@ public class SysTenantController {
 
     private final TenantService tenantService;
     private final TenantDataExporter tenantDataExporter;
+    private final PackageChangeService packageChangeService;
 
-    public SysTenantController(TenantService tenantService, TenantDataExporter tenantDataExporter) {
+    public SysTenantController(TenantService tenantService, TenantDataExporter tenantDataExporter,
+                               PackageChangeService packageChangeService) {
         this.tenantService = tenantService;
         this.tenantDataExporter = tenantDataExporter;
+        this.packageChangeService = packageChangeService;
     }
 
     @GetMapping
@@ -65,6 +71,8 @@ public class SysTenantController {
 
     /**
      * 变更套餐:升级只影响默认管理员角色,降级对该租户全部角色立即收回(4.8)。
+     *
+     * <p>{@code effectiveDate} 为空或 {@code <= 当天} = 立即生效;选未来日期则只登记,等任务到点应用。
      */
     @AuditLog(module = "租户管理", permCode = "system:tenant:package")
     @PutMapping("/{tenantId}/package")
@@ -73,6 +81,18 @@ public class SysTenantController {
                                            @Valid @RequestBody TenantPackageChangeRequest request) {
         tenantService.changePackage(tenantId, request);
         return ApiResponse.ok();
+    }
+
+    /**
+     * 套餐变更历史(只读):含预约未生效的登记记录。
+     *
+     * <p>权限复用列表码:能看租户列表的人就能看它的套餐历史,不单独开码。
+     */
+    @GetMapping("/{tenantId}/package-changes")
+    @SaCheckPermission("system:tenant:list")
+    public ApiResponse<List<PackageChangeView>> packageChanges(@PathVariable Long tenantId,
+                                                              @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.ok(packageChangeService.history(tenantId, limit));
     }
 
     /**
