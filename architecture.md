@@ -407,7 +407,7 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 
 - **登录态**(`tenantId`、`isSuperUser`、`userId`)放在 Sa-Token 会话扩展数据里,由 4.2 的 `TenantWebFilter` 每请求读一次。数据极小,不做额外缓存
 - **权限快照**(`menuTree` + `permCodes`)不放进 Sa-Token 会话,单独放 Redis:`perm:v{version}:{tenantId}:{userId}`。`StpInterface.getPermissionList()`/`getRoleList()` 从这里读,miss 时查库回填并设 TTL
-- **超管短路**:`is_super = 1` 直接返回全量 `perm_code`,不查缓存也不查角色(见 4.10)
+- **超管短路**:`is_super = 1` 时跳过角色查询,直接返回全量 `perm_code`(缓存读写在它之前,所以这份全量同样进缓存,见 4.10)
 
 **失效方式:租户级版本号,不做按 key 批量删除。**
 
@@ -430,7 +430,7 @@ TenantWebFilter:租户识别(会话 / X-Tenant-Code)→ 校验租户状态(4.11,
 
 **前端快照**:登录响应里的 `menuTree`/`permCodes` 是那一刻的快照(7.1.1)。权限变更后前端要拿到新菜单,靠两种方式:重新登录,或调用 `GET /auth/permissions` 拉一次最新权限(服务端同一套逻辑;前端在收到 403 时调用一次即可)。**不做主动推送**,现阶段没必要。
 
-**TTL 取值**:权限缓存 TTL 与 Sa-Token 会话超时对齐(见 9.3),避免出现"会话还在但权限缓存已过期"的抖动;版本号 key 不设 TTL。
+**TTL 取值**:权限缓存 TTL 默认 7200 秒(见 9.3),它是"版本号没变时不回源"的兜底,**不决定权限何时生效**——生效时机由上面的版本号决定。所以它和访问令牌 TTL 并不相等(test/prod 1800、dev 86400)。副作用是:**没推版本号的写入会滞留在缓存里直到 TTL 到期**,典型例子是运维直接改库里的 `is_super`(第 10 节第 10 条)。版本号 key 不设 TTL。
 
 ### 5.6 删除与引用完整性 ✅
 
@@ -866,7 +866,7 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 | `spring.jpa.open-in-view` | `true`(显式配置并加注释说明理由) | `true` | `true` | 见 4.2:HTTP 路径依赖它保证单 Session,**不能依赖框架默认值**(默认值启用了带 WARN,且属反模式,将来可能被改掉) |
 | 业务时区 / 时间类型 | `Asia/Shanghai` + `LocalDateTime` | 同左 | 同左 | JDBC 与 JVM 都显式指定,不依赖机器默认(见 7.3) |
 | 租户状态缓存 TTL(4.11) | 60s | 60s | 60s | 兜底收敛时间;禁用租户时主动删缓存 |
-| 权限缓存 TTL(5.5) | 与 Sa-Token 会话超时对齐 | 同左 | 同左 | 版本号 key(`perm:version:*`)不设 TTL |
+| 权限缓存 TTL(5.5) | 7200 秒 | 7200 秒 | 7200 秒 | `minimall.permission.cache-ttl-seconds`。它是"版本号没变时不回源"的兜底,**不决定权限何时生效**(那是版本号的事),所以和访问令牌 TTL(86400/1800/1800)**并不相等**;版本号 key(`perm:version:*`)不设 TTL。代价见第 10 节第 10 条 |
 | Redis 版本 | ≥ 6.0(本地开发也一样) | ≥ 6.0 | ≥ 6.0 | `sa-token-redis-template` 1.46.0 使用 `SET KEEPTTL`,低于 6.0 直接报错(见 9.1) |
 | Redis | 本地单机 | 本地单机(用独立的 DB index 区分,如 Redis 15 号库专供测试,避免和 dev 数据混在一起) | 生产 Redis 实例/集群 |
 | 访问令牌 TTL(`sa-token.timeout`) | 长(如 86400,方便调试不用频繁重新登录) | 1800 | 1800(30 分钟;短 TTL 是刷新机制生效的前提,见 7.1.3) |
@@ -920,6 +920,13 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 2. 生产迁移失败:Flyway 会把该版本记录为 `failed` 并中断后续迁移。处理顺序是先人工排查失败原因(脚本笔误、目标环境数据和预期不符等),用 `flyway repair` 清除失败记录标记,然后要么发布新版本脚本(`Vn+1`)修正问题,要么确认失败脚本没有产生任何副作用后重新执行——**不修改已发布的 `Vn` 脚本本身**,和 9.5 的"已发布脚本不可变"约定保持一致
 3. **最大的风险点**:MySQL 的 DDL 大多不是事务性的,失败可能留下"部分执行"的中间状态,这是"前滚不回滚"策略下没有自动兜底的地方。缓解手段是脚本尽量保持单条语句/小步操作,避免一个脚本里塞多条强相关的 DDL,降低出现"半成功"状态的复杂度和排查难度,不追求自动化解决,依赖前面的 review 和预发布验证降低发生概率
 
+**已经改过已发布脚本的库怎么救**:9.5/9.6 都说已发布脚本不可变,但真改了就得收拾——Flyway 启动时会比对已应用脚本的 checksum,不一致直接 `Migration checksum mismatch` 让应用起不来。两条出路:
+
+1. **库可以丢** → 删库重建(`DROP DATABASE x; CREATE DATABASE x;`),下次启动 Flyway 拿当前脚本全量建。本地 dev/test 走这条。
+2. **库有数据** → 先把那次改动的手工 DDL 补到该库(`ALTER TABLE ...`),再跑 `mvn flyway:repair` 对齐 checksum(12.5.0 的 repair 描述:*Realign the checksums, descriptions and types of the applied migrations with the ones of the available migrations*),最后 `mvn flyway:validate` 确认。**两步缺一不可**:只补 DDL 不 repair → 起不来;只 repair 不补 DDL → 校验和过了但表结构是旧的,运行时报"列不存在"。
+
+代价是**被落下的库会永远停在旧版本、再也起不来**(checksum 对不上是硬失败,不会自我修复)。所以"改已发布脚本"只应在**同时能删掉所有跑过旧版本的库**时做,否则一律追加新版本文件(9.5)。测试库由 `TestDatabaseReset` 每次运行重建,不受影响;历史上被遗弃的库按第 1 条直接删掉即可,不要留着等它哪天被谁连上。
+
 **发布权限**:dev 环境迁移由开发者本地触发;test 环境在 CI 里自动跑;**prod 环境要求先过 review + 预发布验证,再由人工触发发布,不做无人值守的自动迁移**——这是目前团队规模下相对稳妥的做法,不是技术上做不到自动化,而是生产 DDL 失败的处理成本(见上一条)现阶段还不足以支撑完全自动化。
 
 **落地(本版补的两件事)**:
@@ -943,6 +950,49 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 
 ---
 
+### 9.8 生产部署形态:nginx 同源反向代理 ✅
+
+**后端不配 CORS,一行都不配。** 生产是单域名:前端构建产物(`web/dist`)由 nginx 直接托管,`/auth`、`/system`、`/mall`、`/pay` 转发到后端(默认 `127.0.0.1:8080`,见 9.3)。浏览器看到的永远是同一个源,不存在跨域请求,所以不需要 `allowed-origins`/`allow-credentials` 那一套;前端侧对应的是 `VITE_API_BASE_URL` 留空(见前端文档 7)。**只有**改成前后端不同域部署时才需要反过来在后端开 CORS,那个形态本方案不采用。
+
+nginx 上有四处不能照抄普通 SPA 配置:
+
+1. **页面路由与接口共用前缀**。`/mall/goods` 是页面、`/mall/admin/goods` 是接口,靠前缀区分不了,所以判据要和 dev 的 Vite proxy 保持一致:`Accept` 含 `text/html` 的交给 SPA 兜底(返回 `index.html`),其余转发后端。
+2. **`X-Forwarded-For` 必须覆盖写,不能追加**。后端取真实 IP 时读 XFF 的**第一个**值(`TenantWebFilter#resolveClientIp`),而登录 IP 限流正是按这个值计数的(7.1.1)。用 `$proxy_add_x_forwarded_for`(追加)会把客户端自己伪造的值留在最左边并被后端采信,限流直接形同虚设;必须 `proxy_set_header X-Forwarded-For $remote_addr;`。反过来,不传这个头则所有登录都算成 nginx 的 IP,10 次/分钟的阈值会把整个站点的人一起挡掉。
+3. **上传体积**:后端限单文件 5MB / 单请求 6MB(`spring.servlet.multipart`,见 7.5),nginx 默认 `client_max_body_size` 只有 1MB,不改会让图片上传直接 413。
+4. **`/pay/callback/wx/{tenantCode}` 也要转发**。它是微信服务器打进来的(不经浏览器、没有 `Accept: text/html`)。而 `minimall.mall.pay.notify-base-url` 必须是**公网 HTTPS 且指向 nginx**(基础配置里留空,由各环境自己填,见 6.1)。后端不直接暴露公网时,这条不转发等于收不到支付回调——表现是"钱付了、订单一直未支付"。
+
+骨架(`/auth`、`/system` 两个 location 与 `/mall` 同形,省略):
+
+```nginx
+server {
+    listen 443 ssl;
+    root /srv/minimall/web/dist;
+    client_max_body_size 6m;            # 与 spring.servlet.multipart 对齐
+
+    location /mall/ {
+        # 页面路由与接口共用前缀:带 text/html 的当页面
+        if ($http_accept ~* "text/html") { rewrite ^ /index.html last; }
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $remote_addr;   # 覆盖写,不要用 $proxy_add_x_forwarded_for
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /pay/ {                    # 微信回调,服务端到服务端
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / { try_files $uri $uri/ /index.html; }   # vue-router history 模式
+}
+```
+
+**这段配置没有在真实 nginx 上跑过**(和 `.github/workflows/ci.yml` 顶部同样的标注):它记录的是"要跑起来必须满足哪几个约束"。上线前至少验证四件事:业务页面按 F5 不 404、传一张 5MB 的图、登录限流按真实客户端 IP 计数、微信回调用真实域名打通。
+
+---
+
 ## 10. 已知遗留
 
 1. **大表 DDL 的在线变更工具选型和停机窗口 runbook 未设计**(见 9.6):目前假设 MySQL 8 Online DDL 能覆盖大部分场景,真遇到覆盖不了的大表变更时,工具选型(如 `pt-online-schema-change`)和操作手册留待按需处理
@@ -954,5 +1004,5 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 7. **超管操作没有双人复核**:能改套餐、能禁用租户的账号是单点,审计只留痕不拦截(见 4.10)
 8. **权限缓存的规模上限未压测**(见 5.5):"每用户一个缓存 key + 租户级版本号"的策略避免了批量删除,但 key 数量上限没有实测
 9. **健康检查/actuator 的租户维度**:目前健康检查走白名单、不涉及租户数据,未考虑按租户维度的可用性观测(如"某租户的异步任务堆积")
-10. **`is_super` 变更后需要手动清一次权限缓存**(见 4.10、5.5):权限缓存按"租户版本号"失效,而 `is_super` 只由种子数据/运维脚本设置,**不经过任何会递增版本号的业务接口**。运维脚本改完这个标记后,该用户可能还带着改之前的缓存值,直到 TTL 到期或该租户版本号因其他操作变化。当前靠"运维改了标记就顺手清缓存"兜着(用例里用 `TransactionTemplate` + 首次读缓存前完成标记变更来规避),后续可以让运维脚本显式调一次失效
+10. **`is_super` 变更后需要手动清一次权限缓存**(见 4.10、5.5):权限缓存按"租户版本号"失效,而 `is_super` 只由种子数据/运维脚本设置,**不经过任何会递增版本号的业务接口**。运维脚本改完这个标记后,该用户可能还带着改之前的缓存值,直到 TTL 到期(7200 秒)或该租户版本号因其他操作变化。当前靠"运维改了标记就顺手清缓存"兜着(用例里用 `TransactionTemplate` + 首次读缓存前完成标记变更来规避),后续可以让运维脚本显式调一次失效。**改库后要做的两步**:① 删缓存 `DEL perm:v*`(或只删该用户那个 key);② 踢会话(该用户重新登录)。第 ② 步不能省——**会话扩展里还有一份 `isSuperUser` 标志**,改库不会动它,它要等访问令牌刷新时才按库里的最新值重写(最长一个访问令牌 TTL,prod 30 分钟、dev 24 小时)。两个方向里只有**降权(1→0)**有实际风险:他在这段窗口里仍是"全量权限 + 跨租户可见"
 11. **测试里遇到的两个 Spring Boot 4 变化**(见 9.4,踩过):默认 JSON 库是 Jackson 3(包名 `tools.jackson`),测试代码里写 `com.fasterxml.jackson.databind` 会编译不过;`TestRestTemplate` 的包路径也变了。HTTP 用例直接用 JDK 的 `java.net.http.HttpClient`,既不受这些变化影响,也少一层依赖

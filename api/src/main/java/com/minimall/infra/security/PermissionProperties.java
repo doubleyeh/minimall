@@ -3,10 +3,10 @@ package com.minimall.infra.security;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * 权限缓存配置(架构文档 9.3)。
+ * 权限缓存配置(架构文档 9.3、5.5)。
  *
- * <p>TTL 与会话超时对齐,避免出现"会话还在、权限缓存已过期"导致的抖动:
- * 那种情况下每个请求都会回源查库算权限,而且恰好发生在"权限刚被收回"的窗口里。
+ * <p>TTL 只是"版本号没变时不回源"的兜底,不决定权限何时生效(那是版本号的事)。
+ * 默认 7200 秒,与访问令牌 TTL(dev 86400、test/prod 1800)**并不相等**。
  *
  * @param cacheTtlSeconds        权限缓存 TTL,默认 7200 秒
  * @param refreshLimitPerMinute  权限刷新接口的每人每分钟上限(默认 30)。前端只在登录后与收到 403

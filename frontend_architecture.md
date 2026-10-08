@@ -188,6 +188,8 @@ src/
 
 `menuTree`(导航菜单树) / `permCodes`(按钮权限码) 来自登录响应,为当时的快照。需要更新时调 `GET /auth/permissions` 重新拉取。不做轮询、不做推送。
 
+后端对该接口按**用户**限流(每人每分钟 30 次,`minimall.permission.refresh-limit-per-minute`),超了返回 429 且不再回源算权限。前端的 10 秒限频(5.4)是自律,后端那道才是兜底。
+
 菜单树由后端算好(只含当前用户可见的目录与页面,父目录未授权时其下页面不会出现),前端**不再自己判断菜单可见性** —— 树里有的就是能看的。
 
 ### 5.2 动态路由
@@ -264,12 +266,12 @@ src/
 
 | 项 | dev | prod |
 |---|---|---|
-| `VITE_API_BASE_URL` | 走 Vite proxy | 实际后端地址 |
+| `VITE_API_BASE_URL` | 留空(走 Vite proxy) | 留空(同源,nginx 反代) |
 | Vite proxy | 开 | — |
 | sourcemap | 开 | 关 |
 | `VITE_TENANT_CODE` | 测试租户编码 | 按站点定 |
 
-dev 跨域由 Vite proxy 解决,不要求后端开 CORS。生产若确定跨域部署,需后端补 CORS 配置(见第 9 节)。
+dev 跨域由 Vite proxy 解决;生产是 **nginx 同源反代**(nginx 托管 `web/dist` 并把 `/auth`、`/system`、`/mall`、`/pay` 转发后端),所以两边都**不需要后端开 CORS**,`VITE_API_BASE_URL` 也留空。落地细节与 nginx 必须处理的四个坑见后端 `architecture.md` 9.8。
 
 ---
 
@@ -290,7 +292,5 @@ dev 跨域由 Vite proxy 解决,不要求后端开 CORS。生产若确定跨域�
 ## 9. 遗留
 
 1. 多标签页同一瞬间并发刷新仍可能触发重放登出,未做跨页协调。
-2. 生产跨域部署的 CORS 未确认,需与后端确认。
-3. `route_path` 与组件目录的映射为隐式约定:运行时找不到视图会打一条 error 并回退 404 页面,另有后端用例 `MenuViewContractTest` 逐个菜单核对"迁移里声明的页面在前端真的存在"(菜单改为后端驱动后,这条约定跨了两个仓库目录,没有它就只能靠运营点进去才发现)。
-4. i18n、暗色模式、移动端适配未实现。
-5. `GET /auth/permissions` 限频由前端自律,后端未做专门限流。
+2. `route_path` 与组件目录的映射为隐式约定:运行时找不到视图会打一条 error 并回退 404 页面,另有后端用例 `MenuViewContractTest` 逐个菜单核对"迁移里声明的页面在前端真的存在"(菜单改为后端驱动后,这条约定跨了两个仓库目录,没有它就只能靠运营点进去才发现)。
+3. i18n、暗色模式、移动端适配未实现。
