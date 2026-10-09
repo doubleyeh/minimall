@@ -14,16 +14,16 @@
 
 INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code, icon, is_platform, sort_order, status) VALUES
     (19,  5, '操作日志', 2, 'oper-log', NULL,                    'list', 1, 6, 1),
-    (191, 19, '日志查询', 3, NULL,      'system:operlog:list',   NULL,   1, 1, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (191, 19, '日志查询', 3, NULL,      'system:operlog:list',   NULL,   1, 1, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 -- 平台管理员角色补齐新菜单(超管本身不走角色,这里是给"平台租户下的普通运营账号"用)
 INSERT INTO sys_role_menu (role_id, menu_id)

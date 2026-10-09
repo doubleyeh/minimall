@@ -376,16 +376,16 @@ INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code
     (94, 9, '字典删除', 3, NULL,        'system:dict:delete',          NULL,       1, 4, 1),
     (10, 5, '微信支付配置', 2, 'wx-pay', NULL,                         'wallet',   1, 5, 1),
     (101, 10, '配置查询', 3, NULL,      'system:wxpay:list',           NULL,       1, 1, 1),
-    (102, 10, '配置修改', 3, NULL,      'system:wxpay:update',         NULL,       1, 2, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (102, 10, '配置修改', 3, NULL,      'system:wxpay:update',         NULL,       1, 2, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 -- ------------------------------------------------------------
 -- 平台管理员角色 + 授予全部菜单(含平台专用菜单)
@@ -414,9 +414,9 @@ ON DUPLICATE KEY UPDATE menu_id = menu_id;
 -- 密码:admin123(BCrypt cost 10)。上线前必须确认此值,并在首次登录后立即修改。
 -- ------------------------------------------------------------
 INSERT INTO sys_user (id, tenant_id, dept_id, username, password, nickname, status, is_super, must_change_password)
-VALUES (1, 1, 1, 'admin', '$2a$10$olnYwrHwQDwFgYWeK7Q.tOrN0WviMndlIg3rN5LRZLk0jm2DlgIj6', '平台超管', 1, 1, 1)
-ON DUPLICATE KEY UPDATE is_super = VALUES(is_super),
-                        must_change_password = VALUES(must_change_password);
+VALUES (1, 1, 1, 'admin', '$2a$10$olnYwrHwQDwFgYWeK7Q.tOrN0WviMndlIg3rN5LRZLk0jm2DlgIj6', '平台超管', 1, 1, 1) AS new
+ON DUPLICATE KEY UPDATE is_super = new.is_super,
+                        must_change_password = new.must_change_password;
 
 INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1)
 ON DUPLICATE KEY UPDATE role_id = role_id;
@@ -426,15 +426,15 @@ ON DUPLICATE KEY UPDATE role_id = role_id;
 -- ------------------------------------------------------------
 INSERT INTO sys_dict_type (id, dict_type, dict_name) VALUES
     (1, 'sys_common_status', '通用状态'),
-    (2, 'sys_menu_type', '菜单类型')
-ON DUPLICATE KEY UPDATE dict_name = VALUES(dict_name);
+    (2, 'sys_menu_type', '菜单类型') AS new
+ON DUPLICATE KEY UPDATE dict_name = new.dict_name;
 
 INSERT INTO sys_dict_data (id, dict_type, dict_label, dict_value, sort_order) VALUES
     (1, 'sys_common_status', '正常', '1', 1),
     (2, 'sys_common_status', '停用', '0', 2),
     (3, 'sys_menu_type', '目录', '1', 1),
     (4, 'sys_menu_type', '页面', '2', 2),
-    (5, 'sys_menu_type', '按钮', '3', 3)
-ON DUPLICATE KEY UPDATE dict_label = VALUES(dict_label),
-                        dict_value = VALUES(dict_value),
-                        sort_order = VALUES(sort_order);
+    (5, 'sys_menu_type', '按钮', '3', 3) AS new
+ON DUPLICATE KEY UPDATE dict_label = new.dict_label,
+                        dict_value = new.dict_value,
+                        sort_order = new.sort_order;

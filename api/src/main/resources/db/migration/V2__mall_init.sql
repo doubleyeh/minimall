@@ -567,18 +567,18 @@ CREATE TABLE mall_after_sale_image (
 INSERT INTO sys_dict_type (id, dict_type, dict_name) VALUES
     (101, 'order_pay_timeout_minutes', '订单支付超时分钟数'),
     (102, 'order_auto_receive_days', '订单自动确认收货天数'),
-    (103, 'after_sale_timeout', '售后各环节超时小时数')
-ON DUPLICATE KEY UPDATE dict_name = VALUES(dict_name);
+    (103, 'after_sale_timeout', '售后各环节超时小时数') AS new
+ON DUPLICATE KEY UPDATE dict_name = new.dict_name;
 
 INSERT INTO sys_dict_data (id, dict_type, dict_label, dict_value, sort_order) VALUES
     (101, 'order_pay_timeout_minutes', '15分钟', '15', 1),
     (102, 'order_auto_receive_days', '15天', '15', 1),
     (103, 'after_sale_timeout', '商家处理(小时)', '72', 1),
     (104, 'after_sale_timeout', '买家退货(天)', '7', 2),
-    (105, 'after_sale_timeout', '商家收货(天)', '10', 3)
-ON DUPLICATE KEY UPDATE dict_label = VALUES(dict_label),
-                        dict_value = VALUES(dict_value),
-                        sort_order = VALUES(sort_order);
+    (105, 'after_sale_timeout', '商家收货(天)', '10', 3) AS new
+ON DUPLICATE KEY UPDATE dict_label = new.dict_label,
+                        dict_value = new.dict_value,
+                        sort_order = new.sort_order;
 
 -- ============================================================
 -- 商城管理端菜单(权限码沿用 模块:资源:操作,见 mall_architecture.md 第 1 节)
@@ -626,15 +626,15 @@ INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code
     (209, 200, '商品评价', 2, 'review',           NULL,                    'star',     0, 9, 1),
     (2091, 209, '评价列表', 3, NULL, 'mall:review:list',     NULL, 0, 1, 1),
     (2092, 209, '评价回复', 3, NULL, 'mall:review:reply',    NULL, 0, 2, 1),
-    (2093, 209, '评价隐藏', 3, NULL, 'mall:review:status',   NULL, 0, 3, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (2093, 209, '评价隐藏', 3, NULL, 'mall:review:status',   NULL, 0, 3, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 -- 商城菜单是非平台菜单(is_platform = 0),要落进"全量套餐"(与 V1 那句 SELECT 同理),
 -- 否则租户拿不到商城权限码。

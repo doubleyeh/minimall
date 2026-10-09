@@ -32,16 +32,16 @@ CREATE TABLE sys_task_run_log (
 -- 菜单:平台专用(与"操作日志"同一层),不进任何套餐 —— 租户管理员看不到别人的任务执行情况
 INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code, icon, is_platform, sort_order, status) VALUES
     (20,  5, '定时任务', 2, 'task-log', NULL,                   'time', 1, 7, 1),
-    (192, 20, '任务日志', 3, NULL,      'system:tasklog:list',  NULL,   1, 1, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (192, 20, '任务日志', 3, NULL,      'system:tasklog:list',  NULL,   1, 1, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 -- 平台管理员角色补齐(平台菜单不进套餐,只需角色授权,与 V7 同理)
 INSERT INTO sys_role_menu (role_id, menu_id)

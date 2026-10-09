@@ -860,7 +860,7 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 
 | 配置项 | dev | test | prod | 说明 |
 |---|---|---|---|---|
-| 数据库 | 同一台 MySQL 8 实例,库名 `xxx_dev` | 同一台 MySQL 8 实例,**独立库名**(如 `xxx_test`),和 dev/prod 物理隔离,不共用数据 | 同一台或独立 MySQL 8 实例,库名 `xxx`(或按部署方式定) | CI 上库名需按流水线隔离,见 9.4 |
+| 数据库 | 同一台 MySQL 8 实例,库名 `xxx_dev` | 同一台 MySQL 8 实例,**独立库名**(如 `xxx_test`),和 dev/prod 物理隔离,不共用数据 | 同一台或独立 MySQL 8 实例,库名 `xxx`(或按部署方式定) | **最低版本 8.0.19**(9.5 的行别名写法要求),目标 8.4 LTS;CI 上库名需按流水线隔离,见 9.4 |
 | Hibernate `ddl-auto` | `validate`,三环境统一 | `validate` | `validate` |
 | SQL 日志 | 开 | 开 | 关,或只在排查问题时临时开 |
 | `spring.jpa.open-in-view` | `true`(显式配置并加注释说明理由) | `true` | `true` | 见 4.2:HTTP 路径依赖它保证单 Session,**不能依赖框架默认值**(默认值启用了带 WARN,且属反模式,将来可能被改掉) |
@@ -899,6 +899,7 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 - **基线脚本把建表与种子放在一起**:空库一次到位,不需要"先建表、再补种子"两步。理由是种子(`sys_menu` 完整菜单树、平台租户、全量套餐、超管账号)不是可选的业务数据,缺了它超管登录后连菜单都没有。**后续增量变更仍建议 DDL 与 DML 分开**(见 9.6 checklist 第 2 条)
 - 应用启动时 Flyway 自动检测并执行未应用的迁移脚本,三环境(dev/test/prod)都走这个流程,不手动跑 SQL
 - **种子数据必须幂等**:使用固定的**小整数 ID**(1、2、3…)而不是雪花 ID,配合 `INSERT ... ON DUPLICATE KEY UPDATE` 或 `WHERE NOT EXISTS`,保证重复执行不产生重复数据。这是**全方案唯一使用非雪花 ID 的地方**,理由是种子数据要能被后续脚本稳定引用(如后续版本的 `sys_package_menu` 要引用某个菜单 ID),雪花 ID 每次生成都不同、引用不了;业务数据一律雪花 ID,不能混用
+- **`ON DUPLICATE KEY UPDATE` 一律用行别名,不用 `VALUES(col)`**:写法是 `INSERT ... VALUES (...),(...) AS new ON DUPLICATE KEY UPDATE c = new.c`。理由:`VALUES(col)` 自 MySQL 8.0.20 起标记弃用(每次执行都打 `1287` 告警),MySQL 9 会移除。因此本项目的**最低 MySQL 版本是 8.0.19**,目标环境是 8.4 LTS(见 9.3)。**给一句没用到 `VALUES()` 的语句加别名会报错**:那种句子通常写成 `ON DUPLICATE KEY UPDATE tenant_code = tenant_code`,一旦有别名,`tenant_code` 就同时存在于表与别名行里,MySQL 报 `1052 Column 'x' in field list is ambiguous`。所以别名只加给真用了 `VALUES()` 的语句
 - 后续版本新增菜单/字典/表,一律追加新的 `Vn__...sql`,**不要改 `V1`/`V2`**(9.5 开头与 9.6 的"已发布脚本不可变"约定同样适用)
 
 ### 9.6 迁移脚本评审与回滚流程 ✅

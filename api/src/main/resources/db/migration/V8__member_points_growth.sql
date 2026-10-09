@@ -81,12 +81,12 @@ ALTER TABLE mall_points_log
 -- ============================================================
 INSERT INTO sys_dict_type (id, dict_type, dict_name) VALUES
     (104, 'points_expire_months', '积分批次有效期(月)'),
-    (105, 'growth_roll_months', '成长值滚动窗口(月)')
-ON DUPLICATE KEY UPDATE dict_name = VALUES(dict_name);
+    (105, 'growth_roll_months', '成长值滚动窗口(月)') AS new
+ON DUPLICATE KEY UPDATE dict_name = new.dict_name;
 
 INSERT INTO sys_dict_data (id, dict_type, dict_label, dict_value, sort_order) VALUES
     (106, 'points_expire_months', '月数', '12', 1),
-    (107, 'growth_roll_months', '月数', '12', 1)
-ON DUPLICATE KEY UPDATE dict_label = VALUES(dict_label),
-                        dict_value = VALUES(dict_value),
-                        sort_order = VALUES(sort_order);
+    (107, 'growth_roll_months', '月数', '12', 1) AS new
+ON DUPLICATE KEY UPDATE dict_label = new.dict_label,
+                        dict_value = new.dict_value,
+                        sort_order = new.sort_order;

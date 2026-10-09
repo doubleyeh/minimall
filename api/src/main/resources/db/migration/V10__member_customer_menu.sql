@@ -12,16 +12,16 @@ INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code
     (210, 200, '客户管理', 2, 'customer', NULL, 'people', 0, 10, 1),
     (2101, 210, '客户列表', 3, NULL, 'mall:customer:list', NULL, 0, 1, 1),
     (2102, 210, '客户详情', 3, NULL, 'mall:customer:detail', NULL, 0, 2, 1),
-    (2103, 210, '积分调整', 3, NULL, 'mall:customer:adjust', NULL, 0, 3, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (2103, 210, '积分调整', 3, NULL, 'mall:customer:adjust', NULL, 0, 3, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 -- 商城菜单是非平台菜单(is_platform = 0),要落进"全量套餐",否则租户拿不到商城权限码。
 -- 与 V2 里那两句同理:新菜单不在 V2 那次 SELECT 的结果里,必须显式再跑一次。

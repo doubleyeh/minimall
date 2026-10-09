@@ -13,16 +13,16 @@
 -- 商城菜单是非平台菜单(is_platform = 0),要落进"全量套餐",否则租户拿不到权限码(与 V10 同理)
 INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code, icon, is_platform, sort_order, status) VALUES
     (212,  200, '销售统计', 2, 'sales-stat', NULL,             'chart', 0, 11, 1),
-    (2121, 212, '统计查询', 3, NULL,         'mall:stat:list', NULL,    0, 1, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (2121, 212, '统计查询', 3, NULL,         'mall:stat:list', NULL,    0, 1, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 INSERT INTO sys_package_menu (package_id, menu_id)
 SELECT 1, id FROM sys_menu WHERE is_platform = 0

@@ -10,11 +10,11 @@
 -- ============================================================
 
 INSERT INTO sys_dict_type (id, dict_type, dict_name) VALUES
-    (3, 'tenant_expire_notice_days', '租户到期提醒天数')
-ON DUPLICATE KEY UPDATE dict_name = VALUES(dict_name);
+    (3, 'tenant_expire_notice_days', '租户到期提醒天数') AS new
+ON DUPLICATE KEY UPDATE dict_name = new.dict_name;
 
 INSERT INTO sys_dict_data (id, dict_type, dict_label, dict_value, sort_order) VALUES
-    (6, 'tenant_expire_notice_days', '提前天数', '7', 1)
-ON DUPLICATE KEY UPDATE dict_label = VALUES(dict_label),
-                        dict_value = VALUES(dict_value),
-                        sort_order = VALUES(sort_order);
+    (6, 'tenant_expire_notice_days', '提前天数', '7', 1) AS new
+ON DUPLICATE KEY UPDATE dict_label = new.dict_label,
+                        dict_value = new.dict_value,
+                        sort_order = new.sort_order;

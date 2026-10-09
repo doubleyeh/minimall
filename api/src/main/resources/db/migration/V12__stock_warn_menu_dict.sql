@@ -9,28 +9,28 @@
 -- ============================================================
 
 INSERT INTO sys_dict_type (id, dict_type, dict_name) VALUES
-    (106, 'stock_warn_threshold', '库存预警阈值(件)')
-ON DUPLICATE KEY UPDATE dict_name = VALUES(dict_name);
+    (106, 'stock_warn_threshold', '库存预警阈值(件)') AS new
+ON DUPLICATE KEY UPDATE dict_name = new.dict_name;
 
 INSERT INTO sys_dict_data (id, dict_type, dict_label, dict_value, sort_order) VALUES
-    (108, 'stock_warn_threshold', '可售库存不高于该值即预警', '5', 1)
-ON DUPLICATE KEY UPDATE dict_label = VALUES(dict_label),
-                        dict_value = VALUES(dict_value),
-                        sort_order = VALUES(sort_order);
+    (108, 'stock_warn_threshold', '可售库存不高于该值即预警', '5', 1) AS new
+ON DUPLICATE KEY UPDATE dict_label = new.dict_label,
+                        dict_value = new.dict_value,
+                        sort_order = new.sort_order;
 
 -- 商城菜单是非平台菜单(is_platform = 0),要落进"全量套餐",否则租户拿不到权限码(与 V10 同理)
 INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, route_path, perm_code, icon, is_platform, sort_order, status) VALUES
     (211,  200, '库存预警', 2, 'stock-warn', NULL,              'alert', 0, 2, 1),
-    (2111, 211, '预警列表', 3, NULL,         'mall:stock:list', NULL,    0, 1, 1)
-ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name),
-                        parent_id = VALUES(parent_id),
-                        menu_type = VALUES(menu_type),
-                        route_path = VALUES(route_path),
-                        perm_code = VALUES(perm_code),
-                        icon = VALUES(icon),
-                        is_platform = VALUES(is_platform),
-                        sort_order = VALUES(sort_order),
-                        status = VALUES(status);
+    (2111, 211, '预警列表', 3, NULL,         'mall:stock:list', NULL,    0, 1, 1) AS new
+ON DUPLICATE KEY UPDATE menu_name = new.menu_name,
+                        parent_id = new.parent_id,
+                        menu_type = new.menu_type,
+                        route_path = new.route_path,
+                        perm_code = new.perm_code,
+                        icon = new.icon,
+                        is_platform = new.is_platform,
+                        sort_order = new.sort_order,
+                        status = new.status;
 
 INSERT INTO sys_package_menu (package_id, menu_id)
 SELECT 1, id FROM sys_menu WHERE is_platform = 0
