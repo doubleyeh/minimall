@@ -1,5 +1,6 @@
 package com.minimall.sys.service;
 
+import com.minimall.infra.schedule.ManualTaskRegistry;
 import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.infra.tenant.TenantSnapshot;
 import com.minimall.sys.api.dto.DictItemView;
@@ -40,7 +41,8 @@ public class SysScheduledTasks {
                              TaskRunLogService taskRunLogService,
                              com.minimall.infra.schedule.TaskLogProperties taskLogProperties,
                              com.minimall.sys.service.support.OperLogArchiver operLogArchiver,
-                             com.minimall.infra.audit.AuditProperties auditProperties) {
+                             com.minimall.infra.audit.AuditProperties auditProperties,
+                             com.minimall.infra.schedule.ManualTaskRegistry manualTaskRegistry) {
         this.tenantService = tenantService;
         this.packageChangeService = packageChangeService;
         this.dictService = dictService;
@@ -49,6 +51,9 @@ public class SysScheduledTasks {
         this.taskLogProperties = taskLogProperties;
         this.operLogArchiver = operLogArchiver;
         this.auditProperties = auditProperties;
+        // 只注册套餐到点生效。租户到期处理/注销清理/日志归档/历史清理都**不注册** ——
+        // 它们不可逆或一次影响一批租户,不该有一个 HTTP 入口
+        manualTaskRegistry.register("套餐变更生效", this::applyPackageChanges);
     }
 
     /**

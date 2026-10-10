@@ -55,10 +55,11 @@
 </template>
 
 <script setup lang="ts">
-import { NTag } from 'naive-ui'
+import { NButton, NTag, useMessage } from 'naive-ui'
 import { computed, h, onMounted, reactive, ref } from 'vue'
+import { usePermissionStore } from '@/stores/permission'
 
-import { pageTaskRunLogs, taskRunSummaries } from '@/api/taskLog'
+import { manualTasks, pageTaskRunLogs, taskRunSummaries, triggerTask } from '@/api/taskLog'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import type { TaskRunLogView, TaskSummaryView } from '@/types/system'
 
@@ -94,7 +95,7 @@ function statusTag(status: number, text: string) {
   )
 }
 
-const summaryColumns: DataTableColumns<TaskSummaryView> = [
+const summaryColumnsBase: DataTableColumns<TaskSummaryView> = [
   { title: '任务', key: 'taskName', minWidth: 200 },
   { title: '历史记录', key: 'totalRuns', width: 100 },
   {
@@ -115,6 +116,33 @@ const summaryColumns: DataTableColumns<TaskSummaryView> = [
     key: 'lastDurationMs',
     width: 110,
     render: (row) => (row.lastDurationMs == null ? '—' : `${row.lastDurationMs} ms`),
+  },
+]
+
+const message = useMessage()
+const permission = usePermissionStore()
+/** 后端注册的可手动触发任务名;危险任务不在里面,所以按钮天然不会出现 */
+const triggerable = ref<string[]>([])
+const triggering = ref<string | null>(null)
+
+const summaryColumns: DataTableColumns<TaskSummaryView> = [
+  ...summaryColumnsBase,
+  {
+    title: '操作',
+    key: 'action',
+    width: 110,
+    render: (row) =>
+      permission.hasPerm('system:tasklog:trigger') && triggerable.value.includes(row.taskName)
+        ? h(
+            NButton,
+            {
+              size: 'tiny',
+              loading: triggering.value === row.taskName,
+              onClick: () => onTrigger(row.taskName),
+            },
+            { default: () => '立即执行' },
+          )
+        : null,
   },
 ]
 
@@ -140,7 +168,24 @@ const columns: DataTableColumns<TaskRunLogView> = [
 onMounted(() => {
   void loadSummaries()
   void load()
+  void loadTriggerable()
 })
+
+async function loadTriggerable(): Promise<void> {
+  triggerable.value = (await manualTasks()) ?? []
+}
+
+async function onTrigger(taskName: string): Promise<void> {
+  triggering.value = taskName
+  try {
+    await triggerTask(taskName)
+    message.success('已触发;若已有实例在跑这一次会被跳过,以执行历史为准')
+    await loadSummaries()
+    await load(1)
+  } finally {
+    triggering.value = null
+  }
+}
 
 async function loadSummaries(): Promise<void> {
   summaryLoading.value = true

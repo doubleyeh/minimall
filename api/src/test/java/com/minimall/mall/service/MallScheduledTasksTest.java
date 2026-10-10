@@ -44,7 +44,8 @@ class MallScheduledTasksTest {
                 mock(PayService.class),
                 mock(WxPayClient.class),
                 mock(WxPayRefundSubmitter.class),
-                taskLock);
+                taskLock,
+                new com.minimall.infra.schedule.ManualTaskRegistry());
         // 让锁永远抢得到、并真的执行任务体
         when(taskLock.runIfNotLocked(anyString(), any(Runnable.class))).thenAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();

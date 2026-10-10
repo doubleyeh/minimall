@@ -25,3 +25,13 @@ export function pageTaskRunLogs(query: TaskRunLogPageQuery): Promise<PageResult<
 export function taskRunSummaries(): Promise<TaskSummaryView[]> {
   return request.get<TaskSummaryView[]>('/system/task-run-logs/summaries')
 }
+
+/** 可手动触发的任务名(后端只注册幂等且方向确定的任务)。 */
+export function manualTasks(): Promise<string[]> {
+  return request.get<string[]>('/system/task-run-logs/manual')
+}
+
+/** 立即执行一次。与到点执行共用同一把锁,已有实例在跑时会被跳过并记进历史。 */
+export function triggerTask(taskName: string): Promise<void> {
+  return request.post<void>(`/system/task-run-logs/${encodeURIComponent(taskName)}/trigger`)
+}

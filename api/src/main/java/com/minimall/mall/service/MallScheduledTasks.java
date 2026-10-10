@@ -6,6 +6,7 @@ import com.minimall.mall.service.OrderService;
 import com.minimall.mall.infra.pay.WxPayClient;
 import com.minimall.mall.service.support.WxPayRefundSubmitter;
 import com.minimall.sys.service.support.DictIntReader;
+import com.minimall.infra.schedule.ManualTaskRegistry;
 import com.minimall.infra.schedule.ScheduledTaskLock;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.support.TenantTaskRunner;
@@ -83,7 +84,8 @@ public class MallScheduledTasks {
                               PayService payService,
                               WxPayClient wxPayClient,
                               WxPayRefundSubmitter refundSubmitter,
-                              ScheduledTaskLock taskLock) {
+                              ScheduledTaskLock taskLock,
+                              ManualTaskRegistry manualTaskRegistry) {
         this.tenantTaskRunner = tenantTaskRunner;
         this.orderService = orderService;
         this.afterSaleService = afterSaleService;
@@ -94,6 +96,15 @@ public class MallScheduledTasks {
         this.wxPayClient = wxPayClient;
         this.refundSubmitter = refundSubmitter;
         this.taskLock = taskLock;
+        // 只注册可安全手跑的任务;下面这 8 个都幂等且方向确定
+        manualTaskRegistry.register("关闭超时未支付订单", this::closeTimeoutOrders);
+        manualTaskRegistry.register("订单自动确认收货", this::autoReceiveOrders);
+        manualTaskRegistry.register("售后超时处理", this::handleAfterSaleTimeout);
+        manualTaskRegistry.register("优惠券过期清理", this::expireCouponRecords);
+        manualTaskRegistry.register("积分过期清零", this::expirePoints);
+        manualTaskRegistry.register("会员等级重算", this::recomputeGrowthLevels);
+        manualTaskRegistry.register("核对已关闭订单支付状态", this::reconcileClosedPaidOrders);
+        manualTaskRegistry.register("退款提交重试", this::retryRefundSubmit);
     }
 
     /** 订单超时关闭(每分钟)。 */

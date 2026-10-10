@@ -681,6 +681,32 @@ class SysApiCrudHttpIntegrationTest {
         });
     }
 
+
+    @Test
+    @DisplayName("定时任务手动触发:只有幂等任务在白名单,危险任务连接口都拒绝")
+    void manualTaskWhitelistExcludesDangerousOnes() throws Exception {
+        Response manual = get("/system/task-run-logs/manual", token);
+        assertThat(manual.status()).isEqualTo(200);
+        assertThat(manual.body()).as("对账类任务可手动跑").contains("关闭超时未支付订单");
+        assertThat(manual.body())
+                .as("不可逆/影响一批租户的任务根本没注册 —— 前端不显示按钮,接口也不认")
+                .doesNotContain("注销租户数据清理", "审计日志归档", "任务历史清理", "租户到期处理");
+
+        assertThat(post("/system/task-run-logs/" + enc("注销租户数据清理") + "/trigger", null).code())
+                .as("直接调接口也不可能跑起来")
+                .isNotEqualTo("0");
+    }
+
+    @Test
+    @DisplayName("定时任务手动触发:跑起来并落一条执行历史")
+    void manualTriggerRunsAndWritesHistory() throws Exception {
+        String task = enc("关闭超时未支付订单");
+        assertThat(post("/system/task-run-logs/" + task + "/trigger", null).code()).isEqualTo("0");
+
+        Response logs = get("/system/task-run-logs?taskName=" + task + "&pageNo=1&pageSize=5", token);
+        assertThat(logs.body()).as("手动触发与到点执行写同一张历史表").contains("关闭超时未支付订单");
+    }
+
     private String suffix() {
         return Long.toString(System.nanoTime(), 36);
     }
