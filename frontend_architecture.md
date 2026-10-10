@@ -121,19 +121,7 @@ src/
 
 后端刷新令牌为一次性轮换并带重放检测:同一 refreshToken 被使用第二次,该用户全部会话被撤销。页面并发请求同时 401 时若各自发起刷新,用户被强制登出。
 
-实现:
-
-```
-模块级 refreshPromise: Promise<TokenPair> | null
-
-响应拦截器收到 401,且该请求不是刷新请求:
-  1. refreshPromise 为 null → 本请求发起刷新,Promise 存入 refreshPromise
-     否则 → 不发起刷新,await 已有的 refreshPromise
-  2. await 结果:
-     成功 → 用新 token 重写本请求 Authorization,重放原业务请求
-     失败 → 清空本地令牌,跳登录页
-  3. finally 中将 refreshPromise 置回 null
-```
+实现方式:模块级保留正在进行的那个刷新 Promise;并发请求遇到 401 时,若已有 Promise 就 await 它,而不是各自发起刷新。
 
 配套强制规则:
 
@@ -286,11 +274,3 @@ dev 跨域由 Vite proxy 解决;生产是 **nginx 同源反代**(nginx 托管 `w
 5. **中文本地化生效**:含日期选择器与分页器的页面不显示英文。
 6. 改密成功后强制重登。
 7. 登出请求体带 `refreshToken`。
-
----
-
-## 9. 遗留
-
-1. 多标签页同一瞬间并发刷新仍可能触发重放登出,未做跨页协调。
-2. `route_path` 与组件目录的映射为隐式约定:运行时找不到视图会打一条 error 并回退 404 页面,另有后端用例 `MenuViewContractTest` 逐个菜单核对"迁移里声明的页面在前端真的存在"(菜单改为后端驱动后,这条约定跨了两个仓库目录,没有它就只能靠运营点进去才发现)。
-3. i18n、暗色模式、移动端适配未实现。

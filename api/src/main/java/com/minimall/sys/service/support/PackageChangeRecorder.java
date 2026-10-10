@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 /**
  * 套餐变更记录的写入(架构文档 4.8、4.8.1)。
  *
- * <p><b>为什么单独一个类</b>:写记录原本散在 {@code TenantServiceImpl} 与 {@code PackageMenuSyncService}
+ * <p><b>为什么单独一个类</b>:写记录原本散在 {@code TenantServiceImpl} 与 {@code TenantPackageChangeApplier}
  * 两处,靠调用方"记得写"——漏掉的那条路径就是"改了套餐却没有变更记录"。这里把"一条记录需要哪些字段"
  * (套餐菜单快照、新增/收回差异)和"落库"收在一处,两个调用方都从这里走。
  *

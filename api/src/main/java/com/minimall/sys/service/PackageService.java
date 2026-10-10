@@ -51,11 +51,4 @@ public interface PackageService {
      */
     void saveMenus(Long packageId, PackageMenuSaveRequest request);
 
-    /**
-     * 运维出口:对某个套餐的所有绑定租户重跑一次差异同步。
-     *
-     * <p>为什么需要它:4.8.1 的同步是"按租户独立事务"的,允许个别租户失败并停留在未同步状态;
-     * 同步动作本身幂等(收回是 delete,新增是 insert-if-absent),所以重跑一定能收敛,不需要补偿机制。
-     */
-    void resync(Long packageId);
 }

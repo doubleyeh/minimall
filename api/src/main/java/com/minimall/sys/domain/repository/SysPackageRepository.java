@@ -25,4 +25,8 @@ public interface SysPackageRepository extends JpaRepository<SysPackage, Long>,
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = "delete from sys_package_menu where menu_id = :menuId", nativeQuery = true)
     int deletePackageMenusByMenuId(@Param("menuId") Long menuId);
+
+    /** 同 {@code SysRoleRepository#findMenuIdsOfRole}:权限计算不能依赖 Session 是否开着。 */
+    @Query("select m from SysPackage p join p.menuIds m where p.id = :packageId")
+    List<Long> findMenuIdsOfPackage(@Param("packageId") Long packageId);
 }

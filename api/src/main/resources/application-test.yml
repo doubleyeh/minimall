@@ -1,14 +1,14 @@
 spring:
   datasource:
     # 库名由环境变量注入:CI 上每个流水线用自己的库名,避免并行时抢 Flyway 锁、互相污染(架构文档 9.4)
-    url: jdbc:mysql://${TEST_MYSQL_HOST:127.0.0.1}:3306/${TEST_MYSQL_DB:minimall_test}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: ${TEST_MYSQL_USER:root}
-    password: ${TEST_MYSQL_PASSWORD:123456}
+    url: jdbc:mysql://127.0.0.1:3306/minimall_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
-      host: ${TEST_REDIS_HOST:127.0.0.1}
-      port: ${TEST_REDIS_PORT:6379}
+      host: 127.0.0.1
+      port: 6379
       # 独立的 DB index,避免和 dev 数据混在一起
       database: 15
 
@@ -43,8 +43,8 @@ minimall:
       # 自动化里没有真实的小程序 appId/appSecret,必须开 mock 才能走通登录链路
       # (code 被直接映射成模拟 openid,见 WxAuthClient)。
       # 默认给 true 而不是像基础层那样默认 false:这个 profile 的用途就是自动化。
-      # 仍保留环境变量覆盖,CI 上要验真实 code2Session 时可以 WX_MOCK=false 关掉。
-      wx-mock: ${WX_MOCK:true}
+      # 要验真实 code2Session 时把下面这行改成 false。
+      wx-mock: true
     # 自动化里不出网:出网请求由测试的桩 HTTP 客户端接管(见 StubWxPayHttpClient),
     # 这里只需要一个合法的 HTTPS 前缀,让统一下单能拼出 notify_url
     pay:

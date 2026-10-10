@@ -10,6 +10,7 @@ import com.minimall.common.PageResult;
 import com.minimall.sys.domain.QSysPackage;
 import com.minimall.sys.domain.SysMenu;
 import com.minimall.sys.domain.SysPackage;
+import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.sys.domain.SysTenantPackageChange;
 import com.minimall.sys.domain.Tenant;
 import com.minimall.sys.domain.repository.SysMenuRepository;
@@ -36,9 +37,9 @@ import java.util.stream.Collectors;
 /**
  * 套餐管理实现(架构文档 4.7、4.8.1、5.2.1、5.6)。
  *
- * <p>本类只做"编排":真正落到某张租户身上的写操作在 {@link PackageMenuSyncService} 里,
- * 由它以 {@code REQUIRES_NEW} 逐租户提交。这样拆分的目的是保证
- * "单租户失败不影响其他租户"(4.8.1),而不是把 20 个租户塞进一个大事务。
+ * <p>套餐菜单变更后**不回写任何租户的角色**:权限是读取时用套餐做上限算出来的
+ * (角色 ∩ 套餐 ∩ 启用,见 {@code PermissionProviderImpl}),所以改一次套餐不再是
+ * "N 个租户 × 逐租户事务"的扇出,也不存在"个别租户停在未同步状态"。
  */
 @Service
 @Transactional
@@ -49,16 +50,16 @@ public class PackageServiceImpl implements PackageService {
     private final SysPackageRepository packageRepository;
     private final SysMenuRepository menuRepository;
     private final TenantRepository tenantRepository;
-    private final PackageMenuSyncService syncService;
+    private final PermissionCacheService permissionCacheService;
 
     public PackageServiceImpl(SysPackageRepository packageRepository,
                               SysMenuRepository menuRepository,
                               TenantRepository tenantRepository,
-                              PackageMenuSyncService syncService) {
+                              PermissionCacheService permissionCacheService) {
         this.packageRepository = packageRepository;
         this.menuRepository = menuRepository;
         this.tenantRepository = tenantRepository;
-        this.syncService = syncService;
+        this.permissionCacheService = permissionCacheService;
     }
 
     @Override
@@ -144,47 +145,9 @@ public class PackageServiceImpl implements PackageService {
         pkg.getMenuIds().addAll(newMenus);
         packageRepository.save(pkg);
 
-        if (added.isEmpty() && revoked.isEmpty()) {
-            return;
-        }
-        syncTenants(packageId, added, revoked, SysTenantPackageChange.TRIGGER_PACKAGE_MENU_EDIT);
-    }
-
-    @Override
-    public void resync(Long packageId) {
-        SysPackage pkg = load(packageId);
-        Set<Long> packageMenus = new LinkedHashSet<>(pkg.getMenuIds());
-        List<Tenant> tenants = tenantRepository.findByPackageId(packageId);
-        int failed = 0;
-        for (Tenant tenant : tenants) {
-            try {
-                syncService.convergeTenant(tenant.getId(), packageId, packageMenus);
-            } catch (Exception ex) {
-                failed++;
-                log.error("租户权限收敛失败,需再次重跑 tenantId={} packageId={}", tenant.getId(), packageId, ex);
-            }
-        }
-        log.info("套餐权限重新同步完成 packageId={} 租户数={} 失败={}", packageId, tenants.size(), failed);
-    }
-
-    /**
-     * 逐租户同步。**单个租户失败只记录、不中断、不回滚已成功的租户**(4.8.1 步骤 5)。
-     */
-    private void syncTenants(Long packageId, Set<Long> added, Set<Long> revoked, int triggerType) {
-        List<Tenant> tenants = tenantRepository.findByPackageId(packageId);
-        int failed = 0;
-        for (Tenant tenant : tenants) {
-            try {
-                syncService.syncTenant(tenant.getId(), packageId, added, revoked, triggerType);
-            } catch (Exception ex) {
-                failed++;
-                log.error("套餐同步失败租户 tenantId={} packageId={} —— 该租户停留在未同步状态,可用 resync 重跑",
-                        tenant.getId(), packageId, ex);
-            }
-        }
-        if (failed > 0) {
-            log.warn("套餐同步部分失败 packageId={} 总租户={} 失败={}", packageId, tenants.size(), failed);
-        }
+        // 套餐菜单按 packageId 缓存,清掉即可;权限是读取时用套餐做上限算出来的,不需要回写租户角色
+        permissionCacheService.evictPackage(packageId);
+        log.info("套餐菜单已更新 packageId={} 新增={} 收回={}", packageId, added.size(), revoked.size());
     }
 
     /**

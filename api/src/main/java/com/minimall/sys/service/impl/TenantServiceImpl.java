@@ -15,6 +15,7 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.Tenant;
 import com.minimall.sys.domain.repository.SysDeptRepository;
 import com.minimall.sys.domain.repository.SysPackageRepository;
+import com.minimall.sys.domain.repository.SysMenuRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
 import com.minimall.sys.domain.repository.TenantRepository;
@@ -72,6 +73,7 @@ public class TenantServiceImpl implements TenantService {
     private final TenantRepository tenantRepository;
     private final SysPackageRepository packageRepository;
     private final SysRoleRepository roleRepository;
+    private final SysMenuRepository menuRepository;
     private final SysUserRepository userRepository;
     private final SysDeptRepository deptRepository;
     private final PasswordEncoder passwordEncoder;
@@ -87,6 +89,7 @@ public class TenantServiceImpl implements TenantService {
     public TenantServiceImpl(TenantRepository tenantRepository,
                              SysPackageRepository packageRepository,
                              SysRoleRepository roleRepository,
+                             SysMenuRepository menuRepository,
                              SysUserRepository userRepository,
                              SysDeptRepository deptRepository,
                              PackageChangeService packageChangeService,
@@ -99,6 +102,7 @@ public class TenantServiceImpl implements TenantService {
         this.tenantRepository = tenantRepository;
         this.packageRepository = packageRepository;
         this.roleRepository = roleRepository;
+        this.menuRepository = menuRepository;
         this.userRepository = userRepository;
         this.deptRepository = deptRepository;
         this.packageChangeService = packageChangeService;
@@ -139,14 +143,17 @@ public class TenantServiceImpl implements TenantService {
             // 上下文刚切换,过滤器还绑着"上一个"租户(或未定租户的哨兵),必须重新应用
             tenantFilterService.apply(entityManager);
 
-            // 第 2 步:默认管理员角色。is_default = 1 是套餐同步的锚点(4.8 只自动同步这个角色)
+            // 第 2 步:默认管理员角色。它授权**全部非平台菜单**,套餐不再写进这里 ——
+            // 套餐在权限计算时是上限(角色 ∩ 套餐 ∩ 启用),于是换套餐/改套餐菜单都不需要回写角色
             SysRole role = new SysRole();
             role.setRoleKey("admin");
             role.setRoleName("租户管理员");
             role.setDataScope(5);
             role.setIsDefault(1);
             role.setStatus(1);
-            role.getMenuIds().addAll(tenantPackage.getMenuIds());
+            role.getMenuIds().addAll(menuRepository.findAllNonPlatform().stream()
+                    .map(menu -> menu.getId())
+                    .toList());
             roleRepository.save(role);
 
             // 第 3 步:根部门。不能省 —— data_scope = 2/3/4 全依赖部门层级,没有根部门这些档位会退化成"看不到任何数据"

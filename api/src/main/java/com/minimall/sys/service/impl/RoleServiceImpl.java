@@ -17,7 +17,6 @@ import com.minimall.sys.domain.repository.SysMenuRepository;
 import com.minimall.sys.domain.repository.SysPackageRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.TenantRepository;
-import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.RoleService;
 import com.minimall.sys.service.support.MenuTreeBuilder;
@@ -49,20 +48,17 @@ public class RoleServiceImpl implements RoleService {
     private final SysDeptRepository deptRepository;
     private final SysPackageRepository packageRepository;
     private final TenantRepository tenantRepository;
-    private final PermissionCacheService permissionCacheService;
 
     public RoleServiceImpl(SysRoleRepository roleRepository,
                            SysMenuRepository menuRepository,
                            SysDeptRepository deptRepository,
                            SysPackageRepository packageRepository,
-                           TenantRepository tenantRepository,
-                           PermissionCacheService permissionCacheService) {
+                           TenantRepository tenantRepository) {
         this.roleRepository = roleRepository;
         this.menuRepository = menuRepository;
         this.deptRepository = deptRepository;
         this.packageRepository = packageRepository;
         this.tenantRepository = tenantRepository;
-        this.permissionCacheService = permissionCacheService;
     }
 
     @Override
@@ -117,9 +113,7 @@ public class RoleServiceImpl implements RoleService {
             role.setStatus(request.status());
         }
         applyDeptIds(role, request);
-        // dataScope 变了,数据权限的可见范围就变了:虽然它不参与权限缓存(按请求实时计算,5.3),
-        // 但为了不让"同一请求内前后不一致"的疑虑留下,这里不做额外处理,只记日志
-        permissionCacheService.invalidateTenant(requireTenantId());
+        // dataScope 变了只影响数据权限的可见范围,它按请求实时计算(5.3),不进权限缓存
     }
 
     @Override
@@ -138,14 +132,12 @@ public class RoleServiceImpl implements RoleService {
         // 但 sys_user_role 是挂在用户上的,反向关联不受管理,必须显式删
         roleRepository.deleteUserRolesByRoleId(roleId);
         roleRepository.delete(role);
-        permissionCacheService.invalidateTenant(requireTenantId());
     }
 
     @Override
     public void changeStatus(Long roleId, int status) {
         load(roleId).setStatus(status);
-        // 停用角色 = 该角色下所有用户的权限变小,必须失效缓存(5.5 的触发表)
-        permissionCacheService.invalidateTenant(requireTenantId());
+        // 停用角色不参与权限计算(5.5),下一次读取即生效,不需要失效任何缓存
     }
 
     @Override
@@ -183,8 +175,7 @@ public class RoleServiceImpl implements RoleService {
         role.getMenuIds().addAll(requested);
         roleRepository.save(role);
 
-        // 授权变了,该租户下一个请求就是新权限(5.5)
-        permissionCacheService.invalidateTenant(requireTenantId());
+        // 授权变了:角色菜单每次随角色一起读,下一次读取即生效
     }
 
     /**

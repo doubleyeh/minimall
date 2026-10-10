@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 权限缓存配置(架构文档 9.3、5.5)。
  *
- * <p>TTL 只是"版本号没变时不回源"的兜底,不决定权限何时生效(那是版本号的事)。
+ * <p>缓存的是菜单 ID 这类事实,TTL 到期只是让下一次读取多查一次库,权限不会因此变旧(每次读取都重算)。
  * 默认 7200 秒,与访问令牌 TTL(dev 86400、test/prod 1800)**并不相等**。
  *
  * @param cacheTtlSeconds        权限缓存 TTL,默认 7200 秒

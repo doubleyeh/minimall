@@ -24,6 +24,8 @@ replay_pid*.log
 data/
 
 # —— 前端 ——
+# unplugin-vue-components 自动生成的组件类型声明
+web/src/types/components.d.ts
 node_modules/
 dist/
 .cache/

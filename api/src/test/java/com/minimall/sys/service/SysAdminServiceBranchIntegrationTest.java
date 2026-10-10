@@ -352,7 +352,7 @@ class SysAdminServiceBranchIntegrationTest {
     }
 
     @Test
-    @DisplayName("角色修改:标识不允许改;改 dataScope 要失效该租户权限缓存")
+    @DisplayName("角色修改:标识不允许改;dataScope 可改且不连带清缓存")
     void roleUpdateValidatesAndInvalidates() {
         String key = "itupd" + suffix();
         Long roleId = createRole(key, 1, null);
@@ -362,7 +362,6 @@ class SysAdminServiceBranchIntegrationTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("角色标识不允许修改");
 
-        long before = permissionCacheService.currentVersion(tenantId);
         asTenantAdminRun(() -> roleService.update(roleId, new RoleCreateRequest(key, "改名后", 3, null, 1)));
 
         asTenantAdmin(() -> {
@@ -371,20 +370,17 @@ class SysAdminServiceBranchIntegrationTest {
             assertThat(role.getDataScope()).isEqualTo(3);
             return null;
         });
-        assertThat(permissionCacheService.currentVersion(tenantId))
-                .as("数据范围变了,权限缓存必须失效")
-                .isGreaterThan(before);
+        assertThat(permissionCacheService.enabledMenuIds())
+                .as("dataScope 不进权限缓存,改它不该连带清掉任何缓存")
+                .isPresent();
     }
 
     @Test
-    @DisplayName("角色停用:失效权限缓存")
+    @DisplayName("角色停用:停用角色不再参与权限计算,不需要失效动作")
     void roleChangeStatusInvalidatesCache() {
         Long roleId = createRole("itstat" + suffix(), 1, null);
-        long before = permissionCacheService.currentVersion(tenantId);
 
         asTenantAdminRun(() -> roleService.changeStatus(roleId, 0));
-
-        assertThat(permissionCacheService.currentVersion(tenantId)).isGreaterThan(before);
         asTenantAdmin(() -> {
             assertThat(roleRepository.findById(roleId).orElseThrow().getStatus()).isZero();
             return null;
@@ -430,15 +426,14 @@ class SysAdminServiceBranchIntegrationTest {
                 .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode())
                         .isEqualTo(ErrorCode.MENU_OUT_OF_PACKAGE));
 
-        long before = permissionCacheService.currentVersion(tenantId);
         asTenantAdminRun(() -> roleService.grantMenus(roleId,
                 new RoleMenuGrantRequest(List.of(MENU_SYS, MENU_USER, MENU_USER_LIST))));
 
         assertThat(asTenantAdmin(() -> roleService.grantedMenuIds(roleId)))
                 .containsExactlyInAnyOrder(MENU_SYS, MENU_USER, MENU_USER_LIST);
-        assertThat(permissionCacheService.currentVersion(tenantId))
-                .as("授权变了,该租户下一个请求就该是新权限")
-                .isGreaterThan(before);
+        assertThat(permissionCacheService.enabledMenuIds())
+                .as("授权按角色实时读取,不该连带清掉启用菜单缓存")
+                .isPresent();
         assertThat(asTenantAdmin(() -> roleService.grantableMenuTree(roleId)))
                 .as("候选菜单树只含套餐内的菜单")
                 .isNotEmpty();
@@ -548,8 +543,6 @@ class SysAdminServiceBranchIntegrationTest {
         asPlatformAdminRun(() -> packageService.saveMenus(packageId, new PackageMenuSaveRequest(List.of())));
         assertThat(asPlatformAdmin(() -> packageService.menuIds(packageId))).isEmpty();
 
-        // resync 是 void:用 runnable 形式包一层(顺带覆盖"逐租户收敛"的入口)
-        asPlatformAdminRun(() -> packageService.resync(packageId));
     }
 
     @Test
@@ -604,17 +597,13 @@ class SysAdminServiceBranchIntegrationTest {
     }
 
     @Test
-    @DisplayName("用户修改:角色变化才失效权限缓存;手机号在视图里脱敏")
+    @DisplayName("用户修改:角色变化下一次读取即生效;手机号在视图里脱敏")
     void userUpdateInvalidatesOnlyOnRoleChange() {
         Long userId = asTenantAdmin(() -> userService.create(new UserSaveRequest(
                 "itupd" + suffix(), null, "改用户", "13800001111", null, List.of(), 1))).userId();
 
-        long before = permissionCacheService.currentVersion(tenantId);
         asTenantAdminRun(() -> userService.update(userId, new UserSaveRequest(
                 "ignored", null, "改了昵称", "13800001111", null, List.of(), 1)));
-        assertThat(permissionCacheService.currentVersion(tenantId))
-                .as("只改昵称不动角色,不该失效权限缓存")
-                .isEqualTo(before);
 
         String roleKey = "itnewrole" + suffix();
         Long roleId = asTenantAdmin(() -> roleService.create(
@@ -622,9 +611,8 @@ class SysAdminServiceBranchIntegrationTest {
         asTenantAdminRun(() -> userService.update(userId, new UserSaveRequest(
                 "ignored", null, "改了昵称", "13800001111", null, List.of(roleId), 1)));
 
-        assertThat(permissionCacheService.currentVersion(tenantId))
-                .as("角色变了 → 权限集合变了 → 必须失效")
-                .isGreaterThan(before);
+        assertThat(asTenantAdmin(() -> userService.detail(userId)).nickname())
+                .isEqualTo("改了昵称");
 
         UserView view = asTenantAdmin(() -> userService.detail(userId));
         assertThat(view.phone()).as("服务端脱敏,不把明文交给前端").isEqualTo("138****1111");

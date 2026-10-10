@@ -82,9 +82,8 @@ public class SysPackageController {
     }
 
     /**
-     * 保存套餐菜单:保存后**立即**对所有绑定该套餐的租户生效(4.8.1)。
-     * 租户多时这是一个耗时操作,接口同步返回"已受理并处理完成/部分失败"的结果由实现决定,
-     * 但语义上必须是"保存完成 = 已同步完成或已记录失败租户",不能出现"保存成功但没同步"的状态。
+     * 保存套餐菜单:**下一次权限读取即生效**。套餐在权限计算时是上限,不回写租户角色,
+     * 所以这里没有"逐租户同步",也不存在"保存成功但没同步"的中间状态。
      */
     @AuditLog(module = "套餐管理", permCode = "system:package:update")
     @PutMapping("/{packageId}/menus")
@@ -95,12 +94,4 @@ public class SysPackageController {
         return ApiResponse.ok();
     }
 
-    /** 运维出口:重跑同步,让停在"未同步"状态的租户收敛(4.8.1)。 */
-    @AuditLog(module = "套餐管理", permCode = "system:package:update")
-    @PostMapping("/{packageId}/resync")
-    @SaCheckPermission("system:package:update")
-    public ApiResponse<Void> resync(@PathVariable Long packageId) {
-        packageService.resync(packageId);
-        return ApiResponse.ok();
-    }
 }

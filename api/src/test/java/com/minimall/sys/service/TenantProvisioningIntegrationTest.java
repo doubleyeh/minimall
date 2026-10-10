@@ -81,6 +81,10 @@ class TenantProvisioningIntegrationTest {
     @Autowired
     private SysRoleRepository roleRepository;
     @Autowired
+    private com.minimall.sys.domain.repository.SysMenuRepository menuRepository;
+    @Autowired
+    private com.minimall.infra.security.PermissionProvider permissionProvider;
+    @Autowired
     private SysUserRepository userRepository;
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
@@ -94,14 +98,17 @@ class TenantProvisioningIntegrationTest {
     private PermissionCacheService permissionCacheService;
 
     @Test
-    @DisplayName("用例12:建租户六步——默认角色恰好拥有套餐菜单,管理员用户绑定根部门且强制改密")
+    @DisplayName("用例12:建租户六步——默认角色授权全部非平台菜单,管理员权限恰好是套餐菜单")
     void createTenantProvisionsDefaultRoleDeptAndAdmin() {
         Long packageId = createPackage("受限套餐-" + suffix(), MINIMAL_MENUS);
 
         TenantCreateResponse created = createTenant(packageId);
 
         assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
-                .containsExactlyInAnyOrderElementsOf(MINIMAL_MENUS);
+                .containsExactlyInAnyOrderElementsOf(allNonPlatformMenuIds());
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("套餐是上限:默认角色授权再多,实际权限也只能是套餐菜单")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(MINIMAL_MENUS));
 
         SysUser admin = userRepository.findById(created.adminUserId()).orElseThrow();
         assertThat(admin.getTenantId()).isEqualTo(created.tenantId());
@@ -159,20 +166,19 @@ class TenantProvisioningIntegrationTest {
             return null;
         });
 
-        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
-                .containsExactlyInAnyOrderElementsOf(MINIMAL_MENUS);
-        // 关键:自定义角色也不能留着套餐外的菜单,否则降级等于没做(4.8)
-        assertThat(roleRepository.findMenuIdsOfRole(customRoleId))
-                .doesNotContainAnyElementsOf(MENUS_TO_BE_REVOKED)
-                .contains(11L);
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("降级后实际权限只剩新套餐的菜单")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(MINIMAL_MENUS))
+                .doesNotContainAnyElementsOf(permCodesOfMenus(MENUS_TO_BE_REVOKED));
     }
 
     @Test
-    @DisplayName("用例16:平台直接改套餐内容——绑定该套餐的租户立即同步(4.8.1)")
+    @DisplayName("用例16:平台直接改套餐内容——绑定该套餐的租户下一次读取即受限(4.8.1)")
     void editingPackageMenusPropagatesToBoundTenantsImmediately() {
         Long packageId = createPackage("可改套餐-" + suffix(), USER_SUBTREE);
         TenantCreateResponse created = createTenant(packageId);
-        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId())).contains(13L);
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .containsAll(permCodesOfMenus(USER_SUBTREE));
 
         // 平台把套餐收窄
         asSuperUser(() -> {
@@ -180,8 +186,9 @@ class TenantProvisioningIntegrationTest {
             return null;
         });
 
-        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
-                .containsExactlyInAnyOrderElementsOf(MINIMAL_MENUS);
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("收窄后权限立刻跟着收窄,不需要回写角色")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(MINIMAL_MENUS));
     }
 
     @Test
@@ -197,26 +204,25 @@ class TenantProvisioningIntegrationTest {
     }
 
     @Test
-    @DisplayName("用例8.4:运维出口 resync 让「未同步」的租户收敛回套餐权限(4.8.1)")
-    void resyncConvergesTenantLeftInUnsyncedState() {
+    @DisplayName("用例8.4:绕过接口塞进角色的套餐外菜单,读取时被套餐挡住(不需要任何同步出口)")
+    void outOfPackageGrantIsBlockedAtReadTime() {
         Long packageId = createPackage("收窄套餐-" + suffix(), MINIMAL_MENUS);
         TenantCreateResponse created = createTenant(packageId);
         Long customRoleId = createRole(created.tenantId(), "custom_" + suffix());
 
-        // 造一个"上次同步失败的残留":套餐外的菜单 13 直接塞进关联表。
-        // 用 SQL 而不是接口,是因为正常授权路径会按套餐校验并拒绝(见用例13)——
-        // 这个状态本来就只可能由"同步中断"造成,而 resync 这个出口存在的意义正是收拾它。
+        // 直接用 SQL 塞一个套餐外的菜单(正常授权路径会按套餐校验并拒绝,见用例13)
         jdbcTemplate.update("insert into sys_role_menu (role_id, menu_id) values (?, ?)", customRoleId, 13L);
         assertThat(roleRepository.findMenuIdsOfRole(customRoleId)).contains(13L);
 
-        asSuperUser(() -> {
-            packageService.resync(packageId);
-            return null;
-        });
+        // 管理员只保留这个自定义角色,于是它的授权只有 13,而 13 不在套餐里
+        jdbcTemplate.update("delete from sys_user_role where user_id = ?", created.adminUserId());
+        jdbcTemplate.update("insert into sys_user_role (user_id, role_id) values (?, ?)",
+                created.adminUserId(), customRoleId);
 
-        assertThat(roleRepository.findMenuIdsOfRole(customRoleId))
-                .as("重跑同步必须把套餐外的授权收回来,否则「未同步」状态永远收敛不了")
-                .doesNotContain(13L);
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("套餐是上限:角色里有也不给,不需要 resync 之类的收敛出口")
+                .doesNotContainAnyElementsOf(permCodesOfMenus(List.of(13L)))
+                .isEmpty();
     }
 
     @Test
@@ -225,24 +231,11 @@ class TenantProvisioningIntegrationTest {
         Long widePackageId = createPackage("记录宽-" + suffix(), USER_SUBTREE);
         Long narrowPackageId = createPackage("记录窄-" + suffix(), MINIMAL_MENUS);
         TenantCreateResponse created = createTenant(widePackageId);
-        Long customRoleId = createRole(created.tenantId(), "rec_" + suffix());
-        asTenant(created.tenantId(), () ->
-                roleService.grantMenus(customRoleId, new RoleMenuGrantRequest(USER_SUBTREE)));
-
-        Set<Long> defaultBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId()));
-        Set<Long> customBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(customRoleId));
 
         asSuperUser(() -> {
             tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(narrowPackageId, null));
             return null;
         });
-
-        // "实际生效"必须是逐角色算出来的差集,不能直接拿套餐差异当答案 ——
-        // 那样只能验证"实现写的常量等于自己",验证不了"角色身上真的少了这些菜单"
-        Set<Long> actuallyRevoked = new LinkedHashSet<>(
-                onlyIn(defaultBefore, Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))));
-        actuallyRevoked.addAll(
-                onlyIn(customBefore, Set.copyOf(roleRepository.findMenuIdsOfRole(customRoleId))));
 
         SysTenantPackageChange record = changeRecordOf(created.tenantId());
 
@@ -250,10 +243,13 @@ class TenantProvisioningIntegrationTest {
         assertThat(record.getOldPackageId()).isEqualTo(widePackageId);
         assertThat(record.getNewPackageId()).isEqualTo(narrowPackageId);
         assertThat(menuIds(record.getRevokedMenuIds()))
-                .as("记录说收回了哪些,就必须真的从各角色身上收回来了(否则这条审计流水不可信)")
-                .isEqualTo(actuallyRevoked);
-        assertThat(actuallyRevoked).containsExactlyInAnyOrderElementsOf(MENUS_TO_BE_REVOKED);
+                .as("记录说收回哪些 = 宽套餐比窄套餐多出来的那些")
+                .containsExactlyInAnyOrderElementsOf(MENUS_TO_BE_REVOKED);
         assertThat(menuIds(record.getAddedMenuIds())).as("降级不该记出新增").isEmpty();
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("实际权限立刻只剩新套餐的菜单 —— 不回写角色也能生效")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(MINIMAL_MENUS))
+                .doesNotContainAnyElementsOf(permCodesOfMenus(MENUS_TO_BE_REVOKED));
     }
 
     @Test
@@ -262,42 +258,29 @@ class TenantProvisioningIntegrationTest {
         Long narrowPackageId = createPackage("记录窄2-" + suffix(), MINIMAL_MENUS);
         Long widePackageId = createPackage("记录宽2-" + suffix(), USER_SUBTREE);
         TenantCreateResponse created = createTenant(narrowPackageId);
-        Long customRoleId = createRole(created.tenantId(), "rec2_" + suffix());
-        asTenant(created.tenantId(), () ->
-                roleService.grantMenus(customRoleId, new RoleMenuGrantRequest(MINIMAL_MENUS)));
-
-        Set<Long> defaultBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId()));
-        Set<Long> customBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(customRoleId));
 
         asSuperUser(() -> {
             tenantService.changePackage(created.tenantId(), new TenantPackageChangeRequest(widePackageId, null));
             return null;
         });
 
-        // 升级是"变更后多出来的",方向与降级相反
-        Set<Long> actuallyAdded = onlyIn(
-                Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId())), defaultBefore);
-
         SysTenantPackageChange record = changeRecordOf(created.tenantId());
 
         assertThat(menuIds(record.getAddedMenuIds()))
-                .as("记录里的新增 = 默认角色实际新增的部分")
-                .isEqualTo(actuallyAdded);
-        assertThat(actuallyAdded)
                 .as("升级新增的正是宽套餐比窄套餐多出来的那些菜单")
                 .containsExactlyInAnyOrderElementsOf(onlyIn(Set.copyOf(USER_SUBTREE), Set.copyOf(MINIMAL_MENUS)));
-        assertThat(roleRepository.findMenuIdsOfRole(customRoleId))
-                .as("自定义角色的授权不该被升级动作改动(4.8:新增只同步默认管理员角色)")
-                .containsExactlyInAnyOrderElementsOf(customBefore);
+        assertThat(menuIds(record.getRevokedMenuIds())).as("升级不该记出收回").isEmpty();
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("实际权限立刻跟着变宽 —— 不回写角色也能生效")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(USER_SUBTREE));
     }
 
     @Test
-    @DisplayName("生效日:选当天立即生效(换套餐 + 同步默认角色 + 递增权限版本号)")
+    @DisplayName("生效日:选当天立即生效(换套餐 + 同步默认角色)")
     void changePackageWithTodayEffectiveDateAppliesImmediately() {
         Long narrowPackageId = createPackage("即刻窄-" + suffix(), MINIMAL_MENUS);
         Long widePackageId = createPackage("即刻宽-" + suffix(), USER_SUBTREE);
         TenantCreateResponse created = createTenant(narrowPackageId);
-        long versionBefore = permissionCacheService.currentVersion(created.tenantId());
 
         asSuperUser(() -> {
             tenantService.changePackage(created.tenantId(),
@@ -306,23 +289,21 @@ class TenantProvisioningIntegrationTest {
         });
 
         assertThat(packageIdOf(created.tenantId())).isEqualTo(widePackageId);
-        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
-                .containsExactlyInAnyOrderElementsOf(USER_SUBTREE);
-        assertThat(permissionCacheService.currentVersion(created.tenantId()))
-                .as("权限变了就必须让缓存失效,否则最长 2 小时还是旧权限").isGreaterThan(versionBefore);
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("权限按新套餐算,角色菜单不需要动")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(USER_SUBTREE));
         SysTenantPackageChange record = changeRecordOf(created.tenantId());
         assertThat(record.getEffectiveDate()).isEqualTo(LocalDate.now());
         assertThat(record.getTriggerType()).isEqualTo(SysTenantPackageChange.TRIGGER_TENANT_SWITCH);
     }
 
     @Test
-    @DisplayName("生效日:选未来日期只登记,package_id / 角色菜单 / 权限缓存版本号都不动")
+    @DisplayName("生效日:选未来日期只登记,package_id / 角色菜单都不动")
     void futureEffectiveDateOnlyRegisters() {
         Long narrowPackageId = createPackage("预约窄-" + suffix(), MINIMAL_MENUS);
         Long widePackageId = createPackage("预约宽-" + suffix(), USER_SUBTREE);
         TenantCreateResponse created = createTenant(narrowPackageId);
         Set<Long> menusBefore = Set.copyOf(roleRepository.findMenuIdsOfRole(created.defaultRoleId()));
-        long versionBefore = permissionCacheService.currentVersion(created.tenantId());
         LocalDate future = LocalDate.now().plusDays(5);
 
         asSuperUser(() -> {
@@ -333,8 +314,6 @@ class TenantProvisioningIntegrationTest {
         assertThat(packageIdOf(created.tenantId())).as("预约不该立即生效").isEqualTo(narrowPackageId);
         assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
                 .containsExactlyInAnyOrderElementsOf(menusBefore);
-        assertThat(permissionCacheService.currentVersion(created.tenantId()))
-                .as("没生效就不该动缓存版本号(动了等于白让全租户回源)").isEqualTo(versionBefore);
 
         SysTenantPackageChange record = changeRecordOf(created.tenantId());
         assertThat(record.getEffectiveDate()).isEqualTo(future);
@@ -364,13 +343,13 @@ class TenantProvisioningIntegrationTest {
 
         assertThat(packageChangeService.applyDue()).as("该租户应当被应用").isGreaterThanOrEqualTo(1);
         assertThat(packageIdOf(created.tenantId())).isEqualTo(widePackageId);
-        assertThat(roleRepository.findMenuIdsOfRole(created.defaultRoleId()))
-                .containsExactlyInAnyOrderElementsOf(USER_SUBTREE);
-        long versionAfterApply = permissionCacheService.currentVersion(created.tenantId());
-
+        assertThat(permCodesOf(created.tenantId(), created.adminUserId()))
+                .as("权限按新套餐算,角色菜单不需要动")
+                .containsExactlyInAnyOrderElementsOf(permCodesOfMenus(USER_SUBTREE));
+        Long recordIdBefore = changeRecordOf(created.tenantId()).getId();
         packageChangeService.applyDue();
-        assertThat(permissionCacheService.currentVersion(created.tenantId()))
-                .as("已经是目标套餐,重复跑不该再同步、也不该再推版本号").isEqualTo(versionAfterApply);
+        assertThat(changeRecordOf(created.tenantId()).getId())
+                .as("已经是目标套餐,重复跑不该再产生变更记录").isEqualTo(recordIdBefore);
     }
 
     @Test
@@ -453,6 +432,26 @@ class TenantProvisioningIntegrationTest {
     }
 
     // ——— 辅助方法 ———
+
+    /** 全部非平台菜单(建租户时默认角色的授权范围)。 */
+    private java.util.List<Long> allNonPlatformMenuIds() {
+        return menuRepository.findAllNonPlatform().stream()
+                .map(com.minimall.sys.domain.SysMenu::getId).toList();
+    }
+
+    /** 某租户下某用户的权限码(走真实的读取时交算)。 */
+    private java.util.Set<String> permCodesOf(Long tenantId, Long userId) {
+        return TenantContext.callAsTenant(tenantId, false,
+                () -> permissionProvider.load(userId).permCodes());
+    }
+
+    /** 某批菜单对应的权限码。 */
+    private java.util.List<String> permCodesOfMenus(java.util.Collection<Long> menuIds) {
+        return menuRepository.findByIdIn(menuIds).stream()
+                .map(com.minimall.sys.domain.SysMenu::getPermCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
+    }
 
     private SysTenantPackageChange changeRecordOf(Long tenantId) {
         return asSuperUser(() ->

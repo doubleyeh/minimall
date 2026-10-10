@@ -45,7 +45,3 @@ export function savePackageMenus(packageId: Id, menuIds: Id[]): Promise<void> {
   return request.put<void>(`/system/packages/${packageId}/menus`, { menuIds })
 }
 
-/** 运维出口:让停在"未同步"状态的租户收敛。 */
-export function resyncPackage(packageId: Id): Promise<void> {
-  return request.post<void>(`/system/packages/${packageId}/resync`)
-}

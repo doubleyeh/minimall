@@ -281,7 +281,6 @@ class PermissionMatrixIntegrationTest {
             jdbcTemplate.update("INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (?, ?)",
                     roleId, menuId);
         }
-        permissionCacheService.invalidateTenant(tenantId);
 
         PermissionProvider.PermissionData data = permissionDataOf(userId);
 
@@ -291,21 +290,17 @@ class PermissionMatrixIntegrationTest {
     }
 
     @Test
-    @DisplayName("8.2:菜单树能过 Redis 缓存往返(JSON 序列化),两次读内容一致")
-    void menuTreeSurvivesCacheRoundTrip() {
+    @DisplayName("8.2:菜单树两次读取一致,且启用菜单按 id 进了缓存")
+    void menuTreeIsStableAcrossReads() {
         long roleId = createRole(List.of(1L, 2L));
         long userId = createUser(List.of(roleId));
 
         PermissionProvider.PermissionData first = permissionDataOf(userId);
-        // 第二次直接 load:此时缓存已写入,走的是 Redis 读回的那份
         PermissionProvider.PermissionData second = asTenant(() -> permissionProvider.load(userId));
-        Optional<PermissionCacheService.CachedPermission> cached = permissionCacheService.get(tenantId, userId);
 
-        assertThat(first.menuTree()).as("第一次读会算出来并写缓存").isNotEmpty();
+        assertThat(first.menuTree()).isNotEmpty();
         assertThat(second.menuTree()).usingRecursiveComparison().isEqualTo(first.menuTree());
-        assertThat(cached).as("缓存里应当有菜单树").isPresent();
-        assertThat(cached.orElseThrow().menuTree()).usingRecursiveComparison()
-                .isEqualTo(first.menuTree());
+        assertThat(permissionCacheService.enabledMenuIds()).as("启用菜单已缓存").isPresent();
     }
 
     // ——— 辅助方法 ———

@@ -99,7 +99,6 @@ import {
   packageGrantableMenus,
   packageMenus,
   pagePackages,
-  resyncPackage,
   savePackageMenus,
   updatePackage,
 } from '@/api/package'
@@ -183,9 +182,6 @@ const columns: DataTableColumns<PackageView> = [
       h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
         permission.hasPerm('system:package:update')
           ? h(NButton, { size: 'tiny', onClick: () => openMenus(row) }, { default: () => '菜单配置' })
-          : null,
-        permission.hasPerm('system:package:update')
-          ? h(NButton, { size: 'tiny', onClick: () => resync(row) }, { default: () => '重新同步' })
           : null,
         permission.hasPerm('system:package:update')
           ? h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' })
@@ -329,11 +325,6 @@ function onDisable(row: PackageView): void {
       await load()
     },
   })
-}
-
-async function resync(row: PackageView): Promise<void> {
-  await resyncPackage(row.id)
-  message.success('已重新同步:停留在"未同步"状态的租户已收敛')
 }
 
 onMounted(() => void load(1))

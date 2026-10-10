@@ -46,20 +46,20 @@ public class PackageChangeServiceImpl implements PackageChangeService {
     private final TenantRepository tenantRepository;
     private final SysPackageRepository packageRepository;
     private final SysTenantPackageChangeRepository changeRepository;
-    private final PackageMenuSyncService packageMenuSyncService;
+    private final TenantPackageChangeApplier packageChangeApplier;
     private final PackageChangeRecorder recorder;
     private final TenantTaskRunner tenantTaskRunner;
 
     public PackageChangeServiceImpl(TenantRepository tenantRepository,
                                     SysPackageRepository packageRepository,
                                     SysTenantPackageChangeRepository changeRepository,
-                                    PackageMenuSyncService packageMenuSyncService,
+                                    TenantPackageChangeApplier packageChangeApplier,
                                     PackageChangeRecorder recorder,
                                     TenantTaskRunner tenantTaskRunner) {
         this.tenantRepository = tenantRepository;
         this.packageRepository = packageRepository;
         this.changeRepository = changeRepository;
-        this.packageMenuSyncService = packageMenuSyncService;
+        this.packageChangeApplier = packageChangeApplier;
         this.recorder = recorder;
         this.tenantTaskRunner = tenantTaskRunner;
     }
@@ -83,7 +83,7 @@ public class PackageChangeServiceImpl implements PackageChangeService {
         LocalDate today = LocalDate.now();
         if (effectiveDate != null && effectiveDate.isAfter(today)) {
             // 预约:只登记。差异按"当前套餐 → 目标套餐"预演,供变更历史展示;
-            // 到点真正应用时同步用的是那一刻重算的实际差异(见 PackageMenuSyncService#applyPackageChange)
+            // 到点应用时用的差异是那一刻重算的,不是登记时那份预演差异(见 TenantPackageChangeApplier#applyPackageChange)
             PackageChangeRecorder.Diff diff = recorder.diff(recorder.menusOf(tenant.getPackageId()),
                     recorder.menusOf(packageId));
             recorder.record(tenantId, SysTenantPackageChange.TRIGGER_TENANT_SWITCH, tenant.getPackageId(), packageId,
@@ -93,7 +93,7 @@ public class PackageChangeServiceImpl implements PackageChangeService {
             return;
         }
         // 选当天(或没传)= 立即生效
-        packageMenuSyncService.applyPackageChange(tenantId, packageId,
+        packageChangeApplier.applyPackageChange(tenantId, packageId,
                 SysTenantPackageChange.TRIGGER_TENANT_SWITCH);
     }
 
@@ -107,7 +107,7 @@ public class PackageChangeServiceImpl implements PackageChangeService {
                         // 当前生效记录 = 已生效里 id 最大的那条(先按生效日过滤,再按写入顺序取最新)
                         .findFirstByTenantIdAndEffectiveDateLessThanEqualOrderByIdDesc(tenantId, today)
                         .ifPresent(record -> {
-                            if (packageMenuSyncService.applyPackageChange(tenantId, record.getNewPackageId(),
+                            if (packageChangeApplier.applyPackageChange(tenantId, record.getNewPackageId(),
                                     SysTenantPackageChange.TRIGGER_SCHEDULED_APPLY)) {
                                 applied[0]++;
                             }

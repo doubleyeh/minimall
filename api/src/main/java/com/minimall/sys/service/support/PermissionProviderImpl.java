@@ -1,15 +1,17 @@
 package com.minimall.sys.service.support;
 
+import com.minimall.infra.security.PermissionCacheService;
+import com.minimall.infra.security.PermissionProvider;
+import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.api.dto.MenuTreeNode;
 import com.minimall.sys.domain.SysMenu;
 import com.minimall.sys.domain.SysRole;
 import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysMenuRepository;
+import com.minimall.sys.domain.repository.SysPackageRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
-import com.minimall.infra.security.PermissionCacheService;
-import com.minimall.infra.security.PermissionProvider;
-import com.minimall.infra.tenant.TenantContext;
+import com.minimall.sys.domain.repository.TenantRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -19,20 +21,21 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
- * 权限集合的计算与缓存(架构文档 5.2、5.5、4.10)。
+ * 权限集合的计算(架构文档 5.2、5.5、4.10)。
  *
- * <p>计算规则:用户 → 有效角色(status = 1) → 这些角色的菜单并集 → 菜单的 perm_code 并集。
- * 菜单权限本身是**并集**语义(与数据权限取最大不同,因为两者一个决定"能不能做"、
- * 一个决定"能看到多少数据",见 5.2)。
+ * <p><b>权限在读取时交算,不做"每用户一份算好的缓存"</b>:
+ * {@code permCodes = 角色授权的菜单 ∩ 套餐包含的菜单 ∩ 启用中的菜单}。后两份输入按 id 缓存
+ * (见 {@link PermissionCacheService}),角色菜单随角色一起读(本来就要读角色判状态)。
+ *
+ * <p>为什么不再缓存"用户 → 权限"的结果:那份结果的失效粒度是租户级的(改一个角色要废掉整个租户
+ * 所有用户的缓存),而用户数远多于角色数与套餐数,粒度和变更成本是反着的。改成按事实缓存后,
+ * 角色授权变更、用户角色变更、用户禁用**都不需要任何失效动作**,权限下一次读取即生效。
  *
  * <p><b>超管短路</b>(4.10):{@code sys_user.is_super = 1} 直接返回全量启用菜单的 perm_code,
- * 不查角色。走角色计算只会引入"平台租户的角色被误改导致超管进不了后台"这类运维事故。
- *
- * <p>缓存按 5.5 的版本号方案读写;版本号一变,这里读到的就是新 key(旧的靠 TTL 自然过期)。
+ * 不走角色也不受套餐约束。走角色计算只会引入"平台租户的角色被误改导致超管进不了后台"这类运维事故。
  */
 @Service
 public class PermissionProviderImpl implements PermissionProvider {
@@ -40,15 +43,21 @@ public class PermissionProviderImpl implements PermissionProvider {
     private final SysUserRepository userRepository;
     private final SysRoleRepository roleRepository;
     private final SysMenuRepository menuRepository;
+    private final SysPackageRepository packageRepository;
+    private final TenantRepository tenantRepository;
     private final PermissionCacheService permissionCacheService;
 
     public PermissionProviderImpl(SysUserRepository userRepository,
                                   SysRoleRepository roleRepository,
                                   SysMenuRepository menuRepository,
+                                  SysPackageRepository packageRepository,
+                                  TenantRepository tenantRepository,
                                   PermissionCacheService permissionCacheService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.menuRepository = menuRepository;
+        this.packageRepository = packageRepository;
+        this.tenantRepository = tenantRepository;
         this.permissionCacheService = permissionCacheService;
     }
 
@@ -57,23 +66,12 @@ public class PermissionProviderImpl implements PermissionProvider {
         if (userId == null) {
             return PermissionData.empty();
         }
-        Long tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            // 缓存 key 里带租户,没有租户就不能安全读写缓存。
-            // 这种情况说明调用发生在请求/任务上下文之外,直接按"无权限"处理 —— 默认拒绝,
-            // 不要去猜一个租户(猜错就是把别人的权限给了当前调用者)。
+        if (TenantContext.getTenantId() == null) {
+            // 说明调用发生在请求/任务上下文之外,直接按"无权限"处理 —— 默认拒绝,
+            // 不要去猜一个租户(猜错就是把别人的权限给了当前调用者)
             return PermissionData.empty();
         }
-
-        Optional<PermissionCacheService.CachedPermission> cached = permissionCacheService.get(tenantId, userId);
-        if (cached.isPresent()) {
-            return new PermissionData(cached.get().permCodes(), cached.get().menuTree());
-        }
-
-        PermissionData computed = compute(userId);
-        permissionCacheService.put(tenantId, userId,
-                new PermissionCacheService.CachedPermission(computed.permCodes(), computed.menuTree()));
-        return computed;
+        return compute(userId);
     }
 
     private PermissionData compute(Long userId) {
@@ -86,29 +84,70 @@ public class PermissionProviderImpl implements PermissionProvider {
             return toPermissionData(menuRepository.findAllEnabled());
         }
 
-        Set<Long> menuIds = collectMenuIds(user);
+        Set<Long> menuIds = new HashSet<>(collectMenuIds(user));
         if (menuIds.isEmpty()) {
             return PermissionData.empty();
         }
+        menuIds.retainAll(enabledMenuIds());
+        // 套餐是上限:角色能授权的菜单本就是套餐的子集,这里再兜一层,于是平台改套餐
+        // 不需要回写任何租户的角色菜单(4.8.1)
+        Set<Long> packageMenus = packageMenuIds(user.getTenantId());
+        if (packageMenus != null) {
+            menuIds.retainAll(packageMenus);
+        }
+        if (menuIds.isEmpty()) {
+            return PermissionData.empty();
+        }
+
         List<SysMenu> menus = menuRepository.findByIdIn(menuIds).stream()
                 .filter(menu -> menu.getStatus() != null && menu.getStatus() == 1)
-                // 平台专用菜单只属于平台租户(4.10)。这条防线原本只在授权候选集与套餐写入层,
-                // 菜单改成后端驱动后必须在这里也兜一层 —— 否则被直接写库塞进来的平台菜单会显示给租户
+                // 平台专用菜单只属于平台租户(4.10)
                 .filter(menu -> !menu.isPlatformOnly())
                 .toList();
         return toPermissionData(menus);
     }
 
-    /** 用户所有**有效角色**的菜单并集。停用角色不参与计算(5.5 的触发表里角色停用也要失效缓存)。 */
+    /** 启用中的菜单 ID(缓存未命中时查库并回填)。 */
+    private Set<Long> enabledMenuIds() {
+        return permissionCacheService.enabledMenuIds()
+                .map(HashSet::new)
+                .orElseGet(() -> {
+                    List<Long> ids = menuRepository.findAllEnabled().stream()
+                            .map(SysMenu::getId)
+                            .toList();
+                    permissionCacheService.putEnabledMenuIds(ids);
+                    return new HashSet<>(ids);
+                });
+    }
+
+    /** 该租户当前套餐包含的菜单 ID;套餐"不限"时返回 null,表示不施加套餐约束。 */
+    private Set<Long> packageMenuIds(Long tenantId) {
+        Long packageId = tenantRepository.findById(tenantId)
+                .map(tenant -> tenant.getPackageId())
+                .orElse(null);
+        if (packageId == null) {
+            return null;
+        }
+        return permissionCacheService.packageMenuIds(packageId)
+                .map(HashSet::new)
+                .orElseGet(() -> {
+                    HashSet<Long> ids = new HashSet<>();
+                    ids.addAll(packageRepository.findMenuIdsOfPackage(packageId));
+                    permissionCacheService.putPackageMenuIds(packageId, ids);
+                    return ids;
+                });
+    }
+
+    /** 用户所有**有效角色**的菜单并集。停用角色不参与计算。 */
     private Set<Long> collectMenuIds(SysUser user) {
-        Collection<Long> roleIds = user.getRoleIds();
+        List<Long> roleIds = roleRepository.findRoleIdsOfUser(user.getId());
         if (roleIds == null || roleIds.isEmpty()) {
             return Set.of();
         }
         Set<Long> menuIds = new HashSet<>();
         for (SysRole role : roleRepository.findByIdInAndTenantId(roleIds, user.getTenantId())) {
             if (role.isEnabled()) {
-                menuIds.addAll(role.getMenuIds());
+                menuIds.addAll(roleRepository.findMenuIdsOfRole(role.getId()));
             }
         }
         return menuIds;

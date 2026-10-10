@@ -85,6 +85,10 @@ public interface SysRoleRepository extends JpaRepository<SysRole, Long>,
      * <p>{@code sys_user_role} 是挂在 {@code SysUser} 上的 {@code @ElementCollection},
      * 删角色不会自动清理它(反向关联不受 JPA 管理),所以这里的计数与下面的删除都必须手写。
      */
+    /** 直接用关联表查,不碰 {@code SysUser.roleIds} 那个懒加载集合 —— 权限计算不能依赖 Session 是否开着。 */
+    @Query(value = "select role_id from sys_user_role where user_id = :userId", nativeQuery = true)
+    List<Long> findRoleIdsOfUser(@Param("userId") Long userId);
+
     @Query(value = "select count(*) from sys_user_role where role_id = :roleId", nativeQuery = true)
     long countUsersOfRole(@Param("roleId") Long roleId);
 

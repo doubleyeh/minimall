@@ -229,8 +229,8 @@ class SysApiCrudHttpIntegrationTest {
         assertThat(get("/system/packages/" + packageId + "/menus", token).body())
                 .contains("\"data\":[\"1\",\"2\",\"11\"]");
 
-        assertThat(post("/system/packages/" + packageId + "/resync", null).code())
-                .as("重新同步").isEqualTo("0");
+        assertThat(put("/system/packages/" + packageId + "/menus", "{\"menuIds\":[1,2,11]}").code())
+                .as("改套餐菜单").isEqualTo("0");
         assertThat(put("/system/packages/" + packageId + "/disable", null).code()).isEqualTo("0");
     }
 

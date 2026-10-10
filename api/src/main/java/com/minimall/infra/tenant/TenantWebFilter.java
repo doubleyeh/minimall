@@ -4,6 +4,7 @@ import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
 import com.minimall.common.ErrorCode;
 import com.minimall.infra.audit.AuditContext;
+import com.minimall.infra.security.ClientIpResolver;
 import com.minimall.infra.security.SessionKeys;
 import com.minimall.infra.web.TraceIdFilter;
 import jakarta.servlet.FilterChain;
@@ -75,11 +76,14 @@ public class TenantWebFilter extends OncePerRequestFilter {
 
     private final TenantProperties properties;
     private final TenantLookup tenantLookup;
+    private final ClientIpResolver clientIpResolver;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    public TenantWebFilter(TenantProperties properties, TenantLookup tenantLookup) {
+    public TenantWebFilter(TenantProperties properties, TenantLookup tenantLookup,
+                           ClientIpResolver clientIpResolver) {
         this.properties = properties;
         this.tenantLookup = tenantLookup;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @Override
@@ -186,13 +190,9 @@ public class TenantWebFilter extends OncePerRequestFilter {
         return false;
     }
 
+    /** 真实客户端 IP 由 {@link ClientIpResolver} 决定:不可信来源带来的 XFF 一律不采信。 */
     private String resolveClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            int comma = forwarded.indexOf(',');
-            return comma > 0 ? forwarded.substring(0, comma).trim() : forwarded.trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"));
     }
 
     private Long toLong(Object value) {

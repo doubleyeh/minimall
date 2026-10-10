@@ -149,35 +149,35 @@ class MenuServiceIntegrationTest {
     // ---------------------------------------------------------------- 修改
 
     @Test
-    @DisplayName("改权限码:失效全部租户的权限缓存(不失效等于老权限还能继续用)")
-    void permCodeChangeInvalidatesAllTenants() {
+    @DisplayName("改权限码:启用菜单缓存被清掉(不失效等于老权限还能继续用)")
+    void permCodeChangeInvalidatesMenuCache() {
         Long menuId = createMenu(button(0L, "it缓存按钮", "it:cache:old"));
-        long before = permissionCacheService.currentVersion(PLATFORM_TENANT_ID);
+        permissionCacheService.putEnabledMenuIds(List.of(menuId));
 
         asPlatformAdmin(() -> {
             menuService.update(menuId, button(0L, "it缓存按钮", "it:cache:new"));
             return null;
         });
 
-        assertThat(permissionCacheService.currentVersion(PLATFORM_TENANT_ID))
-                .as("权限码变了必须 INCR 版本号")
-                .isGreaterThan(before);
+        assertThat(permissionCacheService.enabledMenuIds())
+                .as("权限码变了必须清掉启用菜单缓存")
+                .isEmpty();
     }
 
     @Test
-    @DisplayName("只改名称:不失效缓存(避免无意义的全租户缓存穿透)")
+    @DisplayName("只改名称:不清缓存(避免无意义的缓存穿透)")
     void nameOnlyChangeKeepsCache() {
         Long menuId = createMenu(button(0L, "it改名按钮", "it:rename"));
-        long before = permissionCacheService.currentVersion(PLATFORM_TENANT_ID);
+        permissionCacheService.putEnabledMenuIds(List.of(menuId));
 
         asPlatformAdmin(() -> {
             menuService.update(menuId, button(0L, "it改名按钮改", "it:rename"));
             return null;
         });
 
-        assertThat(permissionCacheService.currentVersion(PLATFORM_TENANT_ID))
-                .as("权限码没变就不该失效 - 每次改展示名都清全平台缓存是没有必要的开销")
-                .isEqualTo(before);
+        assertThat(permissionCacheService.enabledMenuIds())
+                .as("权限码没变就不该清 - 每次改展示名都清一遍是没有必要的开销")
+                .isPresent();
     }
 
     @Test

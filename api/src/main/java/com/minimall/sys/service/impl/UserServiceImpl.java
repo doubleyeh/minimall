@@ -16,7 +16,6 @@ import com.minimall.sys.domain.SysUser;
 import com.minimall.sys.domain.repository.SysDeptRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.SysUserRepository;
-import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.infra.security.RefreshTokenService;
 import com.minimall.infra.tenant.TenantContext;
 import com.minimall.sys.service.UserService;
@@ -56,21 +55,18 @@ public class UserServiceImpl implements UserService {
     private final SysRoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final com.minimall.infra.security.PasswordPolicy passwordPolicy;
-    private final PermissionCacheService permissionCacheService;
     private final RefreshTokenService refreshTokenService;
 
     public UserServiceImpl(SysUserRepository userRepository,
                            SysDeptRepository deptRepository,
                            SysRoleRepository roleRepository,
                            PasswordEncoder passwordEncoder,
-                           PermissionCacheService permissionCacheService,
                            RefreshTokenService refreshTokenService,
                            com.minimall.infra.security.PasswordPolicy passwordPolicy) {
         this.userRepository = userRepository;
         this.deptRepository = deptRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
-        this.permissionCacheService = permissionCacheService;
         this.refreshTokenService = refreshTokenService;
         this.passwordPolicy = passwordPolicy;
     }
@@ -165,8 +161,7 @@ public class UserServiceImpl implements UserService {
             user.getRoleIds().clear();
             user.getRoleIds().addAll(newRoles);
             if (changed) {
-                // 角色变了 → 权限集合变了 → 必须失效缓存(5.5 的触发表)
-                permissionCacheService.invalidateTenant(requireTenantId());
+                // 角色变了:权限读取时交算,下一次读取即生效,不需要失效缓存
             }
         }
     }
@@ -187,16 +182,14 @@ public class UserServiceImpl implements UserService {
         });
         // sys_user_role 是挂在用户上的 @ElementCollection,删用户时由 JPA 一并清理
         userRepository.delete(user);
-        // 用户没了,权限缓存与刷新令牌都不该留着
+        // 用户没了,刷新令牌不该留着
         refreshTokenService.revokeAll(userId);
-        permissionCacheService.invalidateTenant(requireTenantId());
     }
 
     @Override
     public void changeStatus(Long userId, int status) {
         SysUser user = load(userId);
         user.setStatus(status);
-        permissionCacheService.invalidateTenant(requireTenantId());
         if (status == 0) {
             // 禁用是一个明确的动作,这里**主动**踢下线并撤销刷新令牌(7.1.2、7.1.3),
             // 不依赖"下次请求时惰性发现"

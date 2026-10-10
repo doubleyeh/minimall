@@ -9,7 +9,6 @@ import com.minimall.sys.domain.Tenant;
 import com.minimall.sys.domain.repository.SysMenuRepository;
 import com.minimall.sys.domain.repository.SysRoleRepository;
 import com.minimall.sys.domain.repository.SysPackageRepository;
-import com.minimall.sys.domain.repository.TenantRepository;
 import com.minimall.infra.security.PermissionCacheService;
 import com.minimall.sys.service.MenuService;
 import com.minimall.sys.service.support.MenuTreeBuilder;
@@ -41,18 +40,15 @@ public class MenuServiceImpl implements MenuService {
     private final SysMenuRepository menuRepository;
     private final SysRoleRepository roleRepository;
     private final SysPackageRepository packageRepository;
-    private final TenantRepository tenantRepository;
     private final PermissionCacheService permissionCacheService;
 
     public MenuServiceImpl(SysMenuRepository menuRepository,
                            SysRoleRepository roleRepository,
                            SysPackageRepository packageRepository,
-                           TenantRepository tenantRepository,
                            PermissionCacheService permissionCacheService) {
         this.menuRepository = menuRepository;
         this.roleRepository = roleRepository;
         this.packageRepository = packageRepository;
-        this.tenantRepository = tenantRepository;
         this.permissionCacheService = permissionCacheService;
     }
 
@@ -106,11 +102,8 @@ public class MenuServiceImpl implements MenuService {
      * 让**全部租户**的权限缓存失效。菜单是平台级数据,改动影响所有租户(5.5)。
      */
     private void invalidateAllTenants(String reason) {
-        List<Tenant> tenants = tenantRepository.findAll();
-        for (Tenant tenant : tenants) {
-            permissionCacheService.invalidateTenant(tenant.getId());
-        }
-        log.info("已失效全部租户权限缓存 原因={} 租户数={}", reason, tenants.size());
+        permissionCacheService.evictMenus();
+        log.info("已失效启用菜单缓存 原因={}", reason);
     }
 
     private void apply(SysMenu menu, MenuSaveRequest request) {

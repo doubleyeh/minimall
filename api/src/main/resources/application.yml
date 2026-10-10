@@ -60,8 +60,13 @@ sa-token:
 minimall:
   # 雪花算法:多实例部署时每个实例必须不同(架构文档 4.3、9.3)
   snowflake:
-    worker-id: ${SNOWFLAKE_WORKER_ID:1}
-    datacenter-id: ${SNOWFLAKE_DATACENTER_ID:1}
+    worker-id: 1
+    datacenter-id: 1
+  # 只有来自这些地址的请求才采信 X-Forwarded-For;支持 IPv4 CIDR
+  security:
+    trusted-proxies:
+      - 127.0.0.1
+      - ::1
   # 租户上下文与过滤(架构文档 4.2、4.9、4.11)
   tenant:
     # 白名单:允许没有 tenantId 就执行的路径,必须显式维护,不做模糊匹配
@@ -175,30 +180,28 @@ minimall:
   # 小程序客户端登录态(商城设计文档 3.1)
   mall:
     auth:
-      # 客户端 JWT 签名密钥。**上线前必须用环境变量覆盖**:密钥泄露等于任何人都能伪造任意客户的令牌。
+      # 客户端 JWT 签名密钥:泄露等于任何人都能伪造任意客户的令牌,上线前必须改这个值。
       # HS256 要求至少 256 位(32 字节),长度不足应用启动即失败。
-      jwt-secret: ${MALL_JWT_SECRET:mini-mall-client-token-secret-change-it-please}
+      jwt-secret: mini-mall-client-token-secret-change-it-please
       # 小程序场景要求"免登录 30 天",过期后前端静默重登,不做服务端登出
       ttl-days: 30
       # 小程序的 appId/appSecret 改为按租户配置(sys_wx_pay_config),不再放这里
       # 模拟 code2Session(仅本地/自动化测试)。**生产必须保持 false**,
       # 打开它等于任何人编一个 code 就能登录成任意客户
-      wx-mock: ${WX_MOCK:false}
+      wx-mock: false
     # 微信支付。每租户的商户号/密钥/证书在 sys_wx_pay_config 里,这里只放全局项
     pay:
-      # 回调地址前缀,必须是公网 HTTPS;租户级只拼 /pay/callback/wx/{tenantCode}。
-      # 直接改这里;Docker 下可用 MINIMALL_MALL_PAY_NOTIFY_BASE_URL 覆盖
-      notify-base-url:
+      # 回调地址前缀,必须是公网 HTTPS;租户级只拼 /pay/callback/wx/{tenantCode}。上线前改这里
+      notify-base-url: https://pay.example.com
       connect-timeout-seconds: 3
       read-timeout-seconds: 10
       # 租户支付配置的缓存 TTL;未配置时用更短的负缓存挡穿透
       config-cache-seconds: 600
       config-cache-miss-seconds: 60
-  # 敏感配置的信封加密主密钥(Base64 的 32 字节)。留空则明文存储,仅限本地开发;
-  # 上线前必须填,且它与已有密文绑定 —— 换了之后旧密文解不开。Docker 下可用
-  # MINIMALL_SECRET_MASTER_KEY 覆盖
+  # 敏感配置的信封加密主密钥(Base64 的 32 字节,即 44 个字符)。
+  # 它与已有密文绑定 —— 换了之后旧密文解不开;上线前必须换成自己的值
   secret:
-    master-key:
+    master-key: yhbQA3qwtTSpnZ8bSEL/v2HzMQGfXXhh/zd9tUnv9B4=
 
 server:
   port: 8080
