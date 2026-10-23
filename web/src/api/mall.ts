@@ -19,6 +19,9 @@ import type {
   PromotionSaveRequest,
   PromotionView,
   ReviewView,
+  SeckillActivityView,
+  SeckillPageQuery,
+  SeckillSaveRequest,
 } from '@/types/mall'
 import { request } from '@/utils/request'
 
@@ -288,4 +291,36 @@ export function replyReview(reviewId: Id, content: string): Promise<void> {
 
 export function changeReviewStatus(reviewId: Id, status: number): Promise<void> {
   return request.put<void>(`/mall/admin/reviews/${reviewId}/status`, undefined, { params: { status } })
+}
+
+// ---------------------------------------------------------------- 秒杀
+
+export function pageSeckills(query: SeckillPageQuery): Promise<PageResult<SeckillActivityView>> {
+  return request.get<PageResult<SeckillActivityView>>('/mall/admin/seckills', { params: query })
+}
+
+export function getSeckill(activityId: Id): Promise<SeckillActivityView> {
+  return request.get<SeckillActivityView>(`/mall/admin/seckills/${activityId}`)
+}
+
+export function createSeckill(data: SeckillSaveRequest): Promise<Id> {
+  return request.post<Id>('/mall/admin/seckills', data)
+}
+
+export function updateSeckill(activityId: Id, data: SeckillSaveRequest): Promise<void> {
+  return request.put<void>(`/mall/admin/seckills/${activityId}`, data)
+}
+
+export function deleteSeckill(activityId: Id): Promise<void> {
+  return request.delete<void>(`/mall/admin/seckills/${activityId}`)
+}
+
+/** 发布:校验并冻结库存,返回冻结件数。 */
+export function publishSeckill(activityId: Id): Promise<number> {
+  return request.post<number>(`/mall/admin/seckills/${activityId}/publish`)
+}
+
+/** 取消:未售出的配额解冻。 */
+export function cancelSeckill(activityId: Id): Promise<void> {
+  return request.post<void>(`/mall/admin/seckills/${activityId}/cancel`)
 }

@@ -1,0 +1,52 @@
+<view class="page">
+  <view wx:if="{{loading}}" class="empty">加载中…</view>
+
+  <block wx:else>
+    <view class="address" bindtap="onPickAddress">
+      <block wx:if="{{address}}">
+        <view class="address__line">
+          <text class="address__name">{{address.receiverName}}</text>
+          <text class="address__phone">{{address.receiverPhone}}</text>
+        </view>
+        <view class="address__detail">{{addressText}}</view>
+      </block>
+      <view wx:else class="address__empty">+ 添加收货地址</view>
+    </view>
+
+    <view class="goods">
+      <image class="goods__img" src="{{image}}" mode="aspectFill"></image>
+      <view class="goods__body">
+        <view class="goods__name ellipsis-2">{{goodsName}}</view>
+        <view class="goods__sku">{{skuName}}</view>
+        <view class="goods__row">
+          <text class="goods__price"><text class="goods__yuan">¥</text>{{priceText}}</text>
+          <view class="stepper">
+            <view class="stepper__btn" bindtap="onQuantityMinus">−</view>
+            <text class="stepper__value">{{quantity}}</text>
+            <view class="stepper__btn" bindtap="onQuantityPlus">+</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="amounts">
+      <view class="amounts__row">
+        <text>商品金额</text>
+        <text>¥{{goodsAmountText}}</text>
+      </view>
+      <view class="amounts__row">
+        <text>运费</text>
+        <text>¥{{freightText}}</text>
+      </view>
+      <view class="amounts__tip">秒杀商品不参与满减,不可使用优惠券与积分</view>
+    </view>
+
+    <view class="footer">
+      <view class="footer__left">
+        <text class="footer__label">实付</text>
+        <text class="footer__pay"><text class="footer__yuan">¥</text>{{payAmountText}}</text>
+      </view>
+      <button class="footer__btn" loading="{{submitting}}" bindtap="onSubmit">提交订单</button>
+    </view>
+  </block>
+</view>

@@ -5,6 +5,7 @@ import com.minimall.mall.api.dto.CreateOrderRequest;
 import com.minimall.mall.api.dto.OrderCreateResponse;
 import com.minimall.mall.api.dto.OrderPreviewRequest;
 import com.minimall.mall.api.dto.OrderPreviewView;
+import com.minimall.mall.api.dto.SeckillPreviewView;
 import com.minimall.common.BusinessException;
 import com.minimall.common.ErrorCode;
 import com.minimall.common.PageResult;
@@ -21,6 +22,8 @@ import com.minimall.mall.domain.MallOrderItem;
 import com.minimall.mall.domain.MallOrderStatusLog;
 import com.minimall.mall.domain.MallPromotionFullReduction;
 import com.minimall.mall.domain.MallPromotionFullReductionScope;
+import com.minimall.mall.domain.MallSeckillActivity;
+import com.minimall.mall.domain.MallSeckillItem;
 import com.minimall.mall.domain.MallSku;
 import com.minimall.mall.domain.MallStockLog;
 import com.minimall.mall.domain.MallWxPayment;
@@ -37,6 +40,9 @@ import com.minimall.mall.domain.repository.MallOrderRepository;
 import com.minimall.mall.domain.repository.MallOrderStatusLogRepository;
 import com.minimall.mall.domain.repository.MallPromotionFullReductionRepository;
 import com.minimall.mall.domain.repository.MallPromotionFullReductionScopeRepository;
+import com.minimall.mall.domain.repository.MallSeckillActivityRepository;
+import com.minimall.mall.domain.repository.MallSeckillBuyerRepository;
+import com.minimall.mall.domain.repository.MallSeckillItemRepository;
 import com.minimall.mall.domain.repository.MallSkuRepository;
 import com.minimall.mall.domain.repository.MallStockLogRepository;
 import com.minimall.mall.domain.repository.MallWxPaymentRepository;
@@ -46,6 +52,8 @@ import com.minimall.mall.service.MemberPointsService;
 import com.minimall.mall.service.OrderService;
 import com.minimall.mall.service.PayService;
 import com.minimall.mall.service.support.OrderAmountCalculator;
+import com.minimall.mall.service.support.SeckillRedisGate;
+import com.minimall.mall.service.support.SeckillStockService;
 import com.minimall.mall.service.support.SkuStockKeeper;
 import com.querydsl.core.BooleanBuilder;
 import org.slf4j.Logger;
@@ -54,6 +62,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -112,6 +122,11 @@ public class OrderServiceImpl implements OrderService {
     private final MemberPointsService memberPointsService;
     private final PayService payService;
     private final OrderNumberGenerator numberGenerator;
+    private final MallSeckillItemRepository seckillItemRepository;
+    private final MallSeckillActivityRepository seckillActivityRepository;
+    private final MallSeckillBuyerRepository seckillBuyerRepository;
+    private final SeckillStockService seckillStockService;
+    private final SeckillRedisGate seckillGate;
 
     public OrderServiceImpl(MallOrderRepository orderRepository,
                             MallOrderItemRepository orderItemRepository,
@@ -132,7 +147,12 @@ public class OrderServiceImpl implements OrderService {
                             OrderAmountCalculator calculator,
                             MemberPointsService memberPointsService,
                             PayService payService,
-                            OrderNumberGenerator numberGenerator) {
+                            OrderNumberGenerator numberGenerator,
+                            MallSeckillItemRepository seckillItemRepository,
+                            MallSeckillActivityRepository seckillActivityRepository,
+                            MallSeckillBuyerRepository seckillBuyerRepository,
+                            SeckillStockService seckillStockService,
+                            SeckillRedisGate seckillGate) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
@@ -153,6 +173,11 @@ public class OrderServiceImpl implements OrderService {
         this.memberPointsService = memberPointsService;
         this.payService = payService;
         this.numberGenerator = numberGenerator;
+        this.seckillItemRepository = seckillItemRepository;
+        this.seckillActivityRepository = seckillActivityRepository;
+        this.seckillBuyerRepository = seckillBuyerRepository;
+        this.seckillStockService = seckillStockService;
+        this.seckillGate = seckillGate;
     }
 
     @Override
@@ -171,10 +196,27 @@ public class OrderServiceImpl implements OrderService {
                 request.pointsToUse(), customerId);
         MallCustomerAddress address = prepared.address();
 
+        return persistOrder(prepared, customerId, tenantId, request.remark(), null);
+    }
+
+    /**
+     * 落库、锁库存、核销、状态日志、支付流水 —— 普通单与秒杀单共用这一整段。
+     *
+     * <p>共用的理由与 {@code prepare} 一样:任何一条路径上的金额、状态、流水写歪了,
+     * 都只能是"某一类订单出问题",而那种缺陷最难被发现。差异只有三处,全部由 {@code seckill} 决定:
+     * 订单类型与活动 id、明细上的商品项 id、以及库存锁定走哪条 SQL。
+     */
+    private OrderCreateResponse persistOrder(PreparedOrder prepared, Long customerId, Long tenantId,
+                                             String remark, SeckillMeta seckill) {
+        MallCustomerAddress address = prepared.address();
         MallOrder order = new MallOrder();
         order.setOrderNo(numberGenerator.nextOrderNo());
         order.setCustomerId(customerId);
         order.setStatus(MallOrder.STATUS_PENDING_PAY);
+        if (seckill != null) {
+            order.setOrderType(MallOrder.TYPE_SECKILL);
+            order.setSeckillActivityId(seckill.activity().getId());
+        }
         order.setGoodsAmount(prepared.goodsAmount());
         order.setFreightAmount(calculator.money(prepared.freight()));
         order.setPromotionDiscountAmount(prepared.promotionDiscount());
@@ -187,33 +229,38 @@ public class OrderServiceImpl implements OrderService {
         order.setReceiverPhone(address.getReceiverPhone());
         order.setReceiverAddress(address.getProvince() + address.getCity() + address.getDistrict()
                 + address.getDetailAddress());
-        order.setRemark(request.remark());
+        order.setRemark(remark);
         order = orderRepository.save(order);
 
         for (Line line : prepared.lines()) {
             MallOrderItem item = new MallOrderItem();
             item.setOrderId(order.getId());
             item.setSkuId(line.sku().getId());
+            if (seckill != null) {
+                item.setSeckillItemId(seckill.item().getId());
+            }
             item.setGoodsId(line.goods().getId());
             item.setGoodsName(line.goods().getGoodsName());
             item.setSkuName(line.sku().getSkuName());
             item.setGoodsImage(line.sku().getSkuImage() != null
                     ? line.sku().getSkuImage() : line.goods().getMainImage());
-            item.setPrice(line.sku().getPrice());
+            item.setPrice(line.unitPrice());
             item.setQuantity(line.quantity());
             item.setTotalAmount(calculator.money(line.totalAmount()));
             item.setAfterSaleStatus(MallOrderItem.AFTER_SALE_NONE);
             orderItemRepository.save(item);
 
-            // 锁库存:条件更新受影响行数为 0 表示可售不足(并发下单抢最后一件),
-            // 此时必须抛异常让整个事务回滚 —— 已经落库的订单与明细会一起撤销
-            int affected = stockKeeper.lockStock(line.sku().getId(), line.goods().getId(), tenantId,
-                    line.quantity());
-            if (affected == 0) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID,
-                        "「" + line.sku().getSkuName() + "」库存不足,请调整数量后重试");
+            if (seckill == null) {
+                // 锁库存:条件更新受影响行数为 0 表示可售不足(并发下单抢最后一件),
+                // 此时必须抛异常让整个事务回滚 —— 已经落库的订单与明细会一起撤销
+                int affected = stockKeeper.lockStock(line.sku().getId(), line.goods().getId(), tenantId,
+                        line.quantity());
+                if (affected == 0) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID,
+                            "「" + line.sku().getSkuName() + "」库存不足,请调整数量后重试");
+                }
+                writeStockLog(line.sku().getId(), STOCK_LOCK, 0, line.quantity(), order.getId(), "下单锁定");
             }
-            writeStockLog(line.sku().getId(), STOCK_LOCK, 0, line.quantity(), order.getId(), "下单锁定");
         }
 
         if (prepared.couponUse().recordId() != null) {
@@ -255,8 +302,9 @@ public class OrderServiceImpl implements OrderService {
         // 放在状态日志之后,让流水顺序是"创建订单(null→待支付)"→"自动支付(待支付→待发货)"
         payService.settleFreeOrder(order.getId());
 
-        log.info("订单创建成功 tenantId={} customerId={} orderNo={} payAmount={} pointsUsed={}",
-                tenantId, customerId, order.getOrderNo(), prepared.payAmount(), prepared.pointsUsed());
+        log.info("订单创建成功 tenantId={} customerId={} orderNo={} payAmount={} pointsUsed={} seckill={}",
+                tenantId, customerId, order.getOrderNo(), prepared.payAmount(), prepared.pointsUsed(),
+                seckill != null);
 
         return new OrderCreateResponse(order.getId(), order.getOrderNo(),
                 order.getGoodsAmount(), order.getFreightAmount(), order.getPromotionDiscountAmount(),
@@ -276,7 +324,7 @@ public class OrderServiceImpl implements OrderService {
                 .map(line -> new OrderPreviewView.Item(line.sku().getId(), line.goods().getId(),
                         line.goods().getGoodsName(), line.sku().getSkuName(),
                         line.sku().getSkuImage() != null ? line.sku().getSkuImage() : line.goods().getMainImage(),
-                        line.sku().getPrice(), line.quantity(), line.totalAmount(),
+                        line.unitPrice(), line.quantity(), line.totalAmount(),
                         line.sku().availableStock()))
                 .toList();
         return new OrderPreviewView(items, prepared.goodsAmount(), prepared.promotionDiscount(),
@@ -287,7 +335,141 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 结算准备:商品行 → 五种金额(3.5 的顺序 + 3.11 的积分抵现)。
+     * 秒杀下单(商城设计文档 3.12):独立入口,不与购物车/满减/券/积分混在一起。
+     *
+     * <p>顺序:Redis 闸门 → 注册回滚补偿 → 事务内精确校验(限购/配额/库存) → 落库。
+     * 闸门放在事务内、补偿挂在事务同步上,是因为 {@code @Transactional} 方法返回后才提交,
+     * 方法里 try/catch 抓不到"提交失败"。
+     */
+    @Override
+    public OrderCreateResponse createSeckill(Long itemId, int quantity, Long addressId) {
+        Long customerId = ClientContext.requireCustomerId();
+        Long tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (addressId == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "请选择收货地址");
+        }
+        if (quantity < 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "购买数量至少 1 件");
+        }
+
+        MallSeckillItem item = seckillItemRepository.findById(itemId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "秒杀商品不存在"));
+        MallSeckillActivity activity = requireRunning(item);
+
+        MallSku sku = skuRepository.findById(item.getSkuId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "商品规格不存在"));
+        MallGoods goods = goodsRepository.findById(item.getGoodsId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "商品不存在"));
+        if (sku.getStatus() == null || sku.getStatus() != STATUS_ENABLED
+                || goods.getStatus() == null || goods.getStatus() != STATUS_ENABLED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "商品已下架,无法抢购");
+        }
+        MallCustomerAddress address = addressRepository.findById(addressId)
+                .filter(row -> Objects.equals(row.getCustomerId(), customerId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "收货地址不存在"));
+
+        int limit = item.getPerCustomerLimit() == null ? 1 : item.getPerCustomerLimit();
+        SeckillRedisGate.Result acquired = acquireGate(item, activity, customerId, quantity, limit);
+        if (acquired == SeckillRedisGate.Result.SOLD_OUT) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "手慢了,已经抢光");
+        }
+        if (acquired == SeckillRedisGate.Result.LIMIT_EXCEEDED) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "每人限购 " + limit + " 件");
+        }
+
+        GateCompensation compensation = new GateCompensation(seckillGate, item.getId(), customerId, quantity);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(compensation);
+        }
+        try {
+            seckillStockService.consume(item, customerId, quantity);
+        } catch (BusinessException ex) {
+            // 限购被数据库拒绝、而闸门放行了 —— 说明 Redis 的已购计数不准,回滚时要按数据库的值改写
+            if (ex.getMessage() != null && ex.getMessage().contains("限购")) {
+                seckillBuyerRepository.findForUpdate(item.getId(), customerId)
+                        .ifPresent(buyer -> compensation.failAsLimitExceeded(
+                                buyer.getBoughtCount() == null ? 0 : buyer.getBoughtCount()));
+            }
+            throw ex;
+        }
+
+        BigDecimal unitPrice = item.getSeckillPrice();
+        Line line = new Line(sku, goods, quantity, unitPrice,
+                calculator.money(unitPrice.multiply(BigDecimal.valueOf(quantity))));
+        BigDecimal goodsAmount = line.totalAmount();
+        BigDecimal freight = freightAmount(List.of(line), address.getProvince());
+        BigDecimal payAmount = calculator.payable(goodsAmount, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, freight);
+        PreparedOrder prepared = new PreparedOrder(List.of(line), address, false, goodsAmount,
+                BigDecimal.ZERO, new CouponUse(null, BigDecimal.ZERO), BigDecimal.ZERO, 0, BigDecimal.ZERO,
+                freight, payAmount, 0, 0);
+        return persistOrder(prepared, customerId, tenantId, null, new SeckillMeta(activity, item));
+    }
+
+    /** 秒杀结算试算:与下单共用运费与金额计算,端上不做任何金额运算。 */
+    @Override
+    public SeckillPreviewView previewSeckill(Long itemId, Long addressId, Integer quantity) {
+        Long customerId = ClientContext.requireCustomerId();
+        int qty = quantity == null ? 1 : quantity;
+        if (qty < 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "购买数量至少 1 件");
+        }
+        MallSeckillItem item = seckillItemRepository.findById(itemId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "秒杀商品不存在"));
+        MallSeckillActivity activity = requireRunning(item);
+        MallSku sku = skuRepository.findById(item.getSkuId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "商品规格不存在"));
+        MallGoods goods = goodsRepository.findById(item.getGoodsId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "商品不存在"));
+
+        MallCustomerAddress address = addressId == null ? null : addressRepository.findById(addressId)
+                .filter(row -> Objects.equals(row.getCustomerId(), customerId))
+                .orElse(null);
+        Line line = new Line(sku, goods, qty, item.getSeckillPrice(),
+                calculator.money(item.getSeckillPrice().multiply(BigDecimal.valueOf(qty))));
+        BigDecimal goodsAmount = line.totalAmount();
+        BigDecimal freight = address == null ? BigDecimal.ZERO : freightAmount(List.of(line), address.getProvince());
+        BigDecimal payAmount = calculator.payable(goodsAmount, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, freight);
+
+        Integer cached = seckillGate.remaining(item.getId());
+        int remaining = cached == null ? item.remaining() : Math.max(cached, 0);
+        return new SeckillPreviewView(item.getId(), item.getGoodsId(), goods.getGoodsName(),
+                sku.getSkuImage() != null ? sku.getSkuImage() : goods.getMainImage(),
+                item.getSkuId(), sku.getSkuName(), item.getSeckillPrice(), qty,
+                goodsAmount, freight, payAmount, remaining, address == null);
+    }
+
+    /** 活动必须"进行中"且当前时间在窗内:定时任务晚了一分钟也不能让用户抢到。 */
+    private MallSeckillActivity requireRunning(MallSeckillItem item) {
+        MallSeckillActivity activity = seckillActivityRepository.findById(item.getActivityId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "秒杀活动不存在"));
+        if (activity.getStatus() == null
+                || activity.getStatus() != MallSeckillActivity.STATUS_RUNNING
+                || !activity.covers(LocalDateTime.now())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "活动未开始或已结束");
+        }
+        return activity;
+    }
+
+    /**
+     * 拿闸门。首次遇到未预热(Redis 重启、任务没跑到)时用数据库的剩余量补一次再重试。
+     */
+    private SeckillRedisGate.Result acquireGate(MallSeckillItem item, MallSeckillActivity activity,
+                                                Long customerId, int quantity, int limit) {
+        var ttl = seckillStockService.ttlOf(activity);
+        SeckillRedisGate.Result result = seckillGate.tryAcquire(item.getId(), customerId, quantity, limit, ttl);
+        if (result != SeckillRedisGate.Result.NOT_READY) {
+            return result;
+        }
+        seckillStockService.ensureGateLoaded(item, activity);
+        return seckillGate.tryAcquire(item.getId(), customerId, quantity, limit, ttl);
+    }
+
+    /** 结算准备:商品行 → 五种金额(3.5 的顺序 + 3.11 的积分抵现)。
      *
      * <p><b>试算与下单共用这一段是有意的</b>:端上自己算一遍的话,运费(模板/区域/包邮)、满减(活动+范围+阶梯)、
      * 券门槛、积分上限任何一处漂移,方向都是**少收钱**。这里只读不写,除了积分可用量会顺带做一次懒过期。
@@ -457,6 +639,12 @@ public class OrderServiceImpl implements OrderService {
         orderRepository.updateStatusOnClose(order.getId(), tenantId, toStatus, closeReason, now);
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
+            if (order.isSeckill() && item.getSeckillItemId() != null) {
+                // 秒杀单:除了锁定库存,还要退配额与限购账本;活动仍在进行中时货回到可抢池
+                seckillStockService.releaseItem(tenantId, item.getSkuId(), item.getGoodsId(),
+                        item.getSeckillItemId(), order.getCustomerId(), item.getQuantity(), order.getId());
+                continue;
+            }
             int affected = stockKeeper.releaseLockedStock(item.getSkuId(), item.getGoodsId(), tenantId,
                     item.getQuantity());
             if (affected == 0) {
@@ -622,7 +810,7 @@ public class OrderServiceImpl implements OrderService {
                     "「" + sku.getSkuName() + "」库存不足,仅剩 " + sku.availableStock() + " 件");
         }
         BigDecimal total = calculator.money(sku.getPrice().multiply(BigDecimal.valueOf(quantity)));
-        return new Line(sku, goods, quantity, total);
+        return new Line(sku, goods, quantity, sku.getPrice(), total);
     }
 
     private MallOrder loadOwned(Long orderId, Long customerId) {
@@ -676,7 +864,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /** 下单行:SKU + 商品 + 数量 + 行金额。 */
-    private record Line(MallSku sku, MallGoods goods, int quantity, BigDecimal totalAmount) {
+    private record Line(MallSku sku, MallGoods goods, int quantity, BigDecimal unitPrice,
+                        BigDecimal totalAmount) {
     }
 
     private record CouponUse(Long recordId, BigDecimal discount) {
@@ -688,5 +877,57 @@ public class OrderServiceImpl implements OrderService {
                                  BigDecimal couponDiscount, int pointsUsed, BigDecimal pointsDiscount,
                                  BigDecimal freight, BigDecimal payAmount, int maxRedeemPoints,
                                  int customerPoints) {
+    }
+
+    /** 秒杀单的类型与商品项 —— 只用来决定订单类型、明细的商品项 id 与库存锁定走哪条路。 */
+    private record SeckillMeta(MallSeckillActivity activity, MallSeckillItem item) {
+    }
+
+    /**
+     * 闸门补偿:事务回滚时把 Redis 名额还回去。
+     *
+     * <p>挂在事务同步上而不是方法内的 catch:提交失败(约束冲突、连接断开)不会走 catch,
+     * 只会走 {@code afterCompletion}。
+     *
+     * <p>两种补偿不能混:{@code LIMIT_EXCEEDED} 说明 Redis 的已购计数不准,必须按数据库的值改写,
+     * 否则下一个请求还会被放行,又变成"扣→查→退"的循环打数据库。
+     */
+    private static final class GateCompensation implements TransactionSynchronization {
+
+        private final SeckillRedisGate gate;
+        private final Long itemId;
+        private final Long customerId;
+        private final int quantity;
+        private boolean limitExceeded;
+        private int actualBought;
+
+        private GateCompensation(SeckillRedisGate gate, Long itemId, Long customerId, int quantity) {
+            this.gate = gate;
+            this.itemId = itemId;
+            this.customerId = customerId;
+            this.quantity = quantity;
+        }
+
+        private void failAsLimitExceeded(int actualBought) {
+            this.limitExceeded = true;
+            this.actualBought = actualBought;
+        }
+
+        @Override
+        public void afterCompletion(int status) {
+            if (status != STATUS_ROLLED_BACK) {
+                return;
+            }
+            try {
+                if (limitExceeded) {
+                    gate.repairLimit(itemId, customerId, actualBought, quantity);
+                } else {
+                    gate.restore(itemId, customerId, quantity);
+                }
+            } catch (RuntimeException ex) {
+                // 补偿失败不能掩盖原始异常;名额最多留到活动结束被清掉
+                log.error("秒杀闸门补偿失败 itemId={} customerId={}", itemId, customerId, ex);
+            }
+        }
     }
 }

@@ -23,6 +23,7 @@ minimall:
   schedule:
     cron:
       close-timeout-orders: "-"
+      seckill-advance: "-"
       reconcile-closed-paid-orders: "-"
       retry-refund-submit: "-"
       auto-receive-orders: "-"

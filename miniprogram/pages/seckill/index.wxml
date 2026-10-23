@@ -1,0 +1,53 @@
+<view class="page">
+  <view wx:if="{{loading && running.length === 0 && upcoming.length === 0}}" class="empty">加载中…</view>
+
+  <block wx:if="{{running.length > 0}}">
+    <view class="section-title">正在疯抢</view>
+    <view
+      wx:for="{{running}}"
+      wx:key="itemId"
+      class="card"
+      bindtap="onItemTap"
+      data-id="{{item.itemId}}"
+    >
+      <image class="card__img" src="{{item.image}}" mode="aspectFill"></image>
+      <view class="card__body">
+        <view class="card__name ellipsis-2">{{item.goodsName}}</view>
+        <view class="card__prices">
+          <text class="card__price"><text class="card__yuan">¥</text>{{item.priceText}}</text>
+          <text class="card__original">¥{{item.originalText}}</text>
+        </view>
+        <view class="card__progress">
+          <view class="card__bar"><view class="card__bar-in" style="width: {{item.percent}}%"></view></view>
+          <text class="card__percent">{{item.progressText}}</text>
+        </view>
+        <view class="card__countdown {{item.soldOut ? 'card__countdown--off' : ''}}">{{item.countdownText}}</view>
+      </view>
+    </view>
+  </block>
+
+  <block wx:if="{{upcoming.length > 0}}">
+    <view class="section-title">即将开始</view>
+    <view
+      wx:for="{{upcoming}}"
+      wx:key="itemId"
+      class="card"
+      bindtap="onItemTap"
+      data-id="{{item.itemId}}"
+    >
+      <image class="card__img" src="{{item.image}}" mode="aspectFill"></image>
+      <view class="card__body">
+        <view class="card__name ellipsis-2">{{item.goodsName}}</view>
+        <view class="card__prices">
+          <text class="card__price"><text class="card__yuan">¥</text>{{item.priceText}}</text>
+          <text class="card__original">¥{{item.originalText}}</text>
+        </view>
+        <view class="card__countdown card__countdown--soon">{{item.countdownText}} 开抢</view>
+      </view>
+    </view>
+  </block>
+
+  <view wx:if="{{!loading && running.length === 0 && upcoming.length === 0}}" class="empty">
+    暂时没有秒杀活动,明天再来看看
+  </view>
+</view>

@@ -1,4 +1,4 @@
-import { categories, goodsPage } from '../../api/client'
+import { categories, goodsPage, seckillHome } from '../../api/client'
 import type { Id } from '../../types/client'
 import { toCard, type GoodsCard } from '../../utils/goods'
 
@@ -32,11 +32,15 @@ Page({
     pageNo: 1,
     loading: false,
     finished: false,
+    /** 秒杀入口:没有场次时整块不渲染 */
+    seckillCount: 0,
+    seckillHint: '',
   },
 
   onLoad() {
     void this.loadCategories()
     void this.loadFirstPage()
+    void this.loadSeckill()
   },
 
   onPullDownRefresh() {
@@ -68,6 +72,32 @@ Page({
       sectionTitle: cell ? cell.label : '为你推荐',
     })
     void this.loadFirstPage()
+  },
+
+  onSeckillTap() {
+    wx.navigateTo({ url: '/pages/seckill/index' })
+  },
+
+  /**
+   * 只拉"有几场",不拉商品明细。
+   *
+   * 首页每次曝光都会跑这段代码,把整份秒杀列表拉下来等于把秒杀的读压力前置到首屏。
+   */
+  async loadSeckill() {
+    try {
+      const home = await seckillHome()
+      const running = (home.running || []).length
+      const upcoming = (home.upcoming || []).length
+      const count = running + upcoming
+      if (count === 0) {
+        return
+      }
+      const hint = running > 0 ? `${running} 场正在疯抢` : `${upcoming} 场即将开始`
+      this.setData({ seckillCount: count, seckillHint: hint })
+    } catch {
+      // 入口条是锦上添花,拉不到就不显示,不能因为秒杀接口把首屏拖垮
+      this.setData({ seckillCount: 0 })
+    }
   },
 
   onGoodsTap(e: WechatMiniprogram.TouchEvent) {

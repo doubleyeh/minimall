@@ -24,6 +24,13 @@
       </view>
       <text class="text-muted">已售 {{saleCountText}}</text>
     </view>
+    <view wx:if="{{seckillItemId}}" class="seckill" bindtap="onSeckillTap">
+      <view class="seckill__left">
+        <text class="seckill__flag">限时秒杀</text>
+        <text class="seckill__price">¥{{seckillPriceText}}</text>
+      </view>
+      <text class="seckill__go">{{seckillHint}} ›</text>
+    </view>
     <view class="title">{{goodsName}}</view>
     <view wx:if="{{goodsSubtitle}}" class="subtitle">{{goodsSubtitle}}</view>
   </view>

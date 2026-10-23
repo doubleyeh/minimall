@@ -1,0 +1,36 @@
+<view class="page">
+  <view class="hero">
+    <image class="hero__img" src="{{image}}" mode="aspectFill"></image>
+    <view class="hero__mask">
+      <view class="hero__flag">限时秒杀</view>
+      <view wx:if="{{state === 'soon'}}" class="hero__countdown">距开始 {{countdownText}}</view>
+      <view wx:elif="{{state === 'running'}}" class="hero__countdown">{{countdownLabel}} {{countdownText}}</view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="prices">
+      <text class="prices__now"><text class="prices__yuan">¥</text>{{priceText}}</text>
+      <text class="prices__original">¥{{originalText}}</text>
+      <text class="prices__remain {{state === 'soldout' ? 'prices__remain--off' : ''}}">{{remainingText}}</text>
+    </view>
+    <view class="progress">
+      <view class="progress__bar"><view class="progress__in" style="width: {{percent}}%"></view></view>
+      <text class="progress__text">{{progressText}}</text>
+    </view>
+    <view class="name ellipsis-2" bindtap="onGoGoods">{{goodsName}}</view>
+    <view class="sku">{{skuName}}</view>
+    <view class="limit">{{limitText}}</view>
+  </view>
+
+  <view class="rules">
+    <view class="rules__title">抢购说明</view>
+    <view class="rules__line">· 秒杀商品不参与满减,不可使用优惠券与积分</view>
+    <view class="rules__line">· 下单后请在 15 分钟内完成支付,超时名额自动释放</view>
+    <view class="rules__line">· 同一账号超出限购数量会被拒绝</view>
+  </view>
+
+  <view class="footer">
+    <button class="footer__btn {{disabled ? 'footer__btn--off' : ''}}" bindtap="onBuy">{{buttonText}}</button>
+  </view>
+</view>

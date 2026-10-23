@@ -62,7 +62,7 @@ public class StockWarnServiceImpl implements StockWarnService {
                 goods == null ? null : goods.getGoodsName(),
                 imageOf(sku, goods),
                 sku.getSkuCode(), sku.getSkuName(),
-                sku.getStock(), sku.getLockedStock(), sku.availableStock());
+                sku.getStock(), sku.getLockedStock(), sku.getFrozenStock(), sku.availableStock());
     }
 
     /** 规格图优先,没有就用商品主图(与订单明细的快照口径一致)。 */

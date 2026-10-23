@@ -24,7 +24,8 @@ public record ClientGoodsDetailView(
         Integer saleCount,
         List<String> images,
         List<SpecGroup> specs,
-        List<ClientSkuView> skus) {
+        List<ClientSkuView> skus,
+        ClientGoodsSeckillView seckill) {
 
     /** 一组规格(如"颜色")及其可选值。 */
     public record SpecGroup(String specName, List<String> values) {

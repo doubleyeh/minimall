@@ -5,6 +5,7 @@ import com.minimall.mall.api.dto.CreateOrderRequest;
 import com.minimall.mall.api.dto.OrderCreateResponse;
 import com.minimall.mall.api.dto.OrderPreviewRequest;
 import com.minimall.mall.api.dto.OrderPreviewView;
+import com.minimall.mall.api.dto.SeckillPreviewView;
 import com.minimall.common.PageResult;
 
 import java.time.LocalDateTime;
@@ -33,6 +34,16 @@ public interface OrderService {
      * 这是它存在的全部理由(端上自算必然漂移,而漂移的方向通常是少收钱)。
      */
     OrderPreviewView preview(OrderPreviewRequest request);
+
+    /**
+     * 秒杀下单(3.12):只有一个商品项,不参与满减/券/积分,运费照算。
+     *
+     * <p>与 {@link #create} 共用落库、状态日志与支付流水那一段,只在算价与库存锁定上分叉。
+     */
+    OrderCreateResponse createSeckill(Long itemId, int quantity, Long addressId);
+
+    /** 秒杀结算试算:与下单共用运费与金额计算。 */
+    SeckillPreviewView previewSeckill(Long itemId, Long addressId, Integer quantity);
 
     /** 买家取消(仅待支付订单)。释放锁定库存并退回优惠券。 */
     void cancel(Long orderId);

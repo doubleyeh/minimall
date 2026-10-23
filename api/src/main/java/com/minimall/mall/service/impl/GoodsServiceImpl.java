@@ -238,12 +238,16 @@ public class GoodsServiceImpl implements GoodsService {
             // 上架一个没有库存的商品,端上点进去就是"卖不了" —— 提前挡住比让用户投诉更好
             throw new BusinessException(ErrorCode.PARAM_INVALID, "商品库存为 0,无法上架");
         }
+        if (status == 0) {
+            ensureNoSeckillReservation(goodsId, "下架");
+        }
         goods.setStatus(status);
     }
 
     @Override
     public void delete(Long goodsId) {
         MallGoods goods = load(goodsId);
+        ensureNoSeckillReservation(goodsId, "删除");
         long referenced = orderItemRepository.countByGoodsId(goodsId);
         if (referenced > 0) {
             throw new BusinessException(ErrorCode.DATA_CONFLICT,
@@ -310,6 +314,17 @@ public class GoodsServiceImpl implements GoodsService {
     }
 
     private void applySkuFields(MallSku sku, SkuSaveRequest request) {
+        int locked = sku.getLockedStock() == null ? 0 : sku.getLockedStock();
+        int frozen = sku.getFrozenStock() == null ? 0 : sku.getFrozenStock();
+        if (request.stock() != null && request.stock() < locked + frozen) {
+            // 库存是三分量:改到 locked + frozen 以下,可售会变成负数,普通单与秒杀单都算错
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "库存不能小于已锁定(" + locked + ")与秒杀冻结(" + frozen + ")之和");
+        }
+        if (request.status() != null && request.status() == 0 && frozen > 0) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "该规格有 " + frozen + " 件被秒杀活动冻结,请先取消活动再停售");
+        }
         sku.setSkuCode(request.skuCode());
         sku.setSkuName(request.skuName());
         sku.setSkuImage(request.skuImage());
@@ -445,6 +460,22 @@ public class GoodsServiceImpl implements GoodsService {
         stockLogRepository.save(log);
     }
 
+    /**
+     * 有 SKU 被秒杀活动冻结时,禁止下架/删除商品。
+     *
+     * <p>冻结的货已经承诺给活动了:下架会让活动照常展示却下不了单,删除则会让解冻找不到 SKU。
+     * 正确做法是先取消活动(它会解冻),再下架。
+     */
+    private void ensureNoSeckillReservation(Long goodsId, String action) {
+        long frozen = skuRepository.findByGoodsIdOrderByIdAsc(goodsId).stream()
+                .mapToLong(sku -> sku.getFrozenStock() == null ? 0 : sku.getFrozenStock())
+                .sum();
+        if (frozen > 0) {
+            throw new BusinessException(ErrorCode.DATA_CONFLICT,
+                    "该商品有 " + frozen + " 件被秒杀活动冻结,请先取消活动再" + action);
+        }
+    }
+
     private void validateCategory(Long categoryId) {
         // 分类可能是二级分类,父级是否启用不影响挂载;这里只校验它存在且属于当前租户
         categoryRepository.findById(categoryId)
@@ -536,6 +567,6 @@ public class GoodsServiceImpl implements GoodsService {
     private SkuView toSkuView(MallSku sku, List<String> specValueNames) {
         return new SkuView(sku.getId(), sku.getSkuCode(), sku.getSkuName(), sku.getSkuImage(),
                 sku.getPrice(), sku.getCostPrice(), sku.getStock(), sku.getLockedStock(),
-                sku.availableStock(), sku.getWeight(), sku.getStatus(), specValueNames);
+                sku.getFrozenStock(), sku.availableStock(), sku.getWeight(), sku.getStatus(), specValueNames);
     }
 }

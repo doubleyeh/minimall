@@ -43,15 +43,60 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
     /**
      * 下单锁定库存(3.3 第 5 步):{@code lockedStock += quantity}。
      *
-     * <p>条件里的 {@code stock - lockedStock >= quantity} 就是"可售库存足够"。
+     * <p>条件里的 {@code stock - lockedStock - frozenStock >= quantity} 就是"普通可售库存足够"。
+     * 少减 {@code frozenStock} 会把秒杀预留的货卖给普通订单,活动开始就无货可抢。
      *
      * @return 受影响行数;0 表示可售库存不足或 SKU 已停售,调用方必须回滚整单
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update MallSku s set s.lockedStock = s.lockedStock + :quantity "
             + "where s.id = :skuId and s.tenantId = :tenantId and s.status = 1 "
-            + "and (s.stock - s.lockedStock) >= :quantity")
+            + "and (s.stock - s.lockedStock - s.frozenStock) >= :quantity")
     int lockStock(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId, @Param("quantity") int quantity);
+
+    /** 发布秒杀活动时冻结配额(3.12)。条件保证冻结不会把可售算成负数。 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.frozenStock = s.frozenStock + :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId "
+            + "and (s.stock - s.lockedStock - s.frozenStock) >= :quantity")
+    int freezeStock(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                    @Param("quantity") int quantity);
+
+    /** 活动结束/取消时把没卖掉的配额解冻。条件防负数。 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.frozenStock = s.frozenStock - :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId and s.frozenStock >= :quantity")
+    int unfreezeStock(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                      @Param("quantity") int quantity);
+
+    /** 秒杀下单:从冻结区转入锁定区(3.12)。 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.lockedStock = s.lockedStock + :quantity, "
+            + "s.frozenStock = s.frozenStock - :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId and s.frozenStock >= :quantity")
+    int lockStockForSeckill(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                            @Param("quantity") int quantity);
+
+    /** 秒杀单取消:锁定区退回冻结区(活动仍在进行中)。 */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.lockedStock = s.lockedStock - :quantity, "
+            + "s.frozenStock = s.frozenStock + :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId and s.lockedStock >= :quantity")
+    int releaseLockedStockToFrozen(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                                   @Param("quantity") int quantity);
+
+    /**
+     * 秒杀单「关单后钱又到账」:只扣实际库存,并把那份冻结还回去(3.12)。
+     *
+     * <p>关单时已经 {@code releaseLockedStockToFrozen} 把货退回冻结区,这里不能再减 {@code lockedStock}
+     * (会扣到别的订单头上),但要减掉 {@code frozenStock} —— 货已经真的卖出去了,不该还占着秒杀配额。
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update MallSku s set s.stock = s.stock - :quantity, s.frozenStock = s.frozenStock - :quantity "
+            + "where s.id = :skuId and s.tenantId = :tenantId "
+            + "and s.stock >= :quantity and s.frozenStock >= :quantity")
+    int deductStockOnlyForSeckill(@Param("skuId") Long skuId, @Param("tenantId") Long tenantId,
+                                  @Param("quantity") int quantity);
 
     /**
      * 释放锁定库存(订单超时/买家取消,3.4):{@code lockedStock -= quantity}。
@@ -111,7 +156,7 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
     long sumStockByGoodsId(@Param("goodsId") Long goodsId, @Param("tenantId") Long tenantId);
 
     /**
-     * 低库存规格:{@code stock - lockedStock <= threshold}。
+     * 低库存规格:{@code stock - lockedStock - frozenStock <= threshold}。
      *
      * <p>判据是**可售库存**而不是 {@code stock}:只看 stock 会把"挂着一堆待付款订单"的规格漏掉,
      * 那正是最该处理的。带上商品一起查并限定**上架**({@code g.status = 1})与**在售 SKU**:
@@ -121,7 +166,7 @@ public interface MallSkuRepository extends JpaRepository<MallSku, Long>,
      */
     @Query("select s from MallSku s, MallGoods g "
             + "where g.id = s.goodsId and g.status = 1 and s.status = 1 "
-            + "and (s.stock - s.lockedStock) <= :threshold "
-            + "order by (s.stock - s.lockedStock) asc, s.id asc")
+            + "and (s.stock - s.lockedStock - s.frozenStock) <= :threshold "
+            + "order by (s.stock - s.lockedStock - s.frozenStock) asc, s.id asc")
     Page<MallSku> findLowStock(@Param("threshold") int threshold, Pageable pageable);
 }

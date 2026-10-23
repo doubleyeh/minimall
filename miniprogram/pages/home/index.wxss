@@ -159,3 +159,36 @@
   font-size: 24rpx;
   color: var(--brand);
 }
+
+/* 秒杀入口条 */
+.seckill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20rpx 24rpx 0;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(120deg, var(--brand), var(--brand-deep));
+}
+
+.seckill__left {
+  display: flex;
+  align-items: baseline;
+}
+
+.seckill__flag {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.seckill__hint {
+  margin-left: 16rpx;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.seckill__more {
+  font-size: 26rpx;
+  color: #ffffff;
+}

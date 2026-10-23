@@ -56,6 +56,37 @@ public class SkuStockKeeper {
         return affected;
     }
 
+    /**
+     * 发布秒杀活动时冻结配额,见 {@link MallSkuRepository#freezeStock}。
+     *
+     * <p>只动 {@code frozenStock},{@code stock} 不变,所以不需要刷 {@code total_stock}。
+     */
+    public int freezeStock(Long skuId, Long tenantId, int quantity) {
+        return skuRepository.freezeStock(skuId, tenantId, quantity);
+    }
+
+    /** 活动结束/取消解冻未售出配额,见 {@link MallSkuRepository#unfreezeStock}。 */
+    public int unfreezeStock(Long skuId, Long tenantId, int quantity) {
+        return skuRepository.unfreezeStock(skuId, tenantId, quantity);
+    }
+
+    /** 秒杀下单:冻结区 → 锁定区,见 {@link MallSkuRepository#lockStockForSeckill}。 */
+    public int lockStockForSeckill(Long skuId, Long tenantId, int quantity) {
+        return skuRepository.lockStockForSeckill(skuId, tenantId, quantity);
+    }
+
+    /** 秒杀单取消:锁定区 → 冻结区(活动仍在进行中),见 {@link MallSkuRepository#releaseLockedStockToFrozen}。 */
+    public int releaseLockedStockToFrozen(Long skuId, Long tenantId, int quantity) {
+        return skuRepository.releaseLockedStockToFrozen(skuId, tenantId, quantity);
+    }
+
+    /** 关单后钱又到账的秒杀单:只扣实际库存并释放冻结,见 {@link MallSkuRepository#deductStockOnlyForSeckill}。 */
+    public int deductStockOnlyForSeckill(Long skuId, Long goodsId, Long tenantId, int quantity) {
+        int affected = skuRepository.deductStockOnlyForSeckill(skuId, tenantId, quantity);
+        refreshTotalStock(goodsId, tenantId, affected);
+        return affected;
+    }
+
     /** 库存没变(受影响行数为 0)时不刷新:避免白跑一次求和与一次清空持久化上下文。 */
     private void refreshTotalStock(Long goodsId, Long tenantId, int affected) {
         if (affected == 0 || goodsId == null) {

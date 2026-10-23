@@ -9,6 +9,8 @@ import type {
   ClientGoodsView,
   ClientOrderView,
   ClientProfileView,
+  ClientSeckillHomeView,
+  ClientSeckillItemView,
   Id,
   OrderCreateResponse,
   OrderPreviewView,
@@ -16,6 +18,7 @@ import type {
   PointsLogView,
   ReviewCreateRequest,
   ReviewView,
+  SeckillPreviewView,
 } from '../types/client'
 import { IS_RELEASE } from '../utils/env'
 import { buildQuery } from '../utils/query'
@@ -294,4 +297,38 @@ export function goodsReviews(goodsId: Id, pageNo = 1, pageSize = 5): Promise<Pag
  */
 export function createReview(data: ReviewCreateRequest): Promise<Id> {
   return request.post<Id>('/mall/api/reviews', data)
+}
+
+// ---------------------------------------------------------------- 秒杀
+
+/** 秒杀首页:服务端按"进行中 / 即将开始"分好组(端上时钟不准会误判)。 */
+export function seckillHome(): Promise<ClientSeckillHomeView> {
+  return request.get<ClientSeckillHomeView>('/mall/api/seckills')
+}
+
+export function seckillDetail(itemId: Id): Promise<ClientSeckillItemView> {
+  return request.get<ClientSeckillItemView>(`/mall/api/seckills/${itemId}`)
+}
+
+/** 结算试算:金额由服务端算,地址未选时运费按 0 计并返回 needAddress。 */
+export function seckillPreview(itemId: Id, data: {
+  addressId?: Id | null
+  quantity: number
+}): Promise<SeckillPreviewView> {
+  return request.post<SeckillPreviewView>(`/mall/api/seckills/${itemId}/preview`, data)
+}
+
+/**
+ * 秒杀下单。
+ *
+ * 必须带幂等键:用户连点时,Redis 闸门只保证"不超卖",拦不住"同一个人下出两笔" ——
+ * 同一个业务意图复用同一个键,服务端会把第二次当成重试直接回放第一次的响应。
+ */
+export function createSeckillOrder(itemId: Id, data: {
+  addressId: Id
+  quantity: number
+}, idempotencyKey: string): Promise<OrderCreateResponse> {
+  return request.post<OrderCreateResponse>(`/mall/api/seckills/${itemId}/orders`, data, {
+    'Idempotency-Key': idempotencyKey,
+  })
 }

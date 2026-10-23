@@ -41,6 +41,10 @@ public class MallStockLog extends BaseTenantEntity {
     @Column(name = "change_locked", nullable = false)
     private Integer changeLocked;
 
+    /** {@code frozenStock} 的变动量(秒杀冻结/解冻)。 */
+    @Column(name = "change_frozen", nullable = false)
+    private Integer changeFrozen = 0;
+
     /** 关联业务 ID(通常为订单 ID),手动调整时为空。 */
     @Column(name = "biz_id")
     private Long bizId;

@@ -38,6 +38,10 @@ Page({
     detailHtml: '',
     reviews: [] as ReviewItem[],
     reviewTotal: 0,
+    /** 秒杀入口:有才有值,为空时标签不渲染 */
+    seckillItemId: '',
+    seckillPriceText: '',
+    seckillHint: '',
   },
 
   /** 商品详情,用于本地匹配 SKU;不放进 data(它会整包发给渲染层,没必要) */
@@ -88,6 +92,12 @@ Page({
         saleCountText: String(detail.saleCount || 0),
         detailHtml: detail.detailContent || '',
         specGroups,
+        // 秒杀入口:没有秒杀时为 null,整块不渲染
+        seckillItemId: detail.seckill ? detail.seckill.itemId : '',
+        seckillPriceText: detail.seckill ? money(detail.seckill.seckillPrice) : '',
+        seckillHint: detail.seckill
+          ? (detail.seckill.status === 2 ? '正在秒杀' : '即将秒杀')
+          : '',
         // 只有一个 SKU 时直接替用户选好:让用户为一个选择唯一选项的规格点一下没有意义
         selected: specGroups.length > 0 && this.skus.length === 1 ? this.skus[0].specValues.slice() : [],
         quantity: 1,
@@ -229,5 +239,12 @@ Page({
       return
     }
     wx.previewImage({ current, urls })
+  },
+
+  onSeckillTap() {
+    if (!this.data.seckillItemId) {
+      return
+    }
+    wx.navigateTo({ url: `/pages/seckill/detail/index?itemId=${this.data.seckillItemId}` })
   },
 })

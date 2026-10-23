@@ -53,6 +53,15 @@
     </view>
   </view>
 
+  <!-- 秒杀入口:有场次才出现,不留一条空槽 -->
+  <view wx:if="{{seckillCount > 0}}" class="seckill" bindtap="onSeckillTap">
+    <view class="seckill__left">
+      <text class="seckill__flag">限时秒杀</text>
+      <text class="seckill__hint">{{seckillHint}}</text>
+    </view>
+    <text class="seckill__more">去看看 ›</text>
+  </view>
+
   <view class="reco">
     <view class="section-title">{{sectionTitle}}</view>
     <text wx:if="{{activeCategoryId !== ''}}" class="reco__reset" bindtap="onCategoryTap" data-id="">看全部</text>

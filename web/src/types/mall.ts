@@ -89,7 +89,9 @@ export interface SkuView {
   costPrice?: number | null
   stock: number
   lockedStock: number
-  /** 可售库存 = stock - lockedStock(端上展示与下单校验都用它) */
+  /** 被秒杀活动冻结、尚未被秒杀单占用的数量 */
+  frozenStock: number
+  /** 可售库存 = stock - lockedStock - frozenStock(端上展示与下单校验都用它) */
   availableStock: number
   weight?: number | null
   status: number
@@ -370,4 +372,63 @@ export interface TopGoodsView {
 export interface SalesStatReport {
   summary: SalesSummaryView
   topGoods: TopGoodsView[]
+}
+
+// ---------------------------------------------------------------- 秒杀
+
+export interface SeckillItemView {
+  id: Id
+  goodsId: Id
+  goodsName?: string | null
+  goodsImage?: string | null
+  skuId: Id
+  skuCode?: string | null
+  skuName?: string | null
+  /** SKU 原价,用于展示划线价 */
+  originalPrice?: number | null
+  seckillPrice: number
+  seckillStock: number
+  soldCount: number
+  perCustomerLimit: number
+  remaining: number
+}
+
+/** 0-草稿 1-待开始 2-进行中 3-已结束 4-已取消 */
+export interface SeckillActivityView {
+  id: Id
+  activityName: string
+  startTime: string
+  endTime: string
+  status: number
+  remark?: string | null
+  sortOrder: number
+  totalQuota: number
+  totalSold: number
+  /** 当前冻结在 SKU 上的数量(仅待开始/进行中非 0) */
+  frozenStock: number
+  items: SeckillItemView[]
+}
+
+export interface SeckillItemSaveRequest {
+  skuId: Id
+  seckillPrice: number
+  seckillStock: number
+  perCustomerLimit: number
+  sortOrder?: number
+}
+
+export interface SeckillSaveRequest {
+  activityName: string
+  startTime: string
+  endTime: string
+  remark?: string | null
+  sortOrder?: number
+  items: SeckillItemSaveRequest[]
+}
+
+export interface SeckillPageQuery {
+  keyword?: string
+  status?: number | null
+  pageNo: number
+  pageSize: number
 }

@@ -12,13 +12,14 @@ import java.math.BigDecimal;
 /**
  * SKU(商城设计文档 3.2):多规格下价格与库存的实际载体。
  *
- * <p><b>库存的两个字段不能混用</b>:
+ * <p><b>库存的三个字段不能混用</b>:
  * <ul>
  *   <li>{@code stock}:实际库存(还没卖出去的实物数量)</li>
  *   <li>{@code lockedStock}:已下单未支付而锁定的数量</li>
+ *   <li>{@code frozenStock}:已发布秒杀活动冻结、尚未被秒杀单占用的数量</li>
  * </ul>
- * <b>可售库存 = {@code stock - lockedStock}</b>。列表页/详情页/下单校验都必须用它,
- * 直接展示或比较 {@code stock} 会卖出已经被别人锁定的货(超卖)。
+ * <b>普通可售库存 = {@code stock - lockedStock - frozenStock}</b>。列表页/详情页/下单校验都必须用它,
+ * 直接展示或比较 {@code stock} 会卖出已经被别人锁定或已被秒杀预留的货(超卖)。
  *
  * <p>支付成功后 {@code stock} 与 {@code lockedStock} **同时**减少(3.8):
  * 前者是货真的卖出去了,后者是锁定解除了。只减一个都会让可售库存算错。
@@ -58,6 +59,10 @@ public class MallSku extends BaseTenantEntity {
     @Column(name = "locked_stock", nullable = false)
     private Integer lockedStock;
 
+    /** 被已发布秒杀活动冻结、尚未被秒杀单占用的数量。 */
+    @Column(name = "frozen_stock", nullable = false)
+    private Integer frozenStock = 0;
+
     /** 重量(kg),按重量计运费时使用(3.7)。 */
     @Column(name = "weight", precision = 10, scale = 3)
     private BigDecimal weight;
@@ -67,14 +72,21 @@ public class MallSku extends BaseTenantEntity {
     private Integer status;
 
     /**
-     * 可售库存 = 实际库存 - 锁定库存。
+     * 可售库存 = 实际库存 - 锁定库存 - 秒杀冻结。
      *
-     * <p>收敛成实体方法而不是各处手写减法:这个公式有两个使用方(展示、下单校验),
-     * 写错一个方向(如 {@code lockedStock - stock})会让超卖判定完全失效。
+     * <p>收敛成实体方法而不是各处手写减法:这个公式有三个使用方(展示、普通下单校验、低库存预警),
+     * 写错一个方向(如 {@code lockedStock - stock})会让超卖判定完全失效。少减 {@code frozenStock}
+     * 的结果是"秒杀预留的货被普通单买走",活动开始就无货可抢。
      */
     public int availableStock() {
         int actual = stock == null ? 0 : stock;
         int locked = lockedStock == null ? 0 : lockedStock;
-        return actual - locked;
+        int frozen = frozenStock == null ? 0 : frozenStock;
+        return actual - locked - frozen;
+    }
+
+    /** 秒杀可抢库存 = 冻结量。 */
+    public int seckillStock() {
+        return frozenStock == null ? 0 : frozenStock;
     }
 }

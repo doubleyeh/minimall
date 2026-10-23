@@ -41,6 +41,10 @@ public class MallOrderItem extends BaseTenantEntity {
     @Column(name = "sku_id", nullable = false)
     private Long skuId;
 
+    /** 秒杀活动商品项,普通单为空。取消/复活靠它定位配额与限购账本。 */
+    @Column(name = "seckill_item_id")
+    private Long seckillItemId;
+
     /** 冗余字段,售后/评价按 goods_id 查询更方便。 */
     @Column(name = "goods_id", nullable = false)
     private Long goodsId;

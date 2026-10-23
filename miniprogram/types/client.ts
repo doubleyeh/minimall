@@ -55,6 +55,25 @@ export interface ClientGoodsDetailView {
   images: string[]
   specs: Array<{ specName: string; values: string[] }>
   skus: ClientSkuView[]
+  /** 该商品有进行中/待开始的秒杀时非 null;没有秒杀时整个字段为 null */
+  seckill?: ClientGoodsSeckillView | null
+}
+
+/**
+ * 商品详情上的秒杀入口。
+ *
+ * 只带"有没有秒杀"与最低限度的时间/价格信息 —— 完整的进度与抢购在秒杀详情页,
+ * 首页与详情页都不该因为想显示一个标签就把整份秒杀数据拉下来。
+ */
+export interface ClientGoodsSeckillView {
+  itemId: Id
+  skuId: Id
+  seckillPrice: number
+  remaining: number
+  perCustomerLimit: number
+  startTime: string
+  endTime: string
+  status: number
 }
 
 export interface CartItemView {
@@ -302,4 +321,57 @@ export interface PointsLogView {
   bizTypeText: string
   remark?: string | null
   createTime: string
+}
+
+// ---------------------------------------------------------------- 秒杀
+
+/**
+ * 秒杀商品项。
+ *
+ * `remaining` 是服务端算好的剩余可抢量(优先读 Redis 闸门),端上不要自己用配额减已售 ——
+ * 下单失败的原因可能来自别的路径,两个算法必然对不上。
+ * `bought` 是当前客户已购件数,用于"每人限购 N 件,你已购 M 件"。
+ */
+export interface ClientSeckillItemView {
+  itemId: Id
+  activityId: Id
+  activityName: string
+  goodsId: Id
+  goodsName: string
+  goodsImage?: string | null
+  skuId: Id
+  skuName: string
+  originalPrice: number
+  seckillPrice: number
+  totalQuota: number
+  soldCount: number
+  remaining: number
+  perCustomerLimit: number
+  bought: number
+  startTime: string
+  endTime: string
+  /** 1-待开始 2-进行中 3-已结束(客户端只会看到 1/2) */
+  status: number
+}
+
+export interface ClientSeckillHomeView {
+  running: ClientSeckillItemView[]
+  upcoming: ClientSeckillItemView[]
+}
+
+/** 秒杀结算试算:金额全部由服务端算,端上不做乘法。 */
+export interface SeckillPreviewView {
+  itemId: Id
+  goodsId: Id
+  goodsName: string
+  goodsImage: string
+  skuId: Id
+  skuName: string
+  seckillPrice: number
+  quantity: number
+  goodsAmount: number
+  freightAmount: number
+  payAmount: number
+  remaining: number
+  needAddress: boolean
 }

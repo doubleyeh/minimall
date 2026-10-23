@@ -90,6 +90,7 @@ public class PayServiceImpl implements PayService {
     private final TenantLookup tenantLookup;
     private final MallWxRefundRepository refundRepository;
     private final OrderAmountCalculator calculator;
+    private final com.minimall.mall.service.support.SeckillStockService seckillStockService;
 
     public PayServiceImpl(MallOrderRepository orderRepository,
                           MallOrderItemRepository orderItemRepository,
@@ -104,7 +105,8 @@ public class PayServiceImpl implements PayService {
                           MallCustomerRepository customerRepository,
                           TenantLookup tenantLookup,
                           MallWxRefundRepository refundRepository,
-                          OrderAmountCalculator calculator) {
+                          OrderAmountCalculator calculator,
+                          com.minimall.mall.service.support.SeckillStockService seckillStockService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.statusLogRepository = statusLogRepository;
@@ -119,6 +121,7 @@ public class PayServiceImpl implements PayService {
         this.tenantLookup = tenantLookup;
         this.refundRepository = refundRepository;
         this.calculator = calculator;
+        this.seckillStockService = seckillStockService;
     }
 
     @Override
@@ -369,6 +372,15 @@ public class PayServiceImpl implements PayService {
         order.setPayTime(LocalDateTime.now());
 
         for (MallOrderItem item : orderItemRepository.findByOrderIdOrderByIdAsc(order.getId())) {
+            // 秒杀单被复活:关单时已经把名额与冻结退回去了,这里要重新占回来(见 SeckillStockService#reopen)。
+            // 它自己写库存流水,不需要下面的通用那段。
+            if (reopening && order.isSeckill() && item.getSeckillItemId() != null) {
+                seckillStockService.reopen(item.getSeckillItemId(), order.getCustomerId(), item.getQuantity(),
+                        order.getId());
+                goodsRepository.findById(item.getGoodsId())
+                        .ifPresent(goods -> increaseSaleCount(goods, item.getQuantity()));
+                continue;
+            }
             // 复活的订单不能再走 deductStockOnPaid:关单时 lockedStock 已经减过了,
             // 再减一次会扣到别的订单头上(见 MallSkuRepository#deductStockOnly)
             int affected = reopening

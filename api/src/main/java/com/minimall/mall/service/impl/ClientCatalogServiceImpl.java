@@ -52,6 +52,7 @@ public class ClientCatalogServiceImpl implements ClientCatalogService {
     private final MallGoodsSpecValueRepository specValueRepository;
     private final MallSkuRepository skuRepository;
     private final MallSkuSpecValueRepository skuSpecValueRepository;
+    private final com.minimall.mall.service.SeckillClientService seckillClientService;
 
     public ClientCatalogServiceImpl(MallGoodsRepository goodsRepository,
                                     MallGoodsCategoryRepository categoryRepository,
@@ -59,7 +60,8 @@ public class ClientCatalogServiceImpl implements ClientCatalogService {
                                     MallGoodsSpecRepository specRepository,
                                     MallGoodsSpecValueRepository specValueRepository,
                                     MallSkuRepository skuRepository,
-                                    MallSkuSpecValueRepository skuSpecValueRepository) {
+                                    MallSkuSpecValueRepository skuSpecValueRepository,
+                                    com.minimall.mall.service.SeckillClientService seckillClientService) {
         this.goodsRepository = goodsRepository;
         this.categoryRepository = categoryRepository;
         this.imageRepository = imageRepository;
@@ -67,6 +69,7 @@ public class ClientCatalogServiceImpl implements ClientCatalogService {
         this.specValueRepository = specValueRepository;
         this.skuRepository = skuRepository;
         this.skuSpecValueRepository = skuSpecValueRepository;
+        this.seckillClientService = seckillClientService;
     }
 
     @Override
@@ -144,7 +147,8 @@ public class ClientCatalogServiceImpl implements ClientCatalogService {
         int totalStock = enabledSkus.stream().mapToInt(MallSku::availableStock).sum();
         return new ClientGoodsDetailView(goods.getId(), goods.getGoodsName(), goods.getGoodsSubtitle(),
                 goods.getMainImage(), goods.getDetailContent(), goods.getSalePriceMin(), goods.getSalePriceMax(),
-                totalStock, goods.getSaleCount(), images, specGroups, skuViews);
+                totalStock, goods.getSaleCount(), images, specGroups, skuViews,
+                seckillClientService.seckillOfGoods(goods.getId()));
     }
 
     private Map<Long, List<String>> specValueNamesBySku(List<Long> skuIds) {

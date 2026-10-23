@@ -36,7 +36,7 @@ type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
  * 而 `wx.request` 对对象类型的 data **默认按 form 表单序列化** —— 不声明的话,
  * 后端的 `@RequestBody` 反序列化会失败,表现为一堆看不懂的 400。
  */
-function buildHeader(hasBody: boolean): Record<string, string> {
+function buildHeader(hasBody: boolean, extra?: Record<string, string>): Record<string, string> {
   const header: Record<string, string> = { 'X-Tenant-Code': TENANT_CODE }
   if (hasBody) {
     header['Content-Type'] = 'application/json'
@@ -45,20 +45,22 @@ function buildHeader(hasBody: boolean): Record<string, string> {
   if (token) {
     header.Authorization = `Bearer ${token}`
   }
-  return header
+  // 幂等键等由调用方补充的头:放在最后,允许覆盖默认值
+  return extra ? { ...header, ...extra } : header
 }
 
 function rawRequest<T>(
   method: Method,
   url: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ statusCode: number; body: ApiResponse<T> | null }> {
   return new Promise((resolve, reject) => {
     wx.request<ApiResponse<T>>({
       url: `${API_BASE_URL}${url}`,
       method,
       data: body as WechatMiniprogram.IAnyObject | undefined,
-      header: buildHeader(body !== undefined),
+      header: buildHeader(body !== undefined, extraHeaders),
       timeout: REQUEST_TIMEOUT,
       success: (res) => {
         resolve({ statusCode: res.statusCode, body: (res.data ?? null) as ApiResponse<T> | null })
@@ -68,15 +70,16 @@ function rawRequest<T>(
   })
 }
 
-async function doRequest<T>(method: Method, url: string, body?: unknown): Promise<T> {
-  let response = await rawRequest<T>(method, url, body)
+async function doRequest<T>(method: Method, url: string, body?: unknown,
+  extraHeaders?: Record<string, string>): Promise<T> {
+  let response = await rawRequest<T>(method, url, body, extraHeaders)
 
   if (response.statusCode === 401) {
     // 令牌 30 天过期:静默重登后重试一次。
     // 重试是安全的 —— 401 由鉴权过滤器在进入 Controller **之前**返回,这一次请求并没有执行,
     // 所以不会出现"写操作执行了但被当成失败重试"的重复提交。
     await silentLogin()
-    response = await rawRequest<T>(method, url, body)
+    response = await rawRequest<T>(method, url, body, extraHeaders)
     if (response.statusCode === 401) {
       throw new ApiError(40100, '登录已过期,请重新进入小程序')
     }
@@ -101,8 +104,9 @@ export const request = {
   get<T>(url: string): Promise<T> {
     return doRequest<T>('GET', url)
   },
-  post<T>(url: string, body?: unknown): Promise<T> {
-    return doRequest<T>('POST', url, body)
+  /** `extraHeaders` 目前只用于秒杀下单的 Idempotency-Key。 */
+  post<T>(url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+    return doRequest<T>('POST', url, body, extraHeaders)
   },
   put<T>(url: string, body?: unknown): Promise<T> {
     return doRequest<T>('PUT', url, body)

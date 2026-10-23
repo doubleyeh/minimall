@@ -41,6 +41,11 @@ public class MallOrder extends BaseTenantEntity {
     /** 售后中(存在进行中的售后单)。 */
     public static final int STATUS_AFTER_SALE = 6;
 
+    /** 普通订单。 */
+    public static final int TYPE_NORMAL = 1;
+    /** 秒杀订单:只有一个商品项,不参与满减/券/积分。 */
+    public static final int TYPE_SECKILL = 2;
+
     /** 对外展示单号,格式见 3.6。 */
     @Column(name = "order_no", nullable = false, length = 32)
     private String orderNo;
@@ -50,6 +55,19 @@ public class MallOrder extends BaseTenantEntity {
 
     @Column(name = "status", nullable = false)
     private Integer status;
+
+    /**
+     * 1-普通订单 2-秒杀订单。
+     *
+     * <p>秒杀单与普通单共用订单表,但取消时的资源回退不同(要退配额与冻结),所以必须有这个标记,
+     * 不能靠"有没有 seckillActivityId"推断 —— 历史数据里普通单的这一列就是空的。
+     */
+    @Column(name = "order_type", nullable = false)
+    private Integer orderType = TYPE_NORMAL;
+
+    /** 秒杀活动 id,普通单为空。 */
+    @Column(name = "seckill_activity_id")
+    private Long seckillActivityId;
 
     /** 商品总金额:下单时各 SKU 价格快照求和。 */
     @Column(name = "goods_amount", nullable = false, precision = 10, scale = 2)
@@ -126,4 +144,8 @@ public class MallOrder extends BaseTenantEntity {
 
     @Column(name = "finish_time")
     private LocalDateTime finishTime;
+
+    public boolean isSeckill() {
+        return orderType != null && orderType == TYPE_SECKILL;
+    }
 }
