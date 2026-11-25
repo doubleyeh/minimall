@@ -5,13 +5,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-      版本号来源:architecture.md 第 9.1 节(2026年9月核实)。
+      版本号来源:architecture.md 第 9.1 节(2026年11月核实)。
       升级前请去 Maven Central / 官方发布页确认最新兼容补丁版本,不要凭记忆改。
     -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -28,22 +28,27 @@
 
         <!--
           注意:不要定义名为 querydsl.version 的属性!
-          spring-boot-dependencies 4.1.0 用 ${openfeign-querydsl.version}(默认 5.1.0)去 import
-          com.querydsl:querydsl-bom,在项目里覆盖这个属性会把父 POM 的 import 一起改坏
+          spring-boot-dependencies 4.2.0 用 ${querydsl.version}(默认 5.1.0;4.1.0 里这个属性
+          叫 openfeign-querydsl.version,4.2 起改名)去 import com.querydsl:querydsl-bom,
+          在项目里覆盖这个属性会把父 POM 的 import 一起改坏
           (会变成 com.querydsl:querydsl-bom:7.x 这种不存在的坐标,构建直接读不出 POM)。
           fork 的版本必须用另一个属性名。
         -->
-        <openfeign-querydsl.version>7.6</openfeign-querydsl.version>
+        <openfeign-querydsl.version>7.7</openfeign-querydsl.version>
         <sa-token.version>1.46.0</sa-token.version>
         <!-- 覆盖率统计(0.8.12 起正式支持 Java 21 的字节码) -->
         <jacoco.version>0.8.13</jacoco.version>
         <!-- 小程序客户端 JWT(jjwt 0.12.x) -->
         <jjwt.version>0.12.6</jjwt.version>
         <archunit.version>1.3.0</archunit.version>
-        <!-- 这两个属性覆盖的是普通受管依赖(不是 import 的 BOM),覆盖是安全的;已实测可解析 -->
-        <mysql.version>26.7.0</mysql.version>
+        <!--
+          这两个属性覆盖的是普通受管依赖(不是 import 的 BOM),覆盖是安全的;已实测可解析。
+          4.2.0 的依赖管理本身锁的就是 mysql 26.10.0 / flyway 12.11.0,这里写相同的值不是覆盖,
+          而是为了让 flyway-maven-plugin 的 <dependencies> 与受管依赖共用同一版本号。
+        -->
+        <mysql.version>26.10.0</mysql.version>
         <!-- flyway-core / flyway-mysql 两个模块版本号必须一致(架构文档 9.1) -->
-        <flyway.version>12.5.0</flyway.version>
+        <flyway.version>12.11.0</flyway.version>
         <!-- 默认排除打 @Tag("integration") 的用例(需要 MySQL/Redis),全量跑: mvn test -Dexcluded.groups= -->
         <excluded.groups>integration</excluded.groups>
     </properties>
@@ -61,7 +66,7 @@
         <!--
           切面:租户过滤切面、操作日志切面都依赖它,web starter 不传递引入。
           注意 Spring Boot 4 里这个 starter 已改名为 spring-boot-starter-aspectj
-          (旧的 spring-boot-starter-aop 在 4.1.0 的依赖管理里没有版本号,直接构建失败)。
+          (旧的 spring-boot-starter-aop 在 4.x 的依赖管理里没有版本号,直接构建失败)。
         -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

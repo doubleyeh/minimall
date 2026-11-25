@@ -16,7 +16,7 @@
 | 层 | 选型 | 版本/说明 |
 |---|---|---|
 | 语言/运行时 | JDK 21 | 虚拟线程默认开启 |
-| 框架 | Spring Boot | 4.1.x(当前最新次要版本) |
+| 框架 | Spring Boot | 4.2.x(当前最新次要版本) |
 | ORM | Spring Data JPA + QueryDSL | 不用 MyBatis-Plus,不用 Spring Data `Specification`(理由见1.1) |
 | 数据库 | MySQL 8 | |
 | 鉴权 | Sa-Token | 登录态、踢人下线 |
@@ -796,10 +796,10 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 | 分类 | 坐标(group:artifact) | 说明 |
 |---|---|---|
 | Web | `spring-boot-starter-web` | |
-| 持久层 | `spring-boot-starter-data-jpa` | 带 Hibernate **7.4.x**(Spring Boot 4.1.0 实际锁定 7.4.1;7.1/7.2 那条线对应的是 4.0,前一版写 7.2.x 是错的) |
+| 持久层 | `spring-boot-starter-data-jpa` | 带 Hibernate **7.4.x**(4.1.0 锁 7.4.1,4.2.0 锁 7.4.15.Final;7.1/7.2 那条线对应的是 4.0,前一版写 7.2.x 是错的) |
 | QueryDSL | `io.github.openfeign.querydsl:querydsl-jpa`(**无 classifier**)、`querydsl-apt`(classifier `jakarta`,scope provided) | **不要用 `com.querydsl` 官方坐标**——原项目最后一次发版在2021年,基本处于停止维护状态,对 Hibernate 6+ 的兼容性有已知未修复问题;OpenFeign fork 是目前活跃维护、专门适配 Jakarta 命名空间的分支,选型时明确指定用这个。**分类器在这两个 artifact 上不对称,已实测**:fork 7.x 的 `querydsl-jpa` 是 jakarta-only,写 `classifier=jakarta` 会直接解析失败;只有 `querydsl-apt` 需要 `jakarta` 分类器(它同时还有 `jpa`/默认两种,默认那个是 javax 命名空间) |
 | 校验 | `spring-boot-starter-validation` | |
-| 鉴权 | `cn.dev33:sa-token-spring-boot4-starter`、`cn.dev33:sa-token-redis-template` + `org.apache.commons:commons-pool2`(会话存 Redis) | **两处注意**:①**不是 `sa-token-spring-boot3-starter`**——Sa-Token 给 Spring Boot 4 单独发了适配模块(`sa-token-spring-boot4-starter`),本方案技术栈是 Spring Boot 4.1.x,应该用这个;②**会话存储用 `sa-token-redis-template`,不是前一版写的 `sa-token-redis-jackson`**——Spring Boot 4 起默认 JSON 库换成 Jackson 3(包名改为 `tools.jackson`),Sa-Token 官方"集成 Redis"文档现在推荐的是基于 `RedisTemplate` 的 `sa-token-redis-template`,别再按旧版本记忆去引 jackson 模块。相关插件(redisson 等)二选一,不要两套 `SaTokenDao` 同时引入 |
+| 鉴权 | `cn.dev33:sa-token-spring-boot4-starter`、`cn.dev33:sa-token-redis-template` + `org.apache.commons:commons-pool2`(会话存 Redis) | **两处注意**:①**不是 `sa-token-spring-boot3-starter`**——Sa-Token 给 Spring Boot 4 单独发了适配模块(`sa-token-spring-boot4-starter`),本方案技术栈是 Spring Boot 4.2.x,应该用这个;②**会话存储用 `sa-token-redis-template`,不是前一版写的 `sa-token-redis-jackson`**——Spring Boot 4 起默认 JSON 库换成 Jackson 3(包名改为 `tools.jackson`),Sa-Token 官方"集成 Redis"文档现在推荐的是基于 `RedisTemplate` 的 `sa-token-redis-template`,别再按旧版本记忆去引 jackson 模块。相关插件(redisson 等)二选一,不要两套 `SaTokenDao` 同时引入 |
 | 版本硬约束 | — | `sa-token-redis-template` 自 1.46.0 起使用了 Redis 6.0+ 的 `SET KEEPTTL`,**Redis 版本必须 ≥ 6.0**,低于 6.0 会直接报 `ERR syntax error`。集成模块的版本必须与 `sa-token-spring-boot4-starter` 完全一致 |
 | 数据库驱动 | `com.mysql:mysql-connector-j` | |
 | 缓存 | `spring-boot-starter-data-redis` | |
@@ -810,16 +810,16 @@ Sa-Token 的登录态校验必然失败。它的租户上下文**来自刷新令
 
 **构建插件要求**:QueryDSL 的 Q 类是编译期通过注解处理器(APT)生成的,`maven-compiler-plugin` 需要在 `annotationProcessorPaths` 里显式声明 `querydsl-apt`(带 jakarta classifier)和 `jakarta.persistence-api`,否则 Q 类不生成,QueryDSL 相关代码编译不过。这是实现时最容易被漏配的一步。
 
-**具体版本号(2026年9月核实,实现时请再核对一遍是否有更新的补丁版本)**:
+**具体版本号(2026年11月核实,实现时请再核对一遍是否有更新的补丁版本)**:
 
 | 坐标 | 版本 | 备注 |
 |---|---|---|
-| `org.springframework.boot:spring-boot-starter-parent` | `4.1.0` | 2026年6月10日 GA,当前 Spring Boot 4 系列最新次要版本;之后如果出了 4.1.x 补丁版本,直接用补丁版本最新的,大版本不用跳到 4.2(那是下一个次要版本,可能有不兼容变更)。**该版本锁定 Hibernate 7.4.1 与 Jackson 3**,后者影响 Sa-Token 会话存储模块的选型(见上表) |
-| `cn.dev33:sa-token-spring-boot4-starter` 及同系列(`sa-token-redis-template` 等) | `1.46.0` | 2026年8月18日发布(前一版写的 1.45.0 是 2026年3月9日的版本,已过时一个次要版本)。同一个 `sa-token-parent` 下所有子模块统一走这个版本号,不要混用;集成模块(redis-template/redisson)的版本必须和 starter 完全一致 |
-| `com.mysql:mysql-connector-j` | `26.7.0` | **版本号看着跳得离谱(9.7.0 直接到 26.x),但这是真的**,是 MySQL 官方在 2026年7月29日 正式发布的版本号重新编号,不是野鸡分支或投毒——去 `dev.mysql.com/doc/relnotes/connector-j/en/` 官方发布说明能直接查到 26.x 系列。之前一版本的方案说明里我曾把这个当成"依赖投毒"的可疑迹象,是没有直接查官方发布页、只看了几条第三方 GitHub 仓库的自动升级记录就下的错误判断,这里更正 |
-| `org.flywaydb:flyway-core` / `flyway-mysql` | `12.x`(如 `12.5.0`) | 两个模块版本号必须一致 |
-| `io.github.openfeign.querydsl:querydsl-jpa` / `querydsl-apt` | `7.x`(如 `7.5`/`7.6`) | 该 fork 已在适配 Hibernate 7.4.x,与本方案的 Hibernate **7.4.x** 一致(前一版把本方案的 Hibernate 写成 7.2.x,与 4.1.0 实际锁定的版本不符,已更正) |
-| `org.projectlombok:lombok` | `1.18.46` | |
+| `org.springframework.boot:spring-boot-starter-parent` | `4.2.0` | 2026年11月19日 GA,当前 Spring Boot 4 系列最新次要版本(截至 2026年11月25日,尚无 4.2.x 补丁);之后如果出了 4.2.x 补丁版本,直接用补丁版本最新的。**该版本锁定 Hibernate 7.4.15.Final、Spring Framework 7.1.0 与 Jackson 3**,后者影响 Sa-Token 会话存储模块的选型(见上表)。4.1→4.2 升级注意两点:①`server.forward-headers-strategy` 被废弃(本项目 XFF 是自己解析的,未受影响);②spring-boot-dependencies 里 querydsl 属性名从 `openfeign-querydsl.version` 改成 `querydsl.version`(见 pom 注释,项目的 fork 版本属性名不受影响) |
+| `cn.dev33:sa-token-spring-boot4-starter` 及同系列(`sa-token-redis-template` 等) | `1.46.0` | 2026年8月18日发布(前一版写的 1.45.0 是 2026年3月9日的版本,已过时一个次要版本);2026年11月25日复查,Boot 4.2 发布后仍无新版本。同一个 `sa-token-parent` 下所有子模块统一走这个版本号,不要混用;集成模块(redis-template/redisson)的版本必须和 starter 完全一致 |
+| `com.mysql:mysql-connector-j` | `26.10.0` | **版本号看着跳得离谱(9.7.0 直接到 26.x),但这是真的**,是 MySQL 官方在 2026年7月29日 正式发布的版本号重新编号,不是野鸡分支或投毒——去 `dev.mysql.com/doc/relnotes/connector-j/en/` 官方发布说明能直接查到 26.x 系列。之前一版本的方案说明里我曾把这个当成"依赖投毒"的可疑迹象,是没有直接查官方发布页、只看了几条第三方 GitHub 仓库的自动升级记录就下的错误判断,这里更正。26.10.0 正是 Boot 4.2.0 依赖管理锁定的版本,与受管值保持一致即可(前一版写 26.7.0 是 2026年9月时的最新) |
+| `org.flywaydb:flyway-core` / `flyway-mysql` | `12.11.0` | 两个模块版本号必须一致;取 Boot 4.2.0 依赖管理锁定的版本(Flyway 13.x 已发布,但不在 Boot 受管范围,不脱离 BOM 追新) |
+| `io.github.openfeign.querydsl:querydsl-jpa` / `querydsl-apt` | `7.7` | 该 fork 已在适配 Hibernate 7.4.x,与本方案的 Hibernate **7.4.x** 一致(前一版把本方案的 Hibernate 写成 7.2.x,与 4.1.0 实际锁定的版本不符,已更正) |
+| `org.projectlombok:lombok` | `1.18.48` | Boot 4.2.0 依赖管理锁定的版本 |
 
 以上版本号是核实时点的真实最新版本,不是训练数据里的旧印象——但"最新"本身是会变的,建议实现方在实际写 `pom.xml` 前,直接去 Maven Central / 各项目官方发布页再确认一次当前最新的兼容补丁版本,而不是直接照抄这张表的数字。
 
